@@ -1,0 +1,8 @@
+node_modules/
+dist/
+.local-npm/
+.vite/
+*.log
+
+.vercel
+.env*
