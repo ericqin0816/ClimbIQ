@@ -110,8 +110,13 @@ function clusterScore(cluster: StartEvidence[]): number {
 }
 
 function weightedTime(cluster: StartEvidence[]): number {
-  const relevant = cluster.filter((item) => item.kind !== "motion");
-  const values = relevant.length ? relevant : cluster;
+  // The light transition is frame-accurate while audio carries speaker/encoding
+  // latency, so when light evidence exists it alone defines the timestamp and
+  // audio/motion only confirm it. Audio is used when there is no light; motion
+  // only when it is the sole cue.
+  const colorItems = cluster.filter((item) => item.kind === "color");
+  const nonMotion = cluster.filter((item) => item.kind !== "motion");
+  const values = colorItems.length ? colorItems : nonMotion.length ? nonMotion : cluster;
   const totalWeight = values.reduce((sum, item) => sum + evidenceWeight(item), 0);
   return values.reduce((sum, item) => sum + item.rawTime * evidenceWeight(item), 0) / Math.max(totalWeight, 1e-6);
 }

@@ -7,7 +7,7 @@ import { detectAudioStartSignal, type AudioStartResult } from "./lib/detectAudio
 import { detectMotionBasedStartEstimate } from "./lib/detectMotionBasedStartEstimate";
 import { detectStartSignal } from "./lib/detectStartSignal";
 import { analyzePoseVideo, PoseAnalysisCancelledError } from "./lib/poseAnalysis";
-import { fuseStartEvidence, type StartEvidence } from "./lib/startSignalFusion";
+import { fuseStartEvidence, type FusedStartDecision, type StartEvidence } from "./lib/startSignalFusion";
 import { captureFrame, clamp, roundTime, sampleFrameAt, sampleZoneAverageColor, seekTo } from "./lib/videoFrameSampler";
 import { validateWallCalibration } from "./lib/wallCalibration";
 import type {
@@ -70,6 +70,12 @@ interface CandidatePreviewFrames {
   exact?: string;
   after?: string;
   error?: string;
+}
+
+interface FusedStartEvidenceOutcome {
+  decision: FusedStartDecision;
+  automaticStart: StartSignalDetectionResult | null;
+  audioReason: string;
 }
 
 function App() {
@@ -645,75 +651,84 @@ function App() {
       return;
     }
 
+    // A zone auto-located by a previous run routes through the shared fused pipeline;
+    // only a zone the user drew themselves (with a non-auto profile) uses the manual path.
+    const userDrawnLightZone = zones.startLight && !zones.startLight.label.startsWith("Auto-detected")
+      ? zones.startLight
+      : undefined;
     setStartRunning(true);
+    let reviewSeekTarget: number | null = null;
     try {
       await runWithVideoRestore(
         video,
         async () => {
-          let result: StartSignalDetectionResult;
           if (resolvedStartProfile === "motion") {
-            result = await detectMotionBasedStartEstimate({
-                video,
-                zone: zones.startBody,
-                searchStart: startSearchStart,
-                searchEnd: startSearchEnd,
-                reactionOffset: reactionTimeOffset,
-                sensitivity: startSensitivity,
-              });
-          } else if (zones.startLight && startDetectionProfile !== "auto") {
-            result = await detectStartSignal({
-                video,
-                zone: zones.startLight,
-                searchStart: startSearchStart,
-                searchEnd: startSearchEnd,
-                sensitivity: startSensitivity,
-                lightVisibility: startLightVisibility,
-                profile: resolvedStartProfile,
-                calibration: startLightCalibration,
-              });
-          } else {
-            setVideoRestoreStatus("Locating the green-to-blue start sensor…");
-            const automaticLight = await detectAutomaticStartLight({
+            setStartResult(await detectMotionBasedStartEstimate({
               video,
+              zone: zones.startBody,
               searchStart: startSearchStart,
               searchEnd: startSearchEnd,
-              onProgress: (processed, total) => {
-                setVideoRestoreStatus(`Locating start sensor: ${processed}/${total} frames…`);
-              },
-            });
-            if (automaticLight.found && automaticLight.zone && automaticLight.calibration && automaticLight.result) {
-              const detectedZone = automaticLight.zone;
-              setZones((current) => ({ ...current, startLight: detectedZone }));
-              setStartLightCalibration(automaticLight.calibration);
-              setStartDetectionProfile("calibrated");
-              setCalibrationStatus("Green-to-blue start sensor found and calibrated automatically.");
-              result = automaticLight.result;
-            } else if (zones.startLight) {
-              result = await detectStartSignal({
-                video,
-                zone: zones.startLight,
-                searchStart: startSearchStart,
-                searchEnd: startSearchEnd,
-                sensitivity: startSensitivity,
-                lightVisibility: startLightVisibility,
-                profile: calibrationReady ? "calibrated" : "generic",
-                calibration: startLightCalibration,
-              });
-            } else {
-              result = await detectMotionBasedStartEstimate({
-                video,
-                zone: zones.startBody,
-                searchStart: startSearchStart,
-                searchEnd: startSearchEnd,
-                reactionOffset: reactionTimeOffset,
-                sensitivity: startSensitivity,
-              });
-            }
+              reactionOffset: reactionTimeOffset,
+              sensitivity: startSensitivity,
+            }));
+            return;
           }
-          setStartResult(result);
+          if (userDrawnLightZone && startDetectionProfile !== "auto") {
+            setStartResult(await detectStartSignal({
+              video,
+              zone: userDrawnLightZone,
+              searchStart: startSearchStart,
+              searchEnd: startSearchEnd,
+              sensitivity: startSensitivity,
+              lightVisibility: startLightVisibility,
+              profile: resolvedStartProfile,
+              calibration: startLightCalibration,
+            }));
+            return;
+          }
+
+          // Same fused light/beep/motion pipeline as Quick Analyze, so both buttons
+          // always produce the same start time.
+          const { decision, automaticStart, audioReason } = await gatherFusedStartEvidence(
+            video,
+            undefined,
+            setVideoRestoreStatus,
+          );
+          setStartEvidenceStatus(`${decision.reason} Audio: ${audioReason}`);
+          if (!decision.found || decision.rawTime === undefined || !automaticStart) {
+            setStartResult(null);
+            setAutoAnalysisStatus("Start could not be confirmed. Use the current-frame button or open Manual timing settings.");
+            return;
+          }
+          setStartResult(automaticStart);
+          if (decision.autoAccept) {
+            const acceptedStart = Math.max(0, roundTime(decision.rawTime + startSignalOffset));
+            acceptTimestamp(
+              "startSignal",
+              acceptedStart,
+              startSourceForResult(automaticStart),
+              automaticStart.confidence,
+              {
+                detectedRawTime: decision.rawTime,
+                offsetApplied: startSignalOffset,
+                note: `Automatically accepted by start detection. ${automaticStart.reason}`,
+              },
+            );
+            setSuggestedStartRawTime(null);
+            setAutoAnalysisStatus(`Start Signal accepted at ${acceptedStart.toFixed(3)}s from the fused light, beep, and motion evidence.`);
+          } else {
+            setSuggestedStartRawTime(decision.rawTime);
+            reviewSeekTarget = decision.rawTime;
+            setAutoAnalysisStatus(
+              `Start evidence needs review. The video has been moved to the suggested start at ${decision.rawTime.toFixed(3)}s — if the frame looks right, press "Accept suggested start", or use the current frame instead.`,
+            );
+          }
         },
         "Start detection complete. Video restored to previous position.",
       );
+      if (reviewSeekTarget !== null) {
+        jumpTo(reviewSeekTarget);
+      }
     } catch (error) {
       setVideoRestoreStatus(error instanceof Error ? `Start detection failed: ${error.message}` : "Start detection failed.");
     } finally {
@@ -819,6 +834,155 @@ function App() {
     }
   }
 
+  /**
+   * Shared start-evidence pipeline used by both Quick Analyze and the Start Timing
+   * card's "Find start automatically" button so they always agree: lane-light
+   * discovery, saved-zone fallback, audio beep detection, motion estimate, and fusion.
+   */
+  async function gatherFusedStartEvidence(
+    video: HTMLVideoElement,
+    signal: AbortSignal | undefined,
+    onStatus: (message: string) => void,
+  ): Promise<FusedStartEvidenceOutcome> {
+    const searchStart = clamp(startSearchStart, 0, Math.max(0, video.duration - 0.5));
+    const searchEnd = Math.min(
+      video.duration,
+      Math.max(
+        searchStart + 0.5,
+        Number.isFinite(startSearchEnd) ? startSearchEnd : 0,
+        Math.min(12, video.duration),
+      ),
+    );
+    onStatus("Scanning both lanes for faint start lights and listening for the countdown…");
+    const audioPromise: Promise<AudioStartResult> = videoFileRef.current
+      ? detectAudioStartSignal({
+          file: videoFileRef.current,
+          searchStart,
+          searchEnd,
+          signal,
+        })
+      : Promise.resolve({
+          found: false,
+          confidence: "None" as Confidence,
+          reason: "The original local video file is unavailable for audio analysis.",
+          segments: [],
+        });
+    const automaticLight = await detectAutomaticStartLight({
+      video,
+      searchStart,
+      searchEnd,
+      startBodyZone: zones.startBody,
+      signal,
+      onProgress: (processed, total) => {
+        onStatus(`Scanning lane lights: ${processed}/${total} frames… Audio is being checked too.`);
+      },
+    });
+    const colorResults = (automaticLight.laneResults ?? (automaticLight.result ? [automaticLight.result] : []))
+      .filter((result) => result.detected && result.rawTime !== undefined);
+    if (automaticLight.found && automaticLight.zone && automaticLight.calibration) {
+      setZones((current) => ({ ...current, startLight: automaticLight.zone }));
+      setStartLightCalibration(automaticLight.calibration);
+      setStartDetectionProfile("calibrated");
+      setCalibrationStatus(
+        `${automaticLight.laneCandidates?.length ?? 1} lane-light candidate${(automaticLight.laneCandidates?.length ?? 1) === 1 ? "" : "s"} found. Primary sensor is near ${Math.round(((automaticLight.zone.x1 + automaticLight.zone.x2) / 2) * 100)}% across and ${Math.round(((automaticLight.zone.y1 + automaticLight.zone.y2) / 2) * 100)}% down the frame.`,
+      );
+    }
+
+    if (!colorResults.length && zones.startLight) {
+      onStatus("Automatic light search was inconclusive. Checking the saved Start Light Zone…");
+      const savedZoneResult = await detectStartSignal({
+          video,
+          zone: zones.startLight,
+          searchStart,
+          searchEnd,
+          sensitivity: startSensitivity,
+          lightVisibility: startLightVisibility,
+          profile: calibrationReady ? "calibrated" : "auto",
+          calibration: startLightCalibration,
+          signal,
+        });
+      if (savedZoneResult.detected && savedZoneResult.rawTime !== undefined) {
+        colorResults.push(savedZoneResult);
+      }
+    }
+
+    if (signal?.aborted) {
+      throw new PoseAnalysisCancelledError();
+    }
+    const audioStart = await audioPromise;
+    onStatus("Comparing lane lights, final beep, and body motion…");
+    const motionStart = await detectMotionBasedStartEstimate({
+      video,
+      zone: zones.startBody,
+      searchStart,
+      searchEnd,
+      reactionOffset: reactionTimeOffset,
+      sensitivity: startSensitivity,
+    });
+
+    if (signal?.aborted) {
+      throw new PoseAnalysisCancelledError();
+    }
+
+    const evidence: StartEvidence[] = colorResults.map((result, index) => ({
+      kind: "color",
+      rawTime: result.rawTime!,
+      confidence: result.confidence,
+      reason: result.reason,
+      label: `lane light ${index + 1}`,
+    }));
+    if (audioStart.found && audioStart.rawTime !== undefined) {
+      evidence.push({
+        kind: "audio",
+        rawTime: audioStart.rawTime,
+        confidence: audioStart.confidence,
+        reason: audioStart.reason,
+        label: "final countdown beep",
+      });
+    }
+    if (motionStart.detected && motionStart.rawTime !== undefined) {
+      evidence.push({
+        kind: "motion",
+        rawTime: motionStart.rawTime,
+        confidence: motionStart.confidence,
+        reason: motionStart.reason,
+        label: "body motion estimate",
+      });
+    }
+    const decision = fuseStartEvidence(evidence);
+    if (!decision.found || decision.rawTime === undefined) {
+      return { decision, automaticStart: null, audioReason: audioStart.reason };
+    }
+
+    const closestColor = colorResults
+      .filter((result) => result.rawTime !== undefined)
+      .sort((left, right) => Math.abs(left.rawTime! - decision.rawTime!) - Math.abs(right.rawTime! - decision.rawTime!))[0];
+    const baseResult = closestColor ?? (motionStart.detected ? motionStart : buildAudioStartResult(audioStart));
+    const automaticStart: StartSignalDetectionResult = {
+      ...baseResult,
+      detected: true,
+      rawTime: decision.rawTime,
+      confidence: decision.confidence,
+      reason: decision.reason,
+      candidates: evidence.map((item) => ({
+        rawTime: item.rawTime,
+        confidence: item.confidence,
+        reason: item.reason,
+        score: item.kind === "motion" ? 1 : 2,
+        kind: item.label ?? item.kind,
+        method: `Start fusion: ${item.kind}`,
+      })),
+      debug: {
+        ...baseResult.debug,
+        detectionMethod: "Fused lane-light, final-beep, and motion evidence",
+        selectedCandidateTime: decision.rawTime,
+        selectedCandidateReason: decision.reason,
+        detectedRawTime: decision.rawTime,
+      },
+    };
+    return { decision, automaticStart, audioReason: audioStart.reason };
+  }
+
   async function runAutomaticAnalysis() {
     const video = videoRef.current;
     if (!video || !metadata?.metadataLoaded) {
@@ -841,146 +1005,16 @@ function App() {
       await runWithVideoRestore(
         video,
         async () => {
-          const searchStart = clamp(startSearchStart, 0, Math.max(0, video.duration - 0.5));
-          const searchEnd = Math.min(
-            video.duration,
-            Math.max(
-              searchStart + 0.5,
-              Number.isFinite(startSearchEnd) ? startSearchEnd : 0,
-              Math.min(12, video.duration),
-            ),
-          );
-          setAutoAnalysisStatus("Scanning both lanes for faint start lights and listening for the countdown…");
-          const audioPromise: Promise<AudioStartResult> = videoFileRef.current
-            ? detectAudioStartSignal({
-                file: videoFileRef.current,
-                searchStart,
-                searchEnd,
-                signal: abortController.signal,
-              })
-            : Promise.resolve({
-                found: false,
-                confidence: "None",
-                reason: "The original local video file is unavailable for audio analysis.",
-                segments: [],
-              });
-          const automaticLight = await detectAutomaticStartLight({
+          const { decision, automaticStart, audioReason } = await gatherFusedStartEvidence(
             video,
-            searchStart,
-            searchEnd,
-            startBodyZone: zones.startBody,
-            signal: abortController.signal,
-            onProgress: (processed, total) => {
-              setAutoAnalysisStatus(`Scanning lane lights: ${processed}/${total} frames… Audio is being checked too.`);
-            },
-          });
-          const colorResults = (automaticLight.laneResults ?? (automaticLight.result ? [automaticLight.result] : []))
-            .filter((result) => result.detected && result.rawTime !== undefined);
-          if (automaticLight.found && automaticLight.zone && automaticLight.calibration) {
-            setZones((current) => ({ ...current, startLight: automaticLight.zone }));
-            setStartLightCalibration(automaticLight.calibration);
-            setStartDetectionProfile("calibrated");
-            setCalibrationStatus(
-              `${automaticLight.laneCandidates?.length ?? 1} lane-light candidate${(automaticLight.laneCandidates?.length ?? 1) === 1 ? "" : "s"} found. Primary sensor is near ${Math.round(((automaticLight.zone.x1 + automaticLight.zone.x2) / 2) * 100)}% across and ${Math.round(((automaticLight.zone.y1 + automaticLight.zone.y2) / 2) * 100)}% down the frame.`,
-            );
-          }
-
-          if (!colorResults.length && zones.startLight) {
-            setAutoAnalysisStatus("Automatic light search was inconclusive. Checking the saved Start Light Zone…");
-            const savedZoneResult = await detectStartSignal({
-                video,
-                zone: zones.startLight,
-                searchStart,
-                searchEnd,
-                sensitivity: startSensitivity,
-                lightVisibility: startLightVisibility,
-                profile: calibrationReady ? "calibrated" : "auto",
-                calibration: startLightCalibration,
-                signal: abortController.signal,
-              });
-            if (savedZoneResult.detected && savedZoneResult.rawTime !== undefined) {
-              colorResults.push(savedZoneResult);
-            }
-          }
-
-          if (abortController.signal.aborted) {
-            throw new PoseAnalysisCancelledError();
-          }
-          const audioStart = await audioPromise;
-          setAutoAnalysisStatus("Comparing lane lights, final beep, and body motion…");
-          const motionStart = await detectMotionBasedStartEstimate({
-            video,
-            zone: zones.startBody,
-            searchStart,
-            searchEnd,
-            reactionOffset: reactionTimeOffset,
-            sensitivity: startSensitivity,
-          });
-
-          if (abortController.signal.aborted) {
-            throw new PoseAnalysisCancelledError();
-          }
-
-          const evidence: StartEvidence[] = colorResults.map((result, index) => ({
-            kind: "color",
-            rawTime: result.rawTime!,
-            confidence: result.confidence,
-            reason: result.reason,
-            label: `lane light ${index + 1}`,
-          }));
-          if (audioStart.found && audioStart.rawTime !== undefined) {
-            evidence.push({
-              kind: "audio",
-              rawTime: audioStart.rawTime,
-              confidence: audioStart.confidence,
-              reason: audioStart.reason,
-              label: "final countdown beep",
-            });
-          }
-          if (motionStart.detected && motionStart.rawTime !== undefined) {
-            evidence.push({
-              kind: "motion",
-              rawTime: motionStart.rawTime,
-              confidence: motionStart.confidence,
-              reason: motionStart.reason,
-              label: "body motion estimate",
-            });
-          }
-          const decision = fuseStartEvidence(evidence);
-          setStartEvidenceStatus(
-            `${decision.reason} Audio: ${audioStart.reason}`,
+            abortController.signal,
+            setAutoAnalysisStatus,
           );
-          if (!decision.found || decision.rawTime === undefined) {
+          setStartEvidenceStatus(`${decision.reason} Audio: ${audioReason}`);
+          if (!decision.found || decision.rawTime === undefined || !automaticStart) {
             setAutoAnalysisStatus("Start could not be confirmed. Use the current-frame button or open Manual timing settings.");
             return;
           }
-
-          const closestColor = colorResults
-            .filter((result) => result.rawTime !== undefined)
-            .sort((left, right) => Math.abs(left.rawTime! - decision.rawTime!) - Math.abs(right.rawTime! - decision.rawTime!))[0];
-          const baseResult = closestColor ?? (motionStart.detected ? motionStart : buildAudioStartResult(audioStart));
-          const automaticStart: StartSignalDetectionResult = {
-            ...baseResult,
-            detected: true,
-            rawTime: decision.rawTime,
-            confidence: decision.confidence,
-            reason: decision.reason,
-            candidates: evidence.map((item) => ({
-              rawTime: item.rawTime,
-              confidence: item.confidence,
-              reason: item.reason,
-              score: item.kind === "motion" ? 1 : 2,
-              kind: item.label ?? item.kind,
-              method: `Start fusion: ${item.kind}`,
-            })),
-            debug: {
-              ...baseResult.debug,
-              detectionMethod: "Fused lane-light, final-beep, and motion evidence",
-              selectedCandidateTime: decision.rawTime,
-              selectedCandidateReason: decision.reason,
-              detectedRawTime: decision.rawTime,
-            },
-          };
           setStartResult(automaticStart);
           if (!decision.autoAccept) {
             setSuggestedStartRawTime(decision.rawTime);

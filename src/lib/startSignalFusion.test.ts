@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { fuseStartEvidence } from "./startSignalFusion";
 
 describe("start signal fusion", () => {
-  it("gives high confidence when light and final beep agree", () => {
+  it("gives high confidence when light and final beep agree, timed by the light", () => {
     const result = fuseStartEvidence([
       { kind: "color", rawTime: 3.02, confidence: "High", reason: "blue transition" },
       { kind: "audio", rawTime: 3, confidence: "High", reason: "final beep" },
@@ -10,7 +10,7 @@ describe("start signal fusion", () => {
     ]);
     expect(result.confidence).toBe("High");
     expect(result.autoAccept).toBe(true);
-    expect(result.rawTime).toBeCloseTo(3.01, 2);
+    expect(result.rawTime).toBeCloseTo(3.02, 3);
   });
 
   it("treats earlier rocking as premovement when light and audio agree later", () => {
@@ -19,7 +19,7 @@ describe("start signal fusion", () => {
       { kind: "color", rawTime: 3, confidence: "Medium", reason: "blue transition" },
       { kind: "audio", rawTime: 3.04, confidence: "High", reason: "final beep" },
     ]);
-    expect(result.rawTime).toBeCloseTo(3.02, 2);
+    expect(result.rawTime).toBeCloseTo(3, 3);
     expect(result.reason).toContain("setup rocking");
     expect(result.rejectedEvidence.some((item) => item.kind === "motion")).toBe(true);
   });

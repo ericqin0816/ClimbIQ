@@ -53,6 +53,22 @@ describe("automatic green-to-blue start light discovery", () => {
     expect(result.transitionTime).toBeCloseTo(0.8, 6);
   });
 
+  it("finds a light that only arms (turns green) partway through the window", () => {
+    const frames = Array.from({ length: 14 }, (_, index) => {
+      const sensor = index < 4
+        ? { r: 70, g: 70, b: 70 }
+        : index < 8
+          ? { r: 18, g: 220, b: 24 }
+          : { r: 18, g: 45, b: 225 };
+      return frame(index * 0.2, sensor);
+    });
+    const result = analyzeGreenBlueFrames(frames);
+
+    expect(result.found).toBe(true);
+    expect(result.transitionTime).toBeCloseTo(1.6, 6);
+    expect(result.calibration?.beforeStartRGB?.g).toBeGreaterThan(result.calibration?.beforeStartRGB?.b ?? 0);
+  });
+
   it("rejects a green-to-blue change high in the frame, above the start box", () => {
     const frames = Array.from({ length: 12 }, (_, index) =>
       frameAt(index * 0.2, index < 4 ? { r: 18, g: 220, b: 24 } : { r: 18, g: 45, b: 225 }, 18, 1, 1),

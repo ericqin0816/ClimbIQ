@@ -63,6 +63,10 @@ interface InternalColorCandidate {
   frameIndex: number;
   beforeRgb: RGB;
   afterRgb: RGB;
+  /** Average color of the sustained green run before the flip; stabler than one frame. */
+  stableBeforeRgb: RGB;
+  /** Average color of the confirmed blue frames after the flip. */
+  stableAfterRgb: RGB;
   baselineGreen: number;
   afterBlue: number;
   blueRatio: number;
@@ -168,43 +172,66 @@ export function analyzeGreenBlueFrames(
     return emptyDiscovery("Color scan frames have inconsistent dimensions.");
   }
 
-  const baselineCount = Math.min(3, frames.length - 3);
   const candidates: InternalColorCandidate[] = [];
   let upperFrameRejections = 0;
 
   for (const radius of PATCH_RADII) {
     const stride = Math.max(1, radius + 1);
     for (let y = radius; y < height - radius; y += stride) {
+      const yNorm = y / height;
       for (let x = radius; x < width - radius; x += stride) {
-        const baselineRgb = averageAcrossFrames(frames.slice(0, baselineCount), x, y, radius);
-        const baselineGreen = greenSignal(baselineRgb);
-        if (baselineGreen < 6 || baselineRgb.g < 24) {
-          continue;
-        }
+        const patchColors: Array<RGB | undefined> = new Array(frames.length);
+        const colorAt = (index: number): RGB =>
+          (patchColors[index] ??= averagePatch(frames[index], x, y, radius));
 
-        for (let frameIndex = baselineCount; frameIndex < frames.length; frameIndex += 1) {
-          const previousRgb = averagePatch(frames[frameIndex - 1], x, y, radius);
-          const afterRgb = averagePatch(frames[frameIndex], x, y, radius);
+        for (let frameIndex = 2; frameIndex < frames.length; frameIndex += 1) {
+          const afterRgb = colorAt(frameIndex);
           const afterBlue = blueSignal(afterRgb);
-          if (greenSignal(previousRgb) < Math.max(2.5, baselineGreen * 0.18) || afterBlue < 5 || afterRgb.b < 24) {
+          if (afterBlue < 5 || afterRgb.b < 24) {
             continue;
           }
-
+          // The light must have been green for at least two frames right before the
+          // flip, but the green run may start anywhere in the window — a light that
+          // only arms after recording begins is still found.
+          if (!isGreenish(colorAt(frameIndex - 1)) || !isGreenish(colorAt(frameIndex - 2))) {
+            continue;
+          }
+          let runStart = frameIndex - 1;
+          while (runStart > 0 && isGreenish(colorAt(runStart - 1))) {
+            runStart -= 1;
+          }
+          const greenRun: RGB[] = [];
+          for (let index = runStart; index < frameIndex; index += 1) {
+            greenRun.push(colorAt(index));
+          }
+          const baselineRgb = averageRgbList(greenRun);
+          const baselineGreen = greenSignal(baselineRgb);
+          if (baselineGreen < 6 || baselineRgb.g < 24) {
+            continue;
+          }
+          const previousRgb = colorAt(frameIndex - 1);
+          if (greenSignal(previousRgb) < Math.max(2.5, baselineGreen * 0.18)) {
+            continue;
+          }
           const colorDelta = computeColorDistance(previousRgb, afterRgb);
           if (colorDelta < 12) {
             continue;
           }
-          const remaining = frames.slice(frameIndex, Math.min(frames.length, frameIndex + 12));
-          const blueFrames = remaining.filter((frame) => {
-            const rgb = averagePatch(frame, x, y, radius);
-            return blueSignal(rgb) >= 4 && rgb.b >= 22;
-          }).length;
-          const blueRatio = remaining.length ? blueFrames / remaining.length : 0;
-          if (blueFrames < Math.min(2, remaining.length) || blueRatio < 0.62) {
+          const remainingEnd = Math.min(frames.length, frameIndex + 12);
+          const blueColors: RGB[] = [];
+          let remainingCount = 0;
+          for (let index = frameIndex; index < remainingEnd; index += 1) {
+            const rgb = colorAt(index);
+            remainingCount += 1;
+            if (blueSignal(rgb) >= 4 && rgb.b >= 22) {
+              blueColors.push(rgb);
+            }
+          }
+          const blueRatio = remainingCount ? blueColors.length / remainingCount : 0;
+          if (blueColors.length < Math.min(2, remainingCount) || blueRatio < 0.62) {
             continue;
           }
 
-          const yNorm = y / height;
           if (yNorm < MIN_START_BOX_Y_NORM) {
             upperFrameRejections += 1;
             break;
@@ -219,6 +246,8 @@ export function analyzeGreenBlueFrames(
             frameIndex,
             beforeRgb: previousRgb,
             afterRgb,
+            stableBeforeRgb: baselineRgb,
+            stableAfterRgb: averageRgbList(blueColors.slice(0, 6)),
             baselineGreen,
             afterBlue,
             blueRatio,
@@ -310,10 +339,12 @@ function candidateToLane(
     : candidate.baselineGreen >= 9 && candidate.afterBlue >= 7 && candidate.colorDelta >= 20
       ? "Medium"
       : "Low";
+  // Calibrate on the averaged sustained colors rather than the two frames around
+  // the flip: a mid-fade transition frame would poison later 30 fps refinement.
   const calibration: StartLightCalibration = {
-    beforeStartRGB: candidate.beforeRgb,
-    afterStartRGB: candidate.afterRgb,
-    colorDelta: roundMetric(candidate.colorDelta),
+    beforeStartRGB: candidate.stableBeforeRgb,
+    afterStartRGB: candidate.stableAfterRgb,
+    colorDelta: roundMetric(computeColorDistance(candidate.stableBeforeRgb, candidate.stableAfterRgb)),
     calibrationFrameBeforeTime: beforeFrame.time,
     calibrationFrameAfterTime: transitionFrame.time,
   };
@@ -452,8 +483,14 @@ function buildCoarseResult(discovery: GreenBlueDiscovery): StartSignalDetectionR
   };
 }
 
-function averageAcrossFrames(frames: DownsampledColorFrame[], x: number, y: number, radius: number): RGB {
-  const colors = frames.map((frame) => averagePatch(frame, x, y, radius));
+function isGreenish(rgb: RGB): boolean {
+  return greenSignal(rgb) >= 2.5 && rgb.g >= 24;
+}
+
+function averageRgbList(colors: RGB[]): RGB {
+  if (!colors.length) {
+    return { r: 0, g: 0, b: 0 };
+  }
   return {
     r: Math.round(colors.reduce((sum, color) => sum + color.r, 0) / colors.length),
     g: Math.round(colors.reduce((sum, color) => sum + color.g, 0) / colors.length),

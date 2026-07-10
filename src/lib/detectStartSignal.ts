@@ -338,7 +338,10 @@ function detectCalibratedTransition({
     const distanceToBefore = sample.distanceToBefore ?? 0;
     const distanceToAfter = sample.distanceToAfter ?? 0;
     const afterAdvantage = distanceToBefore - distanceToAfter;
-    const afterLike = afterAdvantage >= minAfterAdvantage || distanceToAfter < distanceToBefore;
+    // A frame only counts as after-start when it is decisively closer to the calibrated
+    // blue AND actually resembles it. Marginal closeness is noise, and noise selected
+    // here becomes a wrong early start because ranking prefers the earliest candidate.
+    const afterLike = afterAdvantage >= minAfterAdvantage && distanceToAfter <= calibration.colorDelta * 0.75;
     const persistenceFrames = countAfterLikeFrames(samples, index, minAfterAdvantage);
     const boundaryRisk = isNearEnd(sample.time, searchEnd) || isNearStart(sample.time, searchStart);
     const weakEarly = blockedMode && afterAdvantage >= minAfterAdvantage * 0.4;
@@ -368,16 +371,19 @@ function detectCalibratedTransition({
     }
   });
 
-  const ranked = Array.from(candidates.values())
-    .sort((a, b) => candidateRank(a, Math.max(1, calibration.colorDelta), requiredFrames, blockedMode) - candidateRank(b, Math.max(1, calibration.colorDelta), requiredFrames, blockedMode))
-    .slice(0, manualReviewOnly ? 5 : 3);
+  const rankedAll = Array.from(candidates.values())
+    .sort((a, b) => candidateRank(a, Math.max(1, calibration.colorDelta), requiredFrames, blockedMode) - candidateRank(b, Math.max(1, calibration.colorDelta), requiredFrames, blockedMode));
+  // Select from the full list; slicing first can drop the real transition when
+  // earlier noise candidates crowd the top of the ranking.
   const selected = manualReviewOnly
     ? undefined
-    : ranked.find((candidate) =>
+    : rankedAll.find((candidate) =>
       !candidate.boundaryRisk &&
       (candidate.persistenceFrames ?? 0) >= requiredFrames &&
       candidate.score >= minAfterAdvantage,
     );
+  const ranked = (selected ? [selected, ...rankedAll.filter((candidate) => candidate !== selected)] : rankedAll)
+    .slice(0, manualReviewOnly ? 5 : 3);
 
   if (!selected) {
     const boundaryOnly = ranked.length > 0 && ranked.every((candidate) => candidate.boundaryRisk);
@@ -408,7 +414,7 @@ function countAfterLikeFrames(samples: StartSignalDebug["samples"], startIndex: 
   let count = 0;
   for (let index = startIndex; index < samples.length; index += 1) {
     const advantage = (samples[index].distanceToBefore ?? 0) - (samples[index].distanceToAfter ?? 0);
-    if (advantage >= minAfterAdvantage || (samples[index].distanceToAfter ?? Infinity) < (samples[index].distanceToBefore ?? 0)) {
+    if (advantage >= minAfterAdvantage) {
       count += 1;
     } else {
       break;
