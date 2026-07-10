@@ -12,6 +12,7 @@ export type TimestampSource =
   | "Not set"
   | "Manual"
   | "Start light detection"
+  | "Fused start detection"
   | "Motion-based estimate"
   | "Body motion detection"
   | "Official total time"
@@ -264,7 +265,12 @@ export interface PoseLandmarkPoint extends NormalizedPoint {
 export interface BiomechanicsFrame {
   rawTime: number;
   climbTime: number;
+  /** True when MediaPipe returned at least one pose before identity filtering. */
   poseDetected: boolean;
+  /** True when a pose was safely associated with the climber for this frame. */
+  poseSelected?: boolean;
+  /** Raw pose candidates returned for this frame, before identity filtering. */
+  poseCandidateCount?: number;
   landmarks: PoseLandmarkPoint[];
   imageCom?: NormalizedPoint;
   wallCom?: WallPoint;
@@ -284,8 +290,14 @@ export type BiomechanicsQuality = "High" | "Medium" | "Needs review";
 
 export interface BiomechanicsMetrics {
   requestedFrames: number;
+  /** Frames where the model found at least one person. */
   detectedFrames: number;
+  /** Frames where a detected person was associated with the climber. */
+  selectedFrames?: number;
   validFrames: number;
+  /** Raw person-detection coverage before identity filtering. */
+  detectionCoverage?: number;
+  /** Safely selected climber coverage. */
   trackingCoverage: number;
   validCoverage: number;
   meanMassCoverage: number;
@@ -309,7 +321,7 @@ export interface BiomechanicsResult {
   version: 1;
   createdAt: string;
   method: "MediaPipe Pose Landmarker";
-  model: "Pose Landmarker Lite";
+  model: "Pose Landmarker Full";
   modelVersion: "float16/1";
   coordinateSystem: "calibrated-wall-plane";
   startRawTime: number;

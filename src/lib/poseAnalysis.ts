@@ -13,9 +13,9 @@ import { sampleFramesInRange, seekTo } from "./videoFrameSampler";
 import { validateWallCalibration } from "./wallCalibration";
 
 const MEDIAPIPE_WASM_RELATIVE_PATH = "mediapipe/wasm";
-const MODEL_RELATIVE_PATH = "models/pose_landmarker_lite.task";
-const MODEL_EXPECTED_BYTES = 5_777_746;
-const MODEL_SHA256 = "59929e1d1ee95287735ddd833b19cf4ac46d29bc7afddbbf6753c459690d574a";
+const MODEL_RELATIVE_PATH = "models/pose_landmarker_full.task";
+const MODEL_EXPECTED_BYTES = 9_398_198;
+const MODEL_SHA256 = "4eaa5eb7a98365221087693fcc286334cf0858e2eb6e15b506aa4a7ecdcec4ad";
 
 export interface PoseAnalysisProgress {
   phase: "loading" | "analyzing" | "finalizing";
@@ -83,9 +83,9 @@ export async function analyzePoseVideo({
     },
     runningMode: "VIDEO",
     numPoses: 2,
-    minPoseDetectionConfidence: 0.35,
-    minPosePresenceConfidence: 0.35,
-    minTrackingConfidence: 0.35,
+    minPoseDetectionConfidence: 0.2,
+    minPosePresenceConfidence: 0.2,
+    minTrackingConfidence: 0.25,
     outputSegmentationMasks: false,
   });
 
@@ -93,6 +93,7 @@ export async function analyzePoseVideo({
   const runWarnings = new Set<string>();
   let previousCenter: NormalizedPoint | undefined;
   let previousCenterTime: number | undefined;
+  let missedFrames = 0;
 
   try {
     for (let index = 0; index < times.length; index += 1) {
@@ -101,7 +102,18 @@ export async function analyzePoseVideo({
       await seekTo(video, requestedTime);
       checkCancelled(isCancelled, signal);
       const actualTime = video.currentTime;
-      const detection = landmarker.detectForVideo(video, Math.round(requestedTime * 1000));
+      const searchRegion = buildPoseSearchRegion(
+        calibration,
+        identityZone,
+        previousCenter,
+        index,
+        missedFrames,
+      );
+      const detection = landmarker.detectForVideo(
+        video,
+        Math.round(requestedTime * 1000),
+        { regionOfInterest: searchRegion },
+      );
       const selection = selectTrackedPose(
         detection.landmarks,
         identityZone,
@@ -116,6 +128,9 @@ export async function analyzePoseVideo({
       if (selection.selected) {
         previousCenter = selection.selected.center;
         previousCenterTime = actualTime;
+        missedFrames = 0;
+      } else {
+        missedFrames += 1;
       }
       const imageEstimate = computeImageCom(landmarks, settings);
       const wallEstimate = computeWallCom(landmarks, calibrationValidation.matrix, settings);
@@ -123,7 +138,9 @@ export async function analyzePoseVideo({
       frames.push({
         rawTime: roundMetric(actualTime),
         climbTime: roundMetric(actualTime - startRawTime),
-        poseDetected: landmarks.length > 0,
+        poseDetected: detection.landmarks.length > 0,
+        poseSelected: landmarks.length > 0,
+        poseCandidateCount: detection.landmarks.length,
         landmarks,
         imageCom: imageEstimate.point,
         wallCom: wallEstimate.point,
@@ -131,7 +148,9 @@ export async function analyzePoseVideo({
         meanVisibility: roundMetric(Math.min(imageEstimate.meanVisibility, wallEstimate.meanVisibility)),
         valid,
         warning: !landmarks.length
-          ? selection.warning ?? "No pose detected."
+          ? detection.landmarks.length
+            ? selection.warning ?? "A person was found but could not be safely associated with the climber."
+            : "No person was detected in the current wall search region."
           : !valid
             ? `Insufficient visible body mass (${Math.round(Math.min(imageEstimate.massCoverage, wallEstimate.massCoverage) * 100)}%).`
             : undefined,
@@ -153,12 +172,17 @@ export async function analyzePoseVideo({
   if (kinematics.metrics.validFrames < 3) {
     runWarnings.add("Fewer than three valid COM frames were found; velocity metrics are not reliable.");
   }
+  if (kinematics.metrics.detectedFrames === 0) {
+    runWarnings.add("No person was detected. Confirm that the wall corners and Start Body Zone surround the climber at the beginning of the selected range.");
+  } else if ((kinematics.metrics.selectedFrames ?? 0) === 0) {
+    runWarnings.add("People were detected, but none could be safely associated with the climber. Tighten the Start Body Zone around the athlete only.");
+  }
 
   return {
     version: 1,
     createdAt: new Date().toISOString(),
     method: "MediaPipe Pose Landmarker",
-    model: "Pose Landmarker Lite",
+    model: "Pose Landmarker Full",
     modelVersion: "float16/1",
     coordinateSystem: "calibrated-wall-plane",
     startRawTime,
@@ -215,6 +239,13 @@ export function selectTrackedPose(
     .sort((left, right) => left.score - right.score);
   if (!scored.length) {
     return { warning: "No pose with a usable hip or shoulder anchor was detected." };
+  }
+
+  // A Start Body Zone is an identity hint, not a reason to discard the only
+  // person in the first frame. This fallback prevents a slightly tight zone
+  // from turning an otherwise valid single-athlete clip into 0% tracking.
+  if (!previousCenter && scored.length === 1) {
+    return { selected: scored[0] };
   }
 
   if (previousCenter) {
@@ -306,21 +337,92 @@ export function buildPoseSampleTimes(start: number, end: number, fps: number): n
 }
 
 async function loadVerifiedModel(signal?: AbortSignal): Promise<Uint8Array> {
-  const response = await fetch(assetUrl(MODEL_RELATIVE_PATH), { signal });
-  const contentType = response.headers.get("content-type")?.toLowerCase() ?? "";
-  if (!response.ok || contentType.includes("text/html")) {
-    throw new Error("The local pose model is missing or was served as an HTML fallback. Redeploy the complete production build.");
+  try {
+    const response = await fetch(assetUrl(MODEL_RELATIVE_PATH), { signal });
+    const contentType = response.headers.get("content-type")?.toLowerCase() ?? "";
+    if (!response.ok || contentType.includes("text/html")) {
+      throw new Error("The local pose model is missing or was served as an HTML fallback. Redeploy the complete production build.");
+    }
+    const buffer = await response.arrayBuffer();
+    if (buffer.byteLength !== MODEL_EXPECTED_BYTES) {
+      throw new Error(`Pose model size check failed (${buffer.byteLength} bytes).`);
+    }
+    const digest = await crypto.subtle.digest("SHA-256", buffer);
+    const hash = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+    if (hash !== MODEL_SHA256) {
+      throw new Error("Pose model integrity check failed.");
+    }
+    return new Uint8Array(buffer);
+  } catch (error) {
+    if (signal?.aborted || (error instanceof DOMException && error.name === "AbortError")) {
+      throw new PoseAnalysisCancelledError();
+    }
+    throw error;
   }
-  const buffer = await response.arrayBuffer();
-  if (buffer.byteLength !== MODEL_EXPECTED_BYTES) {
-    throw new Error(`Pose model size check failed (${buffer.byteLength} bytes).`);
+}
+
+export interface PoseSearchRegion {
+  left: number;
+  top: number;
+  right: number;
+  bottom: number;
+}
+
+/**
+ * Keeps the athlete large enough for the on-device detector. A speed climber is
+ * only about one ninth of the full 15 m wall height, so whole-frame inference
+ * can reduce the person to just a few detector pixels.
+ */
+export function buildPoseSearchRegion(
+  calibration: WallCalibration,
+  identityZone?: NormalizedZone,
+  previousCenter?: NormalizedPoint,
+  sampleIndex = 0,
+  missedFrames = 0,
+): PoseSearchRegion {
+  const xs = calibration.corners.map((corner) => corner.image.x);
+  const ys = calibration.corners.map((corner) => corner.image.y);
+  const wallLeft = Math.min(...xs);
+  const wallRight = Math.max(...xs);
+  const wallTop = Math.min(...ys);
+  const wallBottom = Math.max(...ys);
+  const wallWidth = Math.max(0.05, wallRight - wallLeft);
+  const wallHeight = Math.max(0.12, wallBottom - wallTop);
+
+  let cropWidth = clampNumber(wallWidth * 1.45, 0.28, 0.75);
+  let cropHeight = clampNumber(wallHeight * 0.34, 0.24, 0.58);
+  let centerX = (wallLeft + wallRight) / 2;
+  let centerY: number;
+
+  if (previousCenter && missedFrames < 2) {
+    centerX = previousCenter.x;
+    centerY = previousCenter.y;
+  } else if (!previousCenter && identityZone) {
+    centerX = (identityZone.x1 + identityZone.x2) / 2;
+    centerY = (identityZone.y1 + identityZone.y2) / 2;
+    cropWidth = Math.max(cropWidth, Math.abs(identityZone.x2 - identityZone.x1) * 2.2);
+    cropHeight = Math.max(cropHeight, Math.abs(identityZone.y2 - identityZone.y1) * 2.2);
+  } else {
+    const scanStep = previousCenter ? Math.max(0, missedFrames - 2) : sampleIndex;
+    const scanIndex = scanStep % 5;
+    const usableTravel = Math.max(0, wallHeight - cropHeight);
+    centerY = wallBottom - cropHeight / 2 - usableTravel * (scanIndex / 4);
   }
-  const digest = await crypto.subtle.digest("SHA-256", buffer);
-  const hash = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
-  if (hash !== MODEL_SHA256) {
-    throw new Error("Pose model integrity check failed.");
-  }
-  return new Uint8Array(buffer);
+
+  return fitRegion(centerX, centerY, cropWidth, cropHeight);
+}
+
+function fitRegion(centerX: number, centerY: number, width: number, height: number): PoseSearchRegion {
+  const safeWidth = clampNumber(width, 0.1, 1);
+  const safeHeight = clampNumber(height, 0.1, 1);
+  const left = clampNumber(centerX - safeWidth / 2, 0, 1 - safeWidth);
+  const top = clampNumber(centerY - safeHeight / 2, 0, 1 - safeHeight);
+  return {
+    left,
+    top,
+    right: left + safeWidth,
+    bottom: top + safeHeight,
+  };
 }
 
 function assetUrl(relativePath: string): string {

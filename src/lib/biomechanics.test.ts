@@ -33,7 +33,7 @@ describe("weighted COM", () => {
     expect(wall.massCoverage).toBeCloseTo(1, 10);
   });
 
-  it("refuses COM when required trunk or thigh landmarks are missing", () => {
+  it("refuses COM when the required trunk anchor is missing", () => {
     const pose = symmetricPose().map((landmark) =>
       landmark.index === 24 ? { ...landmark, visibility: 0 } : landmark,
     );
@@ -41,6 +41,17 @@ describe("weighted COM", () => {
 
     expect(result.point).toBeUndefined();
     expect(result.missingSegments).toContain("trunk");
+    expect(result.missingSegments).toContain("rightThigh");
+  });
+
+  it("tolerates one occluded thigh when at least 80% of modeled mass remains", () => {
+    const pose = symmetricPose().map((landmark) =>
+      landmark.index === 26 ? { ...landmark, visibility: 0 } : landmark,
+    );
+    const result = computeImageCom(pose);
+
+    expect(result.point).toBeDefined();
+    expect(result.massCoverage).toBeGreaterThanOrEqual(0.8);
     expect(result.missingSegments).toContain("rightThigh");
   });
 });
@@ -70,6 +81,25 @@ describe("trajectory kinematics", () => {
 
     expect(result.metrics.pathLengthMeters).toBeCloseTo(0.2, 6);
     expect(result.metrics.averageSpeedMps).toBeCloseTo(1, 6);
+  });
+
+  it("separates raw person detection from safely selected climber tracking", () => {
+    const frames = [0, 0.1, 0.2].map((time) => ({
+      ...frame(time, 1.5, time),
+      poseDetected: true,
+      poseSelected: false,
+      poseCandidateCount: 1,
+      landmarks: [],
+      imageCom: undefined,
+      wallCom: undefined,
+      valid: false,
+    }));
+    const result = applyTrajectoryKinematics(frames, DEFAULT_BIOMECHANICS_SETTINGS, calibration);
+
+    expect(result.metrics.detectionCoverage).toBe(1);
+    expect(result.metrics.trackingCoverage).toBe(0);
+    expect(result.metrics.detectedFrames).toBe(3);
+    expect(result.metrics.selectedFrames).toBe(0);
   });
 
   it("clears stale derived kinematics before recomputing invalid frames", () => {

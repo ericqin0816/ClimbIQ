@@ -21,6 +21,7 @@ interface DetectStartSignalOptions {
   profile?: StartDetectionProfile;
   calibration?: StartLightCalibration;
   fps?: number;
+  signal?: AbortSignal;
 }
 
 const SENSITIVITY_THRESHOLDS: Record<Sensitivity, number> = {
@@ -51,6 +52,7 @@ export async function detectStartSignal({
   profile = "auto",
   calibration,
   fps = 10,
+  signal,
 }: DetectStartSignalOptions): Promise<StartSignalDetectionResult> {
   const threshold = SENSITIVITY_THRESHOLDS[sensitivity];
   const debug: StartSignalDebug = {
@@ -84,7 +86,9 @@ export async function detectStartSignal({
 
   try {
     for (const time of times) {
+      throwIfCancelled(signal);
       const sample = await sampleZoneAverageColor(video, time, zone);
+      throwIfCancelled(signal);
       debug.samples.push({
         time: sample.time,
         averageRgb: sample.averageRgb,
@@ -94,6 +98,9 @@ export async function detectStartSignal({
       });
     }
   } catch (error) {
+    if (signal?.aborted) {
+      throw error;
+    }
     debug.framesSampled = debug.samples.length;
     debug.failureReason = error instanceof Error ? error.message : "Unknown start signal detection error.";
     return result(false, "Start Signal not detected. Frame sampling failed.", "None", threshold, debug);
@@ -209,6 +216,14 @@ export async function detectStartSignal({
     ? " Because the light may be blocked, the visible color change can occur slightly after the true start."
     : "";
   return result(true, `${reason}${boundaryNote}${blockedNote}`, confidence, threshold, debug, selectedCandidate.rawTime, candidates);
+}
+
+function throwIfCancelled(signal?: AbortSignal): void {
+  if (signal?.aborted) {
+    const error = new Error("Start-light detection cancelled.");
+    error.name = "AbortError";
+    throw error;
+  }
 }
 
 function buildStartCandidates({

@@ -21,7 +21,7 @@ Starting with Expo or React Native would add video and canvas constraints before
 
 Speed climbing phone videos are difficult for pose detection. The climber can be small, fast, partially occluded, or filmed from an angle that hides the wrist or hand. This lab uses more reliable signals first:
 
-- start signal from a light color change
+- start signal from an automatically located green-to-blue light transition
 - first movement from pixel motion inside the climber's starting body zone
 - finish pad from official total time after the detected start signal
 
@@ -45,9 +45,9 @@ Velocity is fit from nearby timestamped COM samples rather than assuming perfect
 
 ## Start Signal Detection
 
-The user draws a tight Start Light Zone around the light that changes color. The detector samples the start search window at 10 fps, builds a baseline RGB value from the first 0.5 seconds, then looks for a sustained color distance change over multiple frames.
+Quick Analyze scans several pixel scales and keeps spatially separate left/right lane candidates for regions that are green before the climb, change to blue, and remain blue. Normalized chromaticity helps retain faint lights and floor glows across different angles. It rejects static green objects, green-to-red changes, and brief blue motion. Because the start box is always mounted at the base of the wall below the first and second holds, candidates in the upper frame are rejected outright, lower-frame candidates are boosted, and a drawn Start Body Zone pulls the search toward the climber's lane. Each likely sensor is rescanned at 30 fps to refine the transition time.
 
-It also computes green and blue scores. If green drops while blue rises, confidence increases because that pattern matches many start-light changes.
+The original local video's audio track is decoded on-device and searched for a regular three-to-five-tone countdown; the final tonal burst becomes an independent start cue. The final beep may be longer and louder than the countdown beeps without breaking the match, and when no repeated pattern exists, a single tonal beep that clearly stands out from everything else in the window is used as a medium-confidence start cue. Light, audio, and motion times are clustered together. Agreement between light and audio—or matching left/right lane lights—earns high confidence, and an agreeing beep plus launch motion is accepted automatically at medium confidence. Early motion that disagrees with synchronized cues is treated as setup rocking. Motion alone is never auto-accepted, conflicting strong cues require review, and the user can always set the current frame as Start. When review is needed, the player seeks to the suggested start frame and a one-click **Accept suggested start** button writes the timestamp and continues with first-movement detection.
 
 ## First Movement Detection
 
@@ -75,7 +75,7 @@ npm run typecheck
 npm run test
 ```
 
-Open the dev server URL, upload a local climbing video, run the frame sampling test first, then define the Start Light Zone and Start Body Zone.
+Open the dev server URL, upload a local climbing video, and press **Analyze climb automatically**. Zones are optional unless another person appears in frame or automatic light discovery needs manual help.
 
 ## Deploy On Vercel
 
@@ -95,9 +95,9 @@ Vercel should use:
 
 The app is still client-only. Uploaded videos are read locally in the browser with `HTMLVideoElement` and canvas; this version does not upload videos, store files, or use a backend.
 
-## Debug Reports
+## Diagnostic Data
 
-Every detection run updates the visible debug panel. Use **Copy Debug Report** to copy JSON containing:
+Dataset exports retain diagnostic data for troubleshooting without putting developer-only cards in the main workflow. The data includes:
 
 - video metadata
 - normalized zones
@@ -170,7 +170,7 @@ ClimbIQ Detection Lab is local-first:
 - local saved sessions stay in the browser's `localStorage`
 - optional folder saving uses the browser File System Access API when supported
 
-ClimbIQ does not train a custom AI model. Pose inference uses the bundled MediaPipe Pose Landmarker Lite model on the user's device. Dataset exports include calibration, compact trajectory data, quality metrics, warnings, and pose landmarks when available so future versions can improve analysis and coaching workflows.
+ClimbIQ does not train a custom AI model. Pose inference uses the bundled MediaPipe Pose Landmarker Full model on the user's device. The analyzer follows a moving wall crop so a climber does not become too small when the complete 15 m wall is visible. Dataset exports include calibration, compact trajectory data, quality metrics, warnings, and pose landmarks when available so future versions can improve analysis and coaching workflows.
 
 ## Biomechanics limitations
 

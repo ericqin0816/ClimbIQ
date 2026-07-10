@@ -45,11 +45,13 @@ export async function detectMotionBasedStartEstimate({
   sensitivity,
   fps = 15,
 }: DetectMotionBasedStartOptions): Promise<StartSignalDetectionResult> {
+  const analysisZone = zone ?? createFallbackStartBodyZone();
+  const usingFallbackZone = !zone;
   const threshold = FIXED_THRESHOLDS[sensitivity];
   const debug: StartSignalDebug = {
     zoneExists: Boolean(zone),
-    normalizedZone: zone,
-    pixelZone: zone ? normalizedZoneToPixelRect(zone, video.videoWidth, video.videoHeight) : undefined,
+    normalizedZone: analysisZone,
+    pixelZone: normalizedZoneToPixelRect(analysisZone, video.videoWidth, video.videoHeight),
     detectionMethod: "Motion-based start estimate",
     framesSampled: 0,
     maxColorDistance: 0,
@@ -57,11 +59,6 @@ export async function detectMotionBasedStartEstimate({
     detectedCrossings: [],
     samples: [],
   };
-
-  if (!zone) {
-    debug.failureReason = "Start Body Zone is required for motion-based start estimate.";
-    return result(false, "Start Signal not detected. Draw Start Body Zone first.", "None", threshold, debug);
-  }
 
   const times = sampleFramesInRange(searchStart, searchEnd, fps);
   if (times.length < 5) {
@@ -75,7 +72,7 @@ export async function detectMotionBasedStartEstimate({
     let previousImageData: ImageData | null = null;
     for (const time of times) {
       await seekTo(video, time);
-      const current = captureZoneImageData(video, zone);
+      const current = captureZoneImageData(video, analysisZone);
       if (previousImageData) {
         const motionScore = computeSensitiveMotionScore(previousImageData, current.imageData);
         motionSamples.push({
@@ -122,13 +119,24 @@ export async function detectMotionBasedStartEstimate({
   debug.selectedCandidateReason = selected.reason;
   return result(
     true,
-    `Start light was weak, so start was estimated as ${reactionOffset.toFixed(2)}s before first detected body movement.`,
-    selected.confidence,
+    `Start light was weak, so start was estimated as ${reactionOffset.toFixed(2)}s before first detected body movement.${usingFallbackZone ? " A broad automatic body region was used; review this low-confidence marker." : ""}`,
+    usingFallbackZone ? "Low" : selected.confidence,
     debug.threshold,
     debug,
     selected.rawTime,
     candidates,
   );
+}
+
+function createFallbackStartBodyZone(): NormalizedZone {
+  return {
+    id: "startBody",
+    label: "Automatic lower-center body region",
+    x1: 0.12,
+    y1: 0.35,
+    x2: 0.88,
+    y2: 1,
+  };
 }
 
 function buildCandidates({

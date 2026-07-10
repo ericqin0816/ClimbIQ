@@ -134,9 +134,7 @@ export async function sampleZoneAverageColor(
   zone: NormalizedZone,
 ): Promise<{ time: number; averageRgb: RGB; pixelZone: ZonePixelRect }> {
   await seekTo(video, time);
-  const captured = captureFrame(video);
-  const pixelZone = normalizedZoneToPixelRect(zone, video.videoWidth, video.videoHeight);
-  const imageData = captured.context.getImageData(pixelZone.x, pixelZone.y, pixelZone.width, pixelZone.height);
+  const { imageData, pixelZone } = captureZoneImageData(video, zone);
 
   return {
     time: video.currentTime,
@@ -248,9 +246,26 @@ export function captureZoneImageData(
   video: HTMLVideoElement,
   zone: NormalizedZone,
 ): { imageData: ImageData; pixelZone: ZonePixelRect } {
-  const captured = captureFrame(video);
   const pixelZone = normalizedZoneToPixelRect(zone, video.videoWidth, video.videoHeight);
-  const imageData = captured.context.getImageData(pixelZone.x, pixelZone.y, pixelZone.width, pixelZone.height);
+  const canvas = document.createElement("canvas");
+  canvas.width = pixelZone.width;
+  canvas.height = pixelZone.height;
+  const context = canvas.getContext("2d", { willReadFrequently: true });
+  if (!context) {
+    throw new Error("Canvas 2D context is unavailable.");
+  }
+  context.drawImage(
+    video,
+    pixelZone.x,
+    pixelZone.y,
+    pixelZone.width,
+    pixelZone.height,
+    0,
+    0,
+    pixelZone.width,
+    pixelZone.height,
+  );
+  const imageData = context.getImageData(0, 0, pixelZone.width, pixelZone.height);
   return { imageData, pixelZone };
 }
 

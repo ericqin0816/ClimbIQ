@@ -3,4 +3,4 @@ dist
 .local-npm
 *.log
 tsconfig.tsbuildinfo
-.env
+.env*

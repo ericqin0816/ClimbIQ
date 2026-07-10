@@ -65,6 +65,7 @@ export function BiomechanicsPanel({
   const [error, setError] = useState("");
   const cancelledRef = useRef(false);
   const abortControllerRef = useRef<AbortController | null>(null);
+  const identityZoneRef = useRef(identityZone);
 
   useEffect(() => {
     return () => {
@@ -90,6 +91,10 @@ export function BiomechanicsPanel({
   useEffect(() => {
     setStaticCameraConfirmed(session.calibration?.staticCameraConfirmed ?? false);
   }, [session.calibration?.staticCameraConfirmed]);
+
+  useEffect(() => {
+    identityZoneRef.current = identityZone;
+  }, [identityZone]);
 
   const calibrationValidation = useMemo(
     () => validateWallCalibration(session.calibration),
@@ -188,6 +193,7 @@ export function BiomechanicsPanel({
 
     cancelledRef.current = false;
     const abortController = new AbortController();
+    const analysisIdentityZone = identityZone ? { ...identityZone } : undefined;
     abortControllerRef.current = abortController;
     setRunning(true);
     onRunningChange(true);
@@ -203,7 +209,7 @@ export function BiomechanicsPanel({
           endRawTime: rangeEnd,
           settings: session.settings,
           calibration: session.calibration!,
-          identityZone,
+          identityZone: analysisIdentityZone,
           onProgress: (next) => {
             setProgress(next);
             setStatus(next.phase === "analyzing"
@@ -220,8 +226,23 @@ export function BiomechanicsPanel({
       if (cancelledRef.current || abortController.signal.aborted) {
         throw new PoseAnalysisCancelledError();
       }
+      if (!zonesEqual(result.identityZone, identityZoneRef.current)) {
+        throw new Error("The Start Body Zone changed during analysis, so the stale pose result was discarded. Run it again with the final zone.");
+      }
       onSessionChange({ ...session, result });
-      setStatus(`Biomechanics complete: ${result.metrics.validFrames}/${result.metrics.requestedFrames} valid COM frames.`);
+      const selectedFrames = result.metrics.selectedFrames ?? result.metrics.detectedFrames;
+      if (result.metrics.detectedFrames === 0) {
+        setStatus("Pose scan finished, but no athlete was detected.");
+        setError("No athlete pose was found. Check that the four wall corners surround the actual wall and that the analysis begins with the climber visible near the Start Body Zone.");
+      } else if (selectedFrames === 0) {
+        setStatus("People were found, but the climber could not be selected safely.");
+        setError("Tighten the Start Body Zone around only the climber at the beginning of the range, then run again.");
+      } else if (result.metrics.validFrames === 0) {
+        setStatus(`Pose tracking worked on ${selectedFrames}/${result.metrics.requestedFrames} frames, but no COM frame passed the body-segment quality check.`);
+        setError("The athlete was found, but too many required hips, knees, or shoulders were hidden. Try 35% landmark visibility or a clearer camera angle.");
+      } else {
+        setStatus(`Biomechanics complete: ${result.metrics.validFrames}/${result.metrics.requestedFrames} valid COM frames.`);
+      }
     } catch (caught) {
       if (caught instanceof PoseAnalysisCancelledError) {
         setStatus("Biomechanics analysis cancelled. Previous results were kept.");
@@ -403,8 +424,8 @@ export function BiomechanicsPanel({
                 onChange={(event) => updateSetting("minVisibility", Number(event.target.value))}
                 disabled={running}
               >
-                <option value={0.35}>35% — permissive</option>
-                <option value={0.45}>45% — recommended</option>
+                <option value={0.35}>35% — recommended</option>
+                <option value={0.45}>45%</option>
                 <option value={0.6}>60% — strict</option>
               </select>
             </label>
@@ -415,7 +436,8 @@ export function BiomechanicsPanel({
                 onChange={(event) => updateSetting("minMassCoverage", Number(event.target.value))}
                 disabled={running}
               >
-                <option value={0.85}>85% — recommended</option>
+                <option value={0.8}>80% — recommended</option>
+                <option value={0.85}>85%</option>
                 <option value={0.9}>90%</option>
                 <option value={0.95}>95% — strict</option>
               </select>
@@ -580,7 +602,8 @@ function BiomechanicsResultView({
         </span>
       </div>
       <div className="biomechanics-metrics">
-        <ResultMetric label="Tracking coverage" value={formatPercent(metrics.trackingCoverage)} />
+        <ResultMetric label="Person detection" value={formatPercent(metrics.detectionCoverage ?? metrics.trackingCoverage)} />
+        <ResultMetric label="Tracked athlete" value={formatPercent(metrics.trackingCoverage)} />
         <ResultMetric label="Valid COM coverage" value={formatPercent(metrics.validCoverage)} />
         <ResultMetric label="Mean visible mass" value={formatPercent(metrics.meanMassCoverage)} />
         <ResultMetric label="Average wall speed" value={formatMetric(metrics.averageSpeedMps, "m/s")} />

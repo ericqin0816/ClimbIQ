@@ -39,8 +39,8 @@ export interface ComEstimate<TPoint> {
 
 export const DEFAULT_BIOMECHANICS_SETTINGS: BiomechanicsSettings = {
   sampleFps: 10,
-  minVisibility: 0.45,
-  minMassCoverage: 0.85,
+  minVisibility: 0.35,
+  minMassCoverage: 0.8,
   smoothingWindowSeconds: 0.2,
   anthropometricModel: "athletevision-published-male-reference",
 };
@@ -53,8 +53,8 @@ export const BODY_SEGMENTS: SegmentDefinition[] = [
   { id: "rightUpperArm", proximal: "rightShoulder", distal: "rightElbow", mass: 0.0271, ratio: 0.5772 },
   { id: "leftForearm", proximal: "leftElbow", distal: "leftWrist", mass: 0.0223, ratio: 0.6751 },
   { id: "rightForearm", proximal: "rightElbow", distal: "rightWrist", mass: 0.0223, ratio: 0.6751 },
-  { id: "leftThigh", proximal: "leftHip", distal: "leftKnee", mass: 0.1416, ratio: 0.4095, required: true },
-  { id: "rightThigh", proximal: "rightHip", distal: "rightKnee", mass: 0.1416, ratio: 0.4095, required: true },
+  { id: "leftThigh", proximal: "leftHip", distal: "leftKnee", mass: 0.1416, ratio: 0.4095 },
+  { id: "rightThigh", proximal: "rightHip", distal: "rightKnee", mass: 0.1416, ratio: 0.4095 },
   { id: "leftShank", proximal: "leftKnee", distal: "leftAnkle", mass: 0.0433, ratio: 0.4459 },
   { id: "rightShank", proximal: "rightKnee", distal: "rightAnkle", mass: 0.0433, ratio: 0.4459 },
   { id: "leftFoot", proximal: "leftHeel", distal: "leftToe", mass: 0.0137, ratio: 0.4415 },
@@ -163,9 +163,19 @@ export function applyTrajectoryKinematics(
   }
 
   const requestedFrames = frames.length;
-  const detectedFrames = frames.filter((frame) => frame.poseDetected || frame.landmarks.length > 0).length;
+  const detectedFrames = frames.filter((frame) =>
+    frame.poseCandidateCount !== undefined
+      ? frame.poseCandidateCount > 0
+      : frame.poseDetected || frame.landmarks.length > 0,
+  ).length;
+  const selectedFrames = frames.filter((frame) =>
+    frame.poseSelected !== undefined
+      ? frame.poseSelected
+      : frame.landmarks.length > 0 || frame.poseDetected,
+  ).length;
   const validFrames = frames.filter((frame) => frame.valid && frame.wallCom).length;
-  const trackingCoverage = requestedFrames ? detectedFrames / requestedFrames : 0;
+  const detectionCoverage = requestedFrames ? detectedFrames / requestedFrames : 0;
+  const trackingCoverage = requestedFrames ? selectedFrames / requestedFrames : 0;
   const validCoverage = requestedFrames ? validFrames / requestedFrames : 0;
   const meanMassCoverage = validFrames
     ? frames.filter((frame) => frame.valid).reduce((sum, frame) => sum + frame.massCoverage, 0) / validFrames
@@ -205,8 +215,11 @@ export function applyTrajectoryKinematics(
     "Anthropometric weights use the published adult male reference model and may not match every athlete.",
     "Metric output is valid only for a fixed camera with no pan, tilt, shake, or zoom.",
   ];
-  if (trackingCoverage < 0.8) {
-    warnings.push("Pose tracking coverage is below 80%; review the detected path.");
+  if (detectionCoverage < 0.8) {
+    warnings.push("Person detection coverage is below 80%; check the wall crop and selected time range.");
+  }
+  if (trackingCoverage < detectionCoverage - 0.05) {
+    warnings.push("Some detected people could not be safely associated with the selected climber.");
   }
   if (validCoverage < 0.7) {
     warnings.push("Too many frames lacked the body segments required for a stable COM estimate.");
@@ -233,7 +246,9 @@ export function applyTrajectoryKinematics(
     metrics: {
       requestedFrames,
       detectedFrames,
+      selectedFrames,
       validFrames,
+      detectionCoverage,
       trackingCoverage,
       validCoverage,
       meanMassCoverage,

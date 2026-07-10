@@ -869,6 +869,41 @@ h4 {
   gap: 18px;
 }
 
+.quick-analysis-box {
+  display: grid;
+  gap: 0.7rem;
+  margin-top: 1rem;
+  padding: 0.9rem;
+  border: 1px solid #23536a;
+  border-radius: 10px;
+  background: #0c1e29;
+}
+
+.quick-analysis-box p {
+  margin: 0.25rem 0 0;
+}
+
+.readiness-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.evidence-message {
+  margin: 0;
+  padding: 0.65rem 0.75rem;
+  border-left: 3px solid #38bdf8;
+  background: #091722;
+  color: #cfe8f7;
+  font-size: 0.88rem;
+  line-height: 1.45;
+}
+
+.zone-overlay.locked {
+  pointer-events: none;
+  cursor: not-allowed;
+}
+
 .experimental-banner {
   display: flex;
   flex-wrap: wrap;

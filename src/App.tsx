@@ -2,8 +2,12 @@ import { ChangeEvent, CSSProperties, PointerEvent, useEffect, useMemo, useRef, u
 import { BiomechanicsPanel, PoseVideoOverlay } from "./components/BiomechanicsPanel";
 import { applyTrajectoryKinematics, DEFAULT_BIOMECHANICS_SETTINGS } from "./lib/biomechanics";
 import { detectFirstMovement } from "./lib/detectFirstMovement";
+import { detectAutomaticStartLight } from "./lib/detectAutomaticStartLight";
+import { detectAudioStartSignal, type AudioStartResult } from "./lib/detectAudioStartSignal";
 import { detectMotionBasedStartEstimate } from "./lib/detectMotionBasedStartEstimate";
 import { detectStartSignal } from "./lib/detectStartSignal";
+import { analyzePoseVideo, PoseAnalysisCancelledError } from "./lib/poseAnalysis";
+import { fuseStartEvidence, type StartEvidence } from "./lib/startSignalFusion";
 import { captureFrame, clamp, roundTime, sampleFrameAt, sampleZoneAverageColor, seekTo } from "./lib/videoFrameSampler";
 import { validateWallCalibration } from "./lib/wallCalibration";
 import type {
@@ -46,7 +50,7 @@ const INITIAL_TIMESTAMPS: TimestampMarker[] = [
   marker("finishPad", "Finish Pad"),
 ];
 
-const APP_VERSION = "0.2.0";
+const APP_VERSION = "0.4.0";
 const SESSION_STORAGE_KEY = "climbiq.analysisSessions.v1";
 
 type ZoneDisplayMode = "fit" | "scroll";
@@ -73,10 +77,12 @@ function App() {
   const zoneFrameWrapRef = useRef<HTMLDivElement | null>(null);
   const zoneStageRef = useRef<HTMLDivElement | null>(null);
   const previousObjectUrl = useRef<string | null>(null);
+  const videoFileRef = useRef<File | null>(null);
   const obsidianDirectoryHandle = useRef<any>(null);
   const videoTaskQueueRef = useRef<Promise<void>>(Promise.resolve());
   const pendingSessionVideoMetadataRef = useRef<VideoMetadata | null>(null);
   const pendingVideoFileNameRef = useRef<string | null>(null);
+  const autoAnalysisAbortRef = useRef<AbortController | null>(null);
 
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
   const [metadata, setMetadata] = useState<VideoMetadata | null>(null);
@@ -105,6 +111,7 @@ function App() {
   const [reactionTimeOffset, setReactionTimeOffset] = useState(0.2);
   const [startSignalOffset, setStartSignalOffset] = useState(0);
   const [startResult, setStartResult] = useState<StartSignalDetectionResult | null>(null);
+  const [suggestedStartRawTime, setSuggestedStartRawTime] = useState<number | null>(null);
   const [startRunning, setStartRunning] = useState(false);
 
   const [movementSensitivity, setMovementSensitivity] = useState<Sensitivity>("medium");
@@ -132,9 +139,13 @@ function App() {
   const [obsidianFolderName, setObsidianFolderName] = useState("");
   const [biomechanics, setBiomechanics] = useState<BiomechanicsSession>(createDefaultBiomechanicsSession());
   const [biomechanicsRunning, setBiomechanicsRunning] = useState(false);
+  const [autoAnalysisRunning, setAutoAnalysisRunning] = useState(false);
+  const [autoAnalysisStatus, setAutoAnalysisStatus] = useState("");
+  const [startEvidenceStatus, setStartEvidenceStatus] = useState("");
 
   useEffect(() => {
     setSavedSessions(readSavedSessions());
+    return () => autoAnalysisAbortRef.current?.abort();
   }, []);
 
   useEffect(() => {
@@ -247,7 +258,7 @@ function App() {
       : calibrationReady && ["calibrated", "blocked", "manual"].includes(resolvedStartProfile)
       ? "Calibrated light transition"
       : "Generic color-distance detection";
-  const videoAnalysisRunning = frameTestRunning || startRunning || movementRunning || movementPreviewRunning || biomechanicsRunning;
+  const videoAnalysisRunning = frameTestRunning || startRunning || movementRunning || movementPreviewRunning || biomechanicsRunning || autoAnalysisRunning;
 
   const zoneStageStyle = useMemo((): CSSProperties => {
     const width = metadata?.videoWidth || 16;
@@ -271,6 +282,7 @@ function App() {
   function resetAnalysisForNewVideo(fileName: string) {
     setFrameDebug(null);
     setStartResult(null);
+    setSuggestedStartRawTime(null);
     setMovementResult(null);
     setMovementPreviewFrames({});
     setMovementPreviewRunning(false);
@@ -290,6 +302,7 @@ function App() {
     setZones({});
     setBiomechanics(createDefaultBiomechanicsSession());
     setBiomechanicsRunning(false);
+    setStartEvidenceStatus("");
     setTimestamps(INITIAL_TIMESTAMPS);
     setActiveSessionId(null);
     if (!sessionName || sessionName === "Untitled climb analysis") {
@@ -298,6 +311,11 @@ function App() {
   }
 
   function handleVideoUpload(event: ChangeEvent<HTMLInputElement>) {
+    if (videoAnalysisRunning) {
+      setSessionStatus("Wait for the active analysis to finish before replacing the video.");
+      event.target.value = "";
+      return;
+    }
     const file = event.target.files?.[0];
     if (!file) {
       return;
@@ -314,6 +332,7 @@ function App() {
     pendingVideoFileNameRef.current = file.name;
 
     const nextUrl = URL.createObjectURL(file);
+    videoFileRef.current = file;
     previousObjectUrl.current = nextUrl;
     setVideoUrl(nextUrl);
     setMetadata({
@@ -326,6 +345,7 @@ function App() {
     setCapturedFrame(null);
     setFrameDebug(null);
     setStartResult(null);
+    setSuggestedStartRawTime(null);
     setMovementResult(null);
     setMovementPreviewFrames({});
     setMovementPreviewRunning(false);
@@ -387,7 +407,7 @@ function App() {
     video: HTMLVideoElement,
     work: () => Promise<T>,
     completeMessage: string,
-    _taskName = "video-analysis",
+    taskName = "video analysis",
   ): Promise<T> {
     const previousTask = videoTaskQueueRef.current;
     let releaseTask!: () => void;
@@ -405,8 +425,11 @@ function App() {
       video.pause();
     }
 
+    let workSucceeded = false;
     try {
-      return await work();
+      const output = await work();
+      workSucceeded = true;
+      return output;
     } finally {
       try {
         await seekTo(video, previousTime);
@@ -416,7 +439,11 @@ function App() {
         } else {
           await video.play();
         }
-        setVideoRestoreStatus(completeMessage);
+        setVideoRestoreStatus(
+          workSucceeded
+            ? completeMessage
+            : `Video restored after ${taskName.replaceAll("-", " ")} stopped.`,
+        );
       } catch (error) {
         setVideoRestoreStatus(
           error instanceof Error ? `Video restore failed: ${error.message}` : "Video restore failed.",
@@ -542,7 +569,7 @@ function App() {
 
   function captureCurrentFrameForZones() {
     const video = videoRef.current;
-    if (!video || !metadata?.metadataLoaded) {
+    if (videoAnalysisRunning || !video || !metadata?.metadataLoaded) {
       return;
     }
 
@@ -551,7 +578,7 @@ function App() {
   }
 
   function beginZoneDrag(event: PointerEvent<HTMLDivElement>) {
-    if (!capturedFrame) {
+    if (videoAnalysisRunning || !capturedFrame) {
       return;
     }
     const point = pointerToNormalized(event);
@@ -571,7 +598,7 @@ function App() {
   }
 
   function updateZoneDrag(event: PointerEvent<HTMLDivElement>) {
-    if (!dragStart) {
+    if (videoAnalysisRunning || !dragStart) {
       return;
     }
     const point = pointerToNormalized(event);
@@ -589,6 +616,14 @@ function App() {
   }
 
   function finishZoneDrag(event: PointerEvent<HTMLDivElement>) {
+    if (videoAnalysisRunning) {
+      setDraftZone(null);
+      setDragStart(null);
+      if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+        event.currentTarget.releasePointerCapture(event.pointerId);
+      }
+      return;
+    }
     if (!draftZone) {
       setDragStart(null);
       return;
@@ -615,16 +650,18 @@ function App() {
       await runWithVideoRestore(
         video,
         async () => {
-          const result = resolvedStartProfile === "motion"
-            ? await detectMotionBasedStartEstimate({
+          let result: StartSignalDetectionResult;
+          if (resolvedStartProfile === "motion") {
+            result = await detectMotionBasedStartEstimate({
                 video,
                 zone: zones.startBody,
                 searchStart: startSearchStart,
                 searchEnd: startSearchEnd,
                 reactionOffset: reactionTimeOffset,
                 sensitivity: startSensitivity,
-              })
-            : await detectStartSignal({
+              });
+          } else if (zones.startLight && startDetectionProfile !== "auto") {
+            result = await detectStartSignal({
                 video,
                 zone: zones.startLight,
                 searchStart: startSearchStart,
@@ -634,10 +671,51 @@ function App() {
                 profile: resolvedStartProfile,
                 calibration: startLightCalibration,
               });
+          } else {
+            setVideoRestoreStatus("Locating the green-to-blue start sensor…");
+            const automaticLight = await detectAutomaticStartLight({
+              video,
+              searchStart: startSearchStart,
+              searchEnd: startSearchEnd,
+              onProgress: (processed, total) => {
+                setVideoRestoreStatus(`Locating start sensor: ${processed}/${total} frames…`);
+              },
+            });
+            if (automaticLight.found && automaticLight.zone && automaticLight.calibration && automaticLight.result) {
+              const detectedZone = automaticLight.zone;
+              setZones((current) => ({ ...current, startLight: detectedZone }));
+              setStartLightCalibration(automaticLight.calibration);
+              setStartDetectionProfile("calibrated");
+              setCalibrationStatus("Green-to-blue start sensor found and calibrated automatically.");
+              result = automaticLight.result;
+            } else if (zones.startLight) {
+              result = await detectStartSignal({
+                video,
+                zone: zones.startLight,
+                searchStart: startSearchStart,
+                searchEnd: startSearchEnd,
+                sensitivity: startSensitivity,
+                lightVisibility: startLightVisibility,
+                profile: calibrationReady ? "calibrated" : "generic",
+                calibration: startLightCalibration,
+              });
+            } else {
+              result = await detectMotionBasedStartEstimate({
+                video,
+                zone: zones.startBody,
+                searchStart: startSearchStart,
+                searchEnd: startSearchEnd,
+                reactionOffset: reactionTimeOffset,
+                sensitivity: startSensitivity,
+              });
+            }
+          }
           setStartResult(result);
         },
         "Start detection complete. Video restored to previous position.",
       );
+    } catch (error) {
+      setVideoRestoreStatus(error instanceof Error ? `Start detection failed: ${error.message}` : "Start detection failed.");
     } finally {
       setStartRunning(false);
     }
@@ -667,6 +745,8 @@ function App() {
         },
         "Motion-based start estimate complete. Video restored to previous position.",
       );
+    } catch (error) {
+      setVideoRestoreStatus(error instanceof Error ? `Motion-based start failed: ${error.message}` : "Motion-based start failed.");
     } finally {
       setStartRunning(false);
     }
@@ -680,7 +760,18 @@ function App() {
       return;
     }
 
-    const sample = await sampleZoneAverageColor(video, video.currentTime, zone);
+    if (videoAnalysisRunning) {
+      setCalibrationStatus("Wait for the active video analysis to finish before sampling the light.");
+      return;
+    }
+
+    let sample;
+    try {
+      sample = await sampleZoneAverageColor(video, video.currentTime, zone);
+    } catch (error) {
+      setCalibrationStatus(error instanceof Error ? `Calibration sample failed: ${error.message}` : "Calibration sample failed.");
+      return;
+    }
     setStartLightCalibration((current) => {
       const next: StartLightCalibration = {
         ...current,
@@ -721,8 +812,364 @@ function App() {
         "First movement detection complete. Video restored to previous position.",
       );
       setMovementResult(result);
+    } catch (error) {
+      setVideoRestoreStatus(error instanceof Error ? `First movement detection failed: ${error.message}` : "First movement detection failed.");
     } finally {
       setMovementRunning(false);
+    }
+  }
+
+  async function runAutomaticAnalysis() {
+    const video = videoRef.current;
+    if (!video || !metadata?.metadataLoaded) {
+      setAutoAnalysisStatus("Load a video and wait for its metadata first.");
+      return;
+    }
+
+    const abortController = new AbortController();
+    autoAnalysisAbortRef.current = abortController;
+    setAutoAnalysisRunning(true);
+    setAutoAnalysisStatus("Finding the start signal…");
+    setStartEvidenceStatus("");
+    setStartResult(null);
+    setSuggestedStartRawTime(null);
+    setMovementResult(null);
+    setMovementPreviewFrames({});
+    let reviewSeekTarget: number | null = null;
+
+    try {
+      await runWithVideoRestore(
+        video,
+        async () => {
+          const searchStart = clamp(startSearchStart, 0, Math.max(0, video.duration - 0.5));
+          const searchEnd = Math.min(
+            video.duration,
+            Math.max(
+              searchStart + 0.5,
+              Number.isFinite(startSearchEnd) ? startSearchEnd : 0,
+              Math.min(12, video.duration),
+            ),
+          );
+          setAutoAnalysisStatus("Scanning both lanes for faint start lights and listening for the countdown…");
+          const audioPromise: Promise<AudioStartResult> = videoFileRef.current
+            ? detectAudioStartSignal({
+                file: videoFileRef.current,
+                searchStart,
+                searchEnd,
+                signal: abortController.signal,
+              })
+            : Promise.resolve({
+                found: false,
+                confidence: "None",
+                reason: "The original local video file is unavailable for audio analysis.",
+                segments: [],
+              });
+          const automaticLight = await detectAutomaticStartLight({
+            video,
+            searchStart,
+            searchEnd,
+            startBodyZone: zones.startBody,
+            signal: abortController.signal,
+            onProgress: (processed, total) => {
+              setAutoAnalysisStatus(`Scanning lane lights: ${processed}/${total} frames… Audio is being checked too.`);
+            },
+          });
+          const colorResults = (automaticLight.laneResults ?? (automaticLight.result ? [automaticLight.result] : []))
+            .filter((result) => result.detected && result.rawTime !== undefined);
+          if (automaticLight.found && automaticLight.zone && automaticLight.calibration) {
+            setZones((current) => ({ ...current, startLight: automaticLight.zone }));
+            setStartLightCalibration(automaticLight.calibration);
+            setStartDetectionProfile("calibrated");
+            setCalibrationStatus(
+              `${automaticLight.laneCandidates?.length ?? 1} lane-light candidate${(automaticLight.laneCandidates?.length ?? 1) === 1 ? "" : "s"} found. Primary sensor is near ${Math.round(((automaticLight.zone.x1 + automaticLight.zone.x2) / 2) * 100)}% across and ${Math.round(((automaticLight.zone.y1 + automaticLight.zone.y2) / 2) * 100)}% down the frame.`,
+            );
+          }
+
+          if (!colorResults.length && zones.startLight) {
+            setAutoAnalysisStatus("Automatic light search was inconclusive. Checking the saved Start Light Zone…");
+            const savedZoneResult = await detectStartSignal({
+                video,
+                zone: zones.startLight,
+                searchStart,
+                searchEnd,
+                sensitivity: startSensitivity,
+                lightVisibility: startLightVisibility,
+                profile: calibrationReady ? "calibrated" : "auto",
+                calibration: startLightCalibration,
+                signal: abortController.signal,
+              });
+            if (savedZoneResult.detected && savedZoneResult.rawTime !== undefined) {
+              colorResults.push(savedZoneResult);
+            }
+          }
+
+          if (abortController.signal.aborted) {
+            throw new PoseAnalysisCancelledError();
+          }
+          const audioStart = await audioPromise;
+          setAutoAnalysisStatus("Comparing lane lights, final beep, and body motion…");
+          const motionStart = await detectMotionBasedStartEstimate({
+            video,
+            zone: zones.startBody,
+            searchStart,
+            searchEnd,
+            reactionOffset: reactionTimeOffset,
+            sensitivity: startSensitivity,
+          });
+
+          if (abortController.signal.aborted) {
+            throw new PoseAnalysisCancelledError();
+          }
+
+          const evidence: StartEvidence[] = colorResults.map((result, index) => ({
+            kind: "color",
+            rawTime: result.rawTime!,
+            confidence: result.confidence,
+            reason: result.reason,
+            label: `lane light ${index + 1}`,
+          }));
+          if (audioStart.found && audioStart.rawTime !== undefined) {
+            evidence.push({
+              kind: "audio",
+              rawTime: audioStart.rawTime,
+              confidence: audioStart.confidence,
+              reason: audioStart.reason,
+              label: "final countdown beep",
+            });
+          }
+          if (motionStart.detected && motionStart.rawTime !== undefined) {
+            evidence.push({
+              kind: "motion",
+              rawTime: motionStart.rawTime,
+              confidence: motionStart.confidence,
+              reason: motionStart.reason,
+              label: "body motion estimate",
+            });
+          }
+          const decision = fuseStartEvidence(evidence);
+          setStartEvidenceStatus(
+            `${decision.reason} Audio: ${audioStart.reason}`,
+          );
+          if (!decision.found || decision.rawTime === undefined) {
+            setAutoAnalysisStatus("Start could not be confirmed. Use the current-frame button or open Manual timing settings.");
+            return;
+          }
+
+          const closestColor = colorResults
+            .filter((result) => result.rawTime !== undefined)
+            .sort((left, right) => Math.abs(left.rawTime! - decision.rawTime!) - Math.abs(right.rawTime! - decision.rawTime!))[0];
+          const baseResult = closestColor ?? (motionStart.detected ? motionStart : buildAudioStartResult(audioStart));
+          const automaticStart: StartSignalDetectionResult = {
+            ...baseResult,
+            detected: true,
+            rawTime: decision.rawTime,
+            confidence: decision.confidence,
+            reason: decision.reason,
+            candidates: evidence.map((item) => ({
+              rawTime: item.rawTime,
+              confidence: item.confidence,
+              reason: item.reason,
+              score: item.kind === "motion" ? 1 : 2,
+              kind: item.label ?? item.kind,
+              method: `Start fusion: ${item.kind}`,
+            })),
+            debug: {
+              ...baseResult.debug,
+              detectionMethod: "Fused lane-light, final-beep, and motion evidence",
+              selectedCandidateTime: decision.rawTime,
+              selectedCandidateReason: decision.reason,
+              detectedRawTime: decision.rawTime,
+            },
+          };
+          setStartResult(automaticStart);
+          if (!decision.autoAccept) {
+            setSuggestedStartRawTime(decision.rawTime);
+            reviewSeekTarget = decision.rawTime;
+            setAutoAnalysisStatus(
+              `Start evidence needs review. The video has been moved to the suggested start at ${decision.rawTime.toFixed(3)}s — if the frame looks right, press "Accept suggested start", or use the current frame instead.`,
+            );
+            return;
+          }
+
+          const acceptedStart = Math.max(0, roundTime(decision.rawTime + startSignalOffset));
+          acceptTimestamp(
+            "startSignal",
+            acceptedStart,
+            startSourceForResult(automaticStart),
+            automaticStart.confidence,
+            {
+              detectedRawTime: decision.rawTime,
+              offsetApplied: startSignalOffset,
+              note: `Automatically accepted by Quick Analyze. ${automaticStart.reason}`,
+            },
+          );
+
+          setAutoAnalysisStatus("Start found. Detecting the first visible movement…");
+          const automaticMovementAccepted = await detectAndMaybeAcceptFirstMovement(
+            video,
+            acceptedStart,
+            "Automatically accepted by Quick Analyze.",
+            abortController.signal,
+          );
+
+          const calibrationValidation = validateWallCalibration(biomechanics.calibration);
+          if (!calibrationValidation.valid || !biomechanics.calibration) {
+            setAutoAnalysisStatus(
+              `Timing finished${automaticMovementAccepted ? " and first movement was accepted" : "; first movement needs review"}. To add center of mass, do the one-time four-corner wall calibration below, then press Quick Analyze again.`,
+            );
+            return;
+          }
+
+          const acceptedFinish = getTimestamp(timestamps, "finishPad").rawTime;
+          const officialDuration = Number(officialTotalTime);
+          const inferredFinish = Number.isFinite(officialDuration) && officialDuration > 0
+            ? acceptedStart + officialDuration
+            : video.duration;
+          const poseEnd = Math.min(
+            video.duration,
+            acceptedFinish !== null && acceptedFinish > acceptedStart ? acceptedFinish : inferredFinish,
+          );
+          if (poseEnd <= acceptedStart + 0.2) {
+            throw new Error("The automatic pose range is too short. Check the accepted start and finish markers.");
+          }
+
+          const maxSafeFps = (poseEnd - acceptedStart) * biomechanics.settings.sampleFps > 450
+            ? 5
+            : biomechanics.settings.sampleFps;
+          const automaticSettings = { ...biomechanics.settings, sampleFps: maxSafeFps };
+          setBiomechanicsRunning(true);
+          setAutoAnalysisStatus("Timing finished. Following the climber and calculating center of mass…");
+          try {
+            const poseResult = await analyzePoseVideo({
+              video,
+              startRawTime: acceptedStart,
+              endRawTime: poseEnd,
+              settings: automaticSettings,
+              calibration: biomechanics.calibration,
+              identityZone: zones.startBody,
+              signal: abortController.signal,
+              onProgress: (progress) => {
+                if (progress.phase === "analyzing") {
+                  setAutoAnalysisStatus(`Following the climber: ${progress.processed}/${progress.total} frames…`);
+                }
+              },
+            });
+            setBiomechanics((current) => ({
+              ...current,
+              settings: automaticSettings,
+              result: poseResult,
+            }));
+            const selectedFrames = poseResult.metrics.selectedFrames ?? poseResult.metrics.detectedFrames;
+            if (poseResult.metrics.validFrames > 0) {
+              setAutoAnalysisStatus(
+                `Quick Analyze finished: ${poseResult.metrics.validFrames}/${poseResult.metrics.requestedFrames} usable COM frames${automaticMovementAccepted ? ", with start and first movement accepted." : "; first movement still needs review."}`,
+              );
+            } else if (poseResult.metrics.detectedFrames === 0) {
+              setAutoAnalysisStatus("Timing finished, but the pose scan still found no athlete. Recheck the wall corners and make the Start Body Zone surround the climber at the start.");
+            } else {
+              setAutoAnalysisStatus(`The athlete was tracked on ${selectedFrames} frames, but no frame had enough visible hips, knees, and shoulders for a reliable COM estimate.`);
+            }
+          } finally {
+            setBiomechanicsRunning(false);
+          }
+        },
+        "Quick Analyze finished. Video restored to its previous position.",
+        "Quick Analyze",
+      );
+      if (reviewSeekTarget !== null) {
+        jumpTo(reviewSeekTarget);
+      }
+    } catch (error) {
+      if (error instanceof PoseAnalysisCancelledError || abortController.signal.aborted) {
+        setAutoAnalysisStatus("Quick Analyze cancelled. Existing accepted results were kept.");
+      } else {
+        setAutoAnalysisStatus(error instanceof Error ? `Quick Analyze stopped: ${error.message}` : "Quick Analyze stopped.");
+      }
+    } finally {
+      autoAnalysisAbortRef.current = null;
+      setAutoAnalysisRunning(false);
+      setBiomechanicsRunning(false);
+    }
+  }
+
+  async function detectAndMaybeAcceptFirstMovement(
+    video: HTMLVideoElement,
+    acceptedStart: number,
+    notePrefix: string,
+    signal?: AbortSignal,
+  ): Promise<boolean> {
+    const automaticMovement = await detectFirstMovement({
+      video,
+      zone: zones.startBody,
+      startSignalRawTime: acceptedStart,
+      sensitivity: movementSensitivity,
+      movementDefinition: firstMovementDefinition,
+      committedLaunchMinDelay,
+    });
+    if (signal?.aborted) {
+      throw new PoseAnalysisCancelledError();
+    }
+    setMovementResult(automaticMovement);
+    const accepted = Boolean(
+      automaticMovement.detected &&
+      automaticMovement.rawTime !== undefined &&
+      automaticMovement.confidence !== "Low" &&
+      !automaticMovement.debug.suspiciousFirstFrameDetection &&
+      !automaticMovement.debug.movementAlreadyUnderway,
+    );
+    if (accepted && automaticMovement.rawTime !== undefined) {
+      const markerId = firstMovementDefinition === "committed" ? "committedLaunch" : "firstMovement";
+      acceptTimestamp(
+        markerId,
+        Math.max(0, roundTime(automaticMovement.rawTime + firstMovementOffset)),
+        "Body motion detection",
+        automaticMovement.confidence,
+        {
+          detectedRawTime: automaticMovement.rawTime,
+          offsetApplied: firstMovementOffset,
+          note: `${notePrefix} ${automaticMovement.reason}`,
+        },
+      );
+    }
+    return accepted;
+  }
+
+  async function acceptSuggestedStart() {
+    const video = videoRef.current;
+    if (suggestedStartRawTime === null) {
+      return;
+    }
+    const source = startResult ? startSourceForResult(startResult) : "Fused start detection";
+    const confidence: Confidence = startResult && startResult.confidence !== "None" ? startResult.confidence : "Medium";
+    const acceptedStart = Math.max(0, roundTime(suggestedStartRawTime + startSignalOffset));
+    acceptTimestamp("startSignal", acceptedStart, source, confidence, {
+      detectedRawTime: suggestedStartRawTime,
+      offsetApplied: startSignalOffset,
+      note: "Suggested by Quick Analyze and accepted after review.",
+    });
+    setSuggestedStartRawTime(null);
+    if (!video) {
+      setAutoAnalysisStatus(`Start accepted at ${acceptedStart.toFixed(3)}s.`);
+      return;
+    }
+    setAutoAnalysisRunning(true);
+    setAutoAnalysisStatus(`Start accepted at ${acceptedStart.toFixed(3)}s. Detecting the first visible movement…`);
+    try {
+      const movementAccepted = await runWithVideoRestore(
+        video,
+        () => detectAndMaybeAcceptFirstMovement(video, acceptedStart, "Automatically detected after the reviewed start was accepted."),
+        "First movement search finished. Video restored to its previous position.",
+        "first movement detection",
+      );
+      setAutoAnalysisStatus(
+        movementAccepted
+          ? `Start accepted at ${acceptedStart.toFixed(3)}s and First Movement was detected automatically.`
+          : `Start accepted at ${acceptedStart.toFixed(3)}s. Review First Movement in its card below.`,
+      );
+    } catch (error) {
+      setAutoAnalysisStatus(error instanceof Error ? `First movement search stopped: ${error.message}` : "First movement search stopped.");
+    } finally {
+      setAutoAnalysisRunning(false);
     }
   }
 
@@ -1079,6 +1526,10 @@ function App() {
   }
 
   function saveCurrentSession() {
+    if (videoAnalysisRunning) {
+      setSessionStatus("Wait for the active analysis to finish before saving the session.");
+      return;
+    }
     const session = buildSessionSnapshot();
     const next = [session, ...savedSessions.filter((item) => item.id !== session.id)].sort((a, b) =>
       b.updatedAt.localeCompare(a.updatedAt),
@@ -1104,6 +1555,7 @@ function App() {
         previousObjectUrl.current = null;
       }
       setVideoUrl(null);
+      videoFileRef.current = null;
       setCurrentTime(0);
       setCapturedFrame(null);
       pendingSessionVideoMetadataRef.current = null;
@@ -1133,6 +1585,7 @@ function App() {
     setTimestamps(recalculateTimestampClimbs(mergeTimestampDefaults(session.timestamps ?? [])));
     setBiomechanics(sanitizeBiomechanicsSession(session.biomechanics));
     setStartResult(null);
+    setSuggestedStartRawTime(null);
     setMovementResult(null);
     setFrameDebug(null);
     if (!currentVideoMatches) {
@@ -1151,6 +1604,10 @@ function App() {
   }
 
   function deleteActiveSession() {
+    if (videoAnalysisRunning) {
+      setSessionStatus("Wait for the active analysis to finish before deleting a session.");
+      return;
+    }
     if (!activeSessionId) {
       setSessionStatus("Choose a saved session before deleting.");
       return;
@@ -1163,6 +1620,10 @@ function App() {
   }
 
   function renameActiveSession() {
+    if (videoAnalysisRunning) {
+      setSessionStatus("Wait for the active analysis to finish before renaming the session.");
+      return;
+    }
     if (!activeSessionId) {
       setSessionStatus("Load a saved session before renaming.");
       return;
@@ -1185,6 +1646,10 @@ function App() {
   }
 
   function duplicateActiveSession() {
+    if (videoAnalysisRunning) {
+      setSessionStatus("Wait for the active analysis to finish before duplicating a session.");
+      return;
+    }
     const source = activeSessionId
       ? savedSessions.find((session) => session.id === activeSessionId)
       : buildSessionSnapshot();
@@ -1221,6 +1686,11 @@ function App() {
   }
 
   async function importSession(event: ChangeEvent<HTMLInputElement>) {
+    if (videoAnalysisRunning) {
+      setSessionStatus("Wait for the active analysis to finish before importing a session.");
+      event.target.value = "";
+      return;
+    }
     const file = event.target.files?.[0];
     if (!file) {
       return;
@@ -1258,9 +1728,9 @@ function App() {
       <header className="hero">
         <div>
           <p className="eyebrow">ClimbIQ Detection Lab</p>
-          <h1>Timing and biomechanics, frame by frame</h1>
+          <h1>Upload a climb. Let ClimbIQ find the important moments.</h1>
           <p className="hero-copy">
-            Detect authoritative climb timestamps, then add calibrated pose, center-of-mass trajectory, and wall-plane velocity without uploading the video.
+            Automatic green-to-blue start timing, first movement, and calibrated center-of-mass analysis—all on your device.
           </p>
         </div>
       </header>
@@ -1277,9 +1747,56 @@ function App() {
             />
             <Metric label="Metadata" value={metadata?.metadataLoaded ? "Loaded" : "Waiting"} />
           </div>
+          <div className="quick-analysis-box">
+            <div>
+              <strong>Quick Analyze</strong>
+              <p className="muted">
+                One click compares left/right lane lights, the countdown or single loud start beep, and body motion. The light search stays low in the frame, where the start box sits below the first two holds, and early rocking is ignored when the synchronized cues agree later.
+              </p>
+            </div>
+            <div className="readiness-row" aria-label="Analysis readiness">
+              <span className="time-pill">
+                Start light: {zones.startLight?.label.startsWith("Auto-detected") ? "located automatically" : "automatic green → blue search"}
+              </span>
+              <span className="time-pill">Audio: countdown or single loud beep, detected locally</span>
+              <span className="time-pill">
+                Center of mass: {validateWallCalibration(biomechanics.calibration).valid ? "ready" : "needs one-time wall calibration"}
+              </span>
+            </div>
+            <div className="button-row">
+              <button
+                className="primary"
+                onClick={runAutomaticAnalysis}
+                disabled={!metadata?.metadataLoaded || videoAnalysisRunning}
+              >
+                {autoAnalysisRunning ? "Analyzing climb…" : "Analyze climb automatically"}
+              </button>
+              {autoAnalysisRunning && (
+                <button onClick={() => autoAnalysisAbortRef.current?.abort()}>Cancel</button>
+              )}
+              {!autoAnalysisRunning && suggestedStartRawTime !== null && (
+                <button className="primary" onClick={acceptSuggestedStart} disabled={videoAnalysisRunning}>
+                  Accept suggested start ({suggestedStartRawTime.toFixed(3)}s)
+                </button>
+              )}
+              {!autoAnalysisRunning && metadata?.metadataLoaded && (
+                <button onClick={() => {
+                  acceptTimestamp("startSignal", currentTime, "Manual", "Medium", { note: "Set from the current video frame." });
+                  setSuggestedStartRawTime(null);
+                  setAutoAnalysisStatus(`Start manually set to ${currentTime.toFixed(3)}s.`);
+                }}>
+                  Use current frame as start
+                </button>
+              )}
+            </div>
+            {autoAnalysisStatus && <p className="status-message" aria-live="polite">{autoAnalysisStatus}</p>}
+            {startEvidenceStatus && <p className="evidence-message">{startEvidenceStatus}</p>}
+          </div>
         </Card>
 
         <Card title="Analysis Session">
+          <details className="help-details">
+            <summary>Session name and athlete details</summary>
           <div className="form-grid">
             <label>
               Session name
@@ -1310,13 +1827,14 @@ function App() {
               placeholder="What are you trying to verify in this run?"
             />
           </label>
+          </details>
           <div className="button-row">
-            <button className="primary" onClick={saveCurrentSession}>Save Session</button>
-            <button onClick={renameActiveSession}>Rename Session</button>
-            <button onClick={duplicateActiveSession}>Duplicate Session</button>
+            <button className="primary" onClick={saveCurrentSession} disabled={videoAnalysisRunning}>Save Session</button>
+            <button onClick={renameActiveSession} disabled={videoAnalysisRunning}>Rename Session</button>
+            <button onClick={duplicateActiveSession} disabled={videoAnalysisRunning}>Duplicate Session</button>
           </div>
           <div className="session-load-row">
-            <select value={activeSessionId ?? ""} onChange={(event) => loadSelectedSession(event.target.value)}>
+            <select value={activeSessionId ?? ""} onChange={(event) => loadSelectedSession(event.target.value)} disabled={videoAnalysisRunning}>
               <option value="">Load saved session</option>
               {savedSessions.map((session) => (
                 <option key={session.id} value={session.id}>
@@ -1324,9 +1842,9 @@ function App() {
                 </option>
               ))}
             </select>
-            <button onClick={deleteActiveSession}>Delete Session</button>
+            <button onClick={deleteActiveSession} disabled={videoAnalysisRunning}>Delete Session</button>
           </div>
-          <SavedSessionsList sessions={savedSessions} activeSessionId={activeSessionId} onLoad={loadSelectedSession} />
+          <SavedSessionsList sessions={savedSessions} activeSessionId={activeSessionId} onLoad={loadSelectedSession} disabled={videoAnalysisRunning} />
           <p className="muted">
             Sessions save zones, timing, compact biomechanics results, settings, and notes in this browser. Videos stay local and are not uploaded.
           </p>
@@ -1372,76 +1890,29 @@ function App() {
           {videoRestoreStatus && <p className="status-message">{videoRestoreStatus}</p>}
         </Card>
 
-        <Card title="3. Frame Sampling Test">
-          <button className="primary" disabled={videoAnalysisRunning} onClick={runFrameSamplingTest}>
-            {frameTestRunning ? "Sampling..." : "Run Frame Sampling Test"}
-          </button>
-          {frameDebug && (
-            <div className="debug-list">
-              <Metric label="Video element found" value={yesNo(frameDebug.videoElementFound)} />
-              <Metric label="Metadata loaded" value={yesNo(frameDebug.metadataLoaded)} />
-              <Metric label="Duration" value={frameDebug.duration !== null ? `${frameDebug.duration.toFixed(3)}s` : "n/a"} />
-              <Metric label="Resolution" value={`${frameDebug.videoWidth ?? "n/a"} x ${frameDebug.videoHeight ?? "n/a"}`} />
-              <Metric label="Frames requested" value={String(frameDebug.framesRequested)} />
-              <Metric label="Frames sampled" value={String(frameDebug.framesSampled)} />
-              <Metric label="Canvas draw" value={yesNo(frameDebug.canvasDrawSucceeded)} />
-              <Metric label="Pixel read" value={yesNo(frameDebug.pixelDataReadSucceeded)} />
-              <SampleTable samples={frameDebug.samples} />
-              <ErrorList errors={frameDebug.errors} />
-            </div>
-          )}
-        </Card>
-
-        <Card title="4. Zone Setup" className="wide">
+        <Card title="3. Optional Zones" className="wide">
           <div className="toolbar">
             <button className="primary" onClick={captureCurrentFrameForZones} disabled={videoAnalysisRunning}>
               Capture Current Frame for Zone Setup
             </button>
-            <select value={selectedZoneId} onChange={(event) => setSelectedZoneId(event.target.value as ZoneId)}>
+            <select value={selectedZoneId} onChange={(event) => setSelectedZoneId(event.target.value as ZoneId)} disabled={videoAnalysisRunning}>
               {ZONES.map((zone) => (
                 <option key={zone.id} value={zone.id}>
                   {zone.label}
                 </option>
               ))}
             </select>
-            <button onClick={() => setZones((current) => omitZone(current, selectedZoneId))}>Delete selected zone</button>
-            <button onClick={() => setZones({})}>Clear all zones</button>
-          </div>
-          <div className="toolbar secondary-toolbar">
-            <div className="segmented" aria-label="Zone display mode">
-              <button
-                className={zoneDisplayMode === "fit" ? "active" : ""}
-                onClick={() => setZoneDisplayMode("fit")}
-              >
-                Fit Full Frame
-              </button>
-              <button
-                className={zoneDisplayMode === "scroll" ? "active" : ""}
-                onClick={() => setZoneDisplayMode("scroll")}
-              >
-                Scroll Full Resolution
-              </button>
-            </div>
-            <label className="checkbox-control">
-              <input
-                type="checkbox"
-                checked={showImageBounds}
-                onChange={(event) => setShowImageBounds(event.target.checked)}
-              />
-              Show image bounds
-            </label>
+            <button disabled={videoAnalysisRunning} onClick={() => setZones((current) => omitZone(current, selectedZoneId))}>Delete selected zone</button>
+            <button disabled={videoAnalysisRunning} onClick={() => setZones({})}>Clear all zones</button>
           </div>
           <p className="muted zone-helper">
-            Draw the Start Light Zone tightly around the light only. Large zones dilute the color change.
-            Draw Start Body Zone tightly around the climber at the starting position. Include arms, torso, and hips.
-            Avoid lights, other people, and too much empty wall.
+            You normally do not need a Start Light Zone anymore. Add a Start Body Zone only when another person appears in the video, or draw a light zone manually if automatic green-to-blue search fails.
           </p>
 
           {capturedFrame ? (
             <div
               ref={zoneFrameWrapRef}
-              className={`zone-frame-wrap ${zoneDisplayMode} ${showImageBounds ? "show-bounds" : ""}`}
-              onPointerMove={updatePointerDebug}
+              className={`zone-frame-wrap ${zoneDisplayMode}`}
             >
               <div
                 ref={zoneStageRef}
@@ -1450,7 +1921,8 @@ function App() {
               >
                 <img className="zone-frame" src={capturedFrame} alt="Captured frame for zone setup" />
                 <div
-                  className="zone-overlay"
+                  className={`zone-overlay${videoAnalysisRunning ? " locked" : ""}`}
+                  aria-disabled={videoAnalysisRunning}
                   onPointerDown={beginZoneDrag}
                   onPointerMove={updateZoneDrag}
                   onPointerUp={finishZoneDrag}
@@ -1466,33 +1938,15 @@ function App() {
           ) : (
             <p className="muted">Capture a frame to draw normalized detection zones.</p>
           )}
-          {showImageBounds && <PointerDebugPanel pointerDebug={pointerDebug} zoneDisplayMode={zoneDisplayMode} />}
           <ZoneWarnings zones={zones} />
-          <ZoneCoordinateList zones={zones} />
         </Card>
 
-        <Card title="Start Light Calibration">
+        <Card title="4. Start Timing">
           <p className="muted">
-            Teach the detector the before-start and after-start light colors for this video.
+            Quick Analyze searches multiple scales and both lanes for faint green→blue lights in the lower frame (the start box always sits below the first two holds), detects the countdown or a single loud start beep locally, and compares them with motion. Conflicting cues are left for review instead of silently accepted.
           </p>
-          <div className="button-row">
-            <button onClick={() => setCalibrationSample("before")}>Set Before-Start Sample</button>
-            <button onClick={() => setCalibrationSample("after")}>Set After-Start Sample</button>
-            <button
-              onClick={() => {
-                setStartLightCalibration({});
-                setCalibrationStatus("Calibration cleared.");
-              }}
-            >
-              Clear calibration
-            </button>
-          </div>
-          {calibrationStatus && <p className="status-message">{calibrationStatus}</p>}
-          <CalibrationPanel calibration={startLightCalibration} lightZone={zones.startLight} />
-          <p className="muted">Audio beep detection may be added later as another fallback for videos where the light is not visible.</p>
-        </Card>
-
-        <Card title="5. Start Signal Detection">
+          <details className="help-details">
+            <summary>Manual timing settings</summary>
           <div className="form-grid">
             <label>
               Search start
@@ -1582,8 +2036,24 @@ function App() {
             </p>
           )}
           <p className="muted">Detection method: {startDetectionMethodLabel}</p>
+          <div className="button-row">
+            <button disabled={videoAnalysisRunning || !zones.startLight} onClick={() => setCalibrationSample("before")}>Use current frame as green</button>
+            <button disabled={videoAnalysisRunning || !zones.startLight} onClick={() => setCalibrationSample("after")}>Use current frame as blue</button>
+            <button
+              disabled={videoAnalysisRunning}
+              onClick={() => {
+                setStartLightCalibration({});
+                setCalibrationStatus("Manual light calibration cleared.");
+              }}
+            >
+              Clear light calibration
+            </button>
+          </div>
+          {calibrationStatus && <p className="status-message">{calibrationStatus}</p>}
+          <CalibrationPanel calibration={startLightCalibration} lightZone={zones.startLight} />
+          </details>
           <button className="primary" disabled={videoAnalysisRunning} onClick={runStartSignalDetection}>
-            {startRunning ? "Detecting..." : "Run Start Signal Detection"}
+            {startRunning ? "Finding start…" : "Find start automatically"}
           </button>
           {(isCalibrationWeak || (startResult && !startResult.detected)) && (
             <button className="primary secondary-action" disabled={videoAnalysisRunning} onClick={runMotionBasedStartEstimate}>
@@ -1619,14 +2089,19 @@ function App() {
               })
             }
             onJump={(delta = 0) => jumpTo(startFinalRaw !== undefined ? Math.max(0, roundTime(startFinalRaw + delta)) : undefined)}
-            onReject={() => setStartResult(null)}
+            onReject={() => {
+              setStartResult(null);
+              setSuggestedStartRawTime(null);
+            }}
             emptyText="Start Signal not detected."
             defaultCandidateSource="Start light detection"
           />
         </Card>
 
-        <Card title="6. First Movement Detection">
-          <p className="muted">Searches from Start Signal to Start Signal + 2.0s using pixel motion in the Start Body Zone.</p>
+        <Card title="5. First Movement">
+          <p className="muted">Quick Analyze runs this automatically after the color-defined start. Open settings only when manual tuning is needed.</p>
+          <details className="help-details">
+            <summary>Manual movement settings</summary>
           <label className="single-field">
             Sensitivity
             <select value={movementSensitivity} onChange={(event) => setMovementSensitivity(event.target.value as Sensitivity)}>
@@ -1672,9 +2147,10 @@ function App() {
               onChange={(event) => setFirstMovementOffset(Number(event.target.value))}
             />
           </label>
+          </details>
           {startSignalRaw === null && <p className="muted">Accept a Start Signal suggestion or set Start Signal manually first.</p>}
           <button className="primary" disabled={videoAnalysisRunning || startSignalRaw === null} onClick={runFirstMovementDetection}>
-            {movementRunning ? "Detecting..." : "Run First Movement Detection"}
+            {movementRunning ? "Detecting…" : "Detect first movement"}
           </button>
           <DetectionCard
             title="Suggested First Movement"
@@ -1720,7 +2196,7 @@ function App() {
           />
         </Card>
 
-        <Card title="7. Finish From Official Time">
+        <Card title="6. Official Finish Time">
           <label className="single-field">
             Official total time
             <input
@@ -1758,7 +2234,7 @@ function App() {
           )}
         </Card>
 
-        <Card title="8. Timestamp Results" className="full">
+        <Card title="7. Results" className="full">
           <div className="table-wrap">
             <table>
               <thead>
@@ -1799,7 +2275,7 @@ function App() {
           </div>
         </Card>
 
-        <Card title="9. Split Calculations">
+        <Card title="8. Splits">
           <div className="split-grid">
             {splitRows.map((row) => (
               <Metric key={row.label} label={row.label} value={row.value === null ? "Not set" : `${row.value.toFixed(3)}s`} />
@@ -1807,7 +2283,7 @@ function App() {
           </div>
         </Card>
 
-        <Card title="10. Biomechanics & Center of Mass" className="full">
+        <Card title="9. Center of Mass" className="full">
           <BiomechanicsPanel
             key={`${videoUrl ?? "no-video"}:${activeSessionId ?? "unsaved-session"}`}
             videoRef={videoRef}
@@ -1817,7 +2293,7 @@ function App() {
             finishRawTime={getTimestamp(timestamps, "finishPad").rawTime}
             identityZone={zones.startBody}
             session={biomechanics}
-            analysisBlocked={startRunning || movementRunning || movementPreviewRunning || frameTestRunning}
+            analysisBlocked={startRunning || movementRunning || movementPreviewRunning || frameTestRunning || autoAnalysisRunning}
             onSessionChange={setBiomechanics}
             onRunningChange={setBiomechanicsRunning}
             onJump={jumpTo}
@@ -1836,7 +2312,7 @@ function App() {
             <button onClick={downloadDatasetJson}>Download JSON</button>
             <label className="file-button">
               Import Session JSON
-              <input type="file" accept="application/json,.json" onChange={importSession} />
+              <input type="file" accept="application/json,.json" onChange={importSession} disabled={videoAnalysisRunning} />
             </label>
           </div>
           <div className="button-row compact-row">
@@ -1871,11 +2347,6 @@ function App() {
           </details>
         </Card>
 
-        <Card title="11. Detection Debug Report" className="wide">
-          <button className="primary" onClick={copyDebugReport}>Copy Debug Report</button>
-          {copyStatus && <span className="copy-status">{copyStatus}</span>}
-          <pre className="debug-json">{JSON.stringify(buildDebugReport(), null, 2)}</pre>
-        </Card>
       </section>
     </main>
   );
@@ -1903,10 +2374,12 @@ function SavedSessionsList({
   sessions,
   activeSessionId,
   onLoad,
+  disabled = false,
 }: {
   sessions: SavedAnalysisSession[];
   activeSessionId: string | null;
   onLoad: (sessionId: string) => void;
+  disabled?: boolean;
 }) {
   if (!sessions.length) {
     return <p className="muted">No saved sessions yet.</p>;
@@ -1919,6 +2392,7 @@ function SavedSessionsList({
           key={session.id}
           className={session.id === activeSessionId ? "active" : ""}
           onClick={() => onLoad(session.id)}
+          disabled={disabled}
         >
           <strong>{session.name}</strong>
           <span>{session.date || "No date"}{session.videoFileName ? ` / ${session.videoFileName}` : ""}</span>
@@ -2510,12 +2984,52 @@ function getTimestamp(timestamps: TimestampMarker[], id: TimestampMarker["id"]) 
   return timestamps.find((item) => item.id === id) ?? marker(id, id);
 }
 
+function buildAudioStartResult(audio: AudioStartResult): StartSignalDetectionResult {
+  const rawTime = audio.rawTime ?? 0;
+  return {
+    detected: audio.found,
+    rawTime: audio.rawTime,
+    confidence: audio.confidence,
+    reason: audio.reason,
+    threshold: 0,
+    candidates: audio.found ? [{
+      rawTime,
+      confidence: audio.confidence,
+      reason: audio.reason,
+      score: audio.sequence?.length ?? 0,
+      kind: "Final countdown beep",
+      method: "Audio countdown detection",
+      persistenceFrames: audio.sequence?.length,
+    }] : [],
+    debug: {
+      zoneExists: false,
+      detectionMethod: "Audio countdown detection",
+      framesSampled: audio.segments.length,
+      maxColorDistance: 0,
+      threshold: 0,
+      detectedCrossings: [],
+      detectedRawTime: audio.rawTime,
+      selectedCandidateTime: audio.rawTime,
+      selectedCandidateReason: audio.reason,
+      samples: [],
+    },
+  };
+}
+
 function startSourceForResult(result: StartSignalDetectionResult): TimestampSource {
-  return result.debug.detectionMethod === "Motion-based start estimate" ? "Motion-based estimate" : "Start light detection";
+  return result.debug.detectionMethod?.startsWith("Fused")
+    ? "Fused start detection"
+    : result.debug.detectionMethod === "Motion-based start estimate"
+      ? "Motion-based estimate"
+      : "Start light detection";
 }
 
 function startSourceForCandidate(candidate: DetectionCandidate): TimestampSource {
-  return candidate.method === "Motion-based start estimate" ? "Motion-based estimate" : "Start light detection";
+  return candidate.method?.startsWith("Start fusion")
+    ? "Fused start detection"
+    : candidate.method === "Motion-based start estimate"
+      ? "Motion-based estimate"
+      : "Start light detection";
 }
 
 function recalculateTimestampClimbs(timestamps: TimestampMarker[]): TimestampMarker[] {
@@ -2837,7 +3351,10 @@ function sanitizeBiomechanicsSession(value: unknown): BiomechanicsSession {
   }
 
   const frames = Array.isArray(resultCandidate.frames)
-    ? (resultCandidate.frames as unknown[]).slice(0, 450).map(sanitizeBiomechanicsFrame).filter((frame): frame is BiomechanicsFrame => Boolean(frame))
+    ? (resultCandidate.frames as unknown[])
+        .slice(0, 450)
+        .map((frame) => sanitizeBiomechanicsFrame(frame, settings.minMassCoverage))
+        .filter((frame): frame is BiomechanicsFrame => Boolean(frame))
     : [];
   if (!frames.length) {
     return { version: 1, settings, calibration };
@@ -2847,7 +3364,7 @@ function sanitizeBiomechanicsSession(value: unknown): BiomechanicsSession {
     version: 1,
     createdAt: typeof resultCandidate.createdAt === "string" ? resultCandidate.createdAt : new Date().toISOString(),
     method: "MediaPipe Pose Landmarker",
-    model: "Pose Landmarker Lite",
+    model: "Pose Landmarker Full",
     modelVersion: "float16/1",
     coordinateSystem: "calibrated-wall-plane",
     startRawTime,
@@ -2861,7 +3378,7 @@ function sanitizeBiomechanicsSession(value: unknown): BiomechanicsSession {
   return { version: 1, settings, calibration, result };
 }
 
-function sanitizeBiomechanicsFrame(value: unknown): BiomechanicsFrame | null {
+function sanitizeBiomechanicsFrame(value: unknown, minMassCoverage: number): BiomechanicsFrame | null {
   if (!value || typeof value !== "object") {
     return null;
   }
@@ -2889,11 +3406,22 @@ function sanitizeBiomechanicsFrame(value: unknown): BiomechanicsFrame | null {
   const wallCom = sanitizeWallPoint(candidate.wallCom);
   const massCoverage = boundedNumber(candidate.massCoverage, 0, 1, 0);
   const meanVisibility = boundedNumber(candidate.meanVisibility, 0, 1, 0);
-  const valid = Boolean(candidate.valid && imageCom && wallCom && massCoverage >= 0.8);
+  const valid = Boolean(candidate.valid && imageCom && wallCom && massCoverage >= minMassCoverage);
+  const poseSelected = typeof candidate.poseSelected === "boolean"
+    ? candidate.poseSelected
+    : landmarks.length > 0 || valid;
+  const poseDetected = typeof candidate.poseDetected === "boolean"
+    ? candidate.poseDetected
+    : poseSelected;
+  const poseCandidateCount = Number.isInteger(candidate.poseCandidateCount)
+    ? Math.max(0, Math.min(2, Number(candidate.poseCandidateCount)))
+    : poseDetected ? 1 : 0;
   return {
     rawTime,
     climbTime,
-    poseDetected: Boolean(candidate.poseDetected || landmarks.length > 0 || (candidate.valid && imageCom && wallCom)),
+    poseDetected,
+    poseSelected,
+    poseCandidateCount,
     landmarks,
     imageCom,
     wallCom,
