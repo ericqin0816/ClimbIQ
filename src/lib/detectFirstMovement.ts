@@ -8,6 +8,7 @@ import type {
   Sensitivity,
 } from "../types";
 import { captureZoneImageData, normalizedZoneToPixelRect, sampleFramesInRange, seekTo } from "./videoFrameSampler";
+import { adaptiveMotionThreshold, causalSmoothMotion } from "./motionSignal";
 
 interface DetectFirstMovementOptions {
   video: HTMLVideoElement;
@@ -112,14 +113,19 @@ export async function detectFirstMovement({
   debug.firstSampledTimeAfterStart = firstPostStartSample ? roundMetric(firstPostStartSample.time - startSignalRawTime) : undefined;
   debug.firstSampleMotion = firstPostStartSample?.smoothedMotionScore;
 
-  const baselineSamples = debug.samples.slice(0, Math.min(5, debug.samples.length)).map((sample) => sample.smoothedMotionScore);
+  const preStartBaseline = debug.samples
+    .filter((sample) => sample.time < startSignalRawTime)
+    .map((sample) => sample.smoothedMotionScore);
+  const baselineSamples = preStartBaseline.length >= 3
+    ? preStartBaseline
+    : debug.samples.slice(0, Math.min(5, debug.samples.length)).map((sample) => sample.smoothedMotionScore);
   const baselineMotion = median(baselineSamples);
   const fixedThreshold = FIXED_THRESHOLDS[sensitivity];
-  const dynamicThreshold = baselineMotion + DYNAMIC_ADDS[sensitivity];
+  const dynamicThreshold = adaptiveMotionThreshold(baselineSamples, fixedThreshold, DYNAMIC_ADDS[sensitivity]);
   debug.baselineMotion = roundMetric(baselineMotion);
   debug.fixedThreshold = fixedThreshold;
   debug.dynamicThreshold = roundMetric(dynamicThreshold);
-  const earliestThreshold = roundMetric(Math.min(fixedThreshold, dynamicThreshold));
+  const earliestThreshold = roundMetric(dynamicThreshold);
   const committedThreshold = roundMetric(Math.max(earliestThreshold * 1.8, baselineMotion * 2, earliestThreshold + 0.25));
   debug.threshold = earliestThreshold;
   debug.earliestMotionThreshold = earliestThreshold;
@@ -567,21 +573,16 @@ function countMotionFrames(samples: FirstMovementDebug["samples"], startIndex: n
 function createFallbackStartBodyZone(): NormalizedZone {
   return {
     id: "startBody",
-    label: "Fallback lower-center body region",
-    x1: 0.12,
-    y1: 0.35,
-    x2: 0.88,
-    y2: 1,
+    label: "Fallback lower-wall body region",
+    x1: 0.08,
+    y1: 0.42,
+    x2: 0.92,
+    y2: 0.94,
   };
 }
 
 function smoothMotionSamples(samples: FirstMovementDebug["samples"]): void {
-  for (let index = 0; index < samples.length; index += 1) {
-    const previous = samples[index - 1]?.motionScore ?? samples[index].motionScore;
-    const current = samples[index].motionScore;
-    const next = samples[index + 1]?.motionScore ?? samples[index].motionScore;
-    samples[index].smoothedMotionScore = roundMetric((previous + current + next) / 3);
-  }
+  causalSmoothMotion(samples);
 }
 
 function getMotionConfidence({
@@ -621,7 +622,10 @@ function getMotionConfidence({
 
 function isNearFirstPostStartSample(time: number, startSignalRawTime: number, frameInterval: number): boolean {
   const climbTime = time - startSignalRawTime;
-  return climbTime >= 0 && climbTime <= frameInterval * 2.05;
+  // A real launch often begins in the first sampled frame after an exact audio
+  // start. Only flag a virtually identical timestamp; movement-already-underway
+  // and pre-start baselines handle genuinely late/wrong start markers.
+  return climbTime >= 0 && climbTime <= Math.min(0.005, frameInterval * 0.1);
 }
 
 function getTopMotionPeaks(samples: FirstMovementDebug["samples"], startSignalRawTime: number) {

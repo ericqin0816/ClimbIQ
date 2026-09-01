@@ -1,19 +1,36 @@
 import { ChangeEvent, CSSProperties, PointerEvent, useEffect, useMemo, useRef, useState } from "react";
 import { BiomechanicsPanel, PoseVideoOverlay } from "./components/BiomechanicsPanel";
-import { applyTrajectoryKinematics, DEFAULT_BIOMECHANICS_SETTINGS } from "./lib/biomechanics";
+import {
+  resolveAutomaticPoseFinishBoundary,
+  trimBiomechanicsResultAtFinish,
+} from "./lib/biomechanicsFinish";
+import { selectBiomechanicsResultCoveringRange } from "./lib/biomechanicsFreshness";
+import {
+  compactBiomechanicsSession,
+  createDefaultBiomechanicsSession,
+  sanitizeBiomechanicsSession,
+} from "./lib/biomechanicsSession";
 import { detectFirstMovement } from "./lib/detectFirstMovement";
-import { detectAutomaticStartLight } from "./lib/detectAutomaticStartLight";
+import { detectFinishSignal } from "./lib/detectFinishSignal";
+import { detectAutomaticStartLight, type GreenBlueLaneCandidate } from "./lib/detectAutomaticStartLight";
 import { detectAudioStartSignal, type AudioStartResult } from "./lib/detectAudioStartSignal";
 import { detectMotionBasedStartEstimate } from "./lib/detectMotionBasedStartEstimate";
 import { detectStartSignal } from "./lib/detectStartSignal";
+import { detectHoldContact, getHold10ContactMarker } from "./lib/holdContact";
+import { resolveHold10Target } from "./lib/holdTarget";
 import { analyzePoseVideo, PoseAnalysisCancelledError } from "./lib/poseAnalysis";
+import { analyzeRouteSplits } from "./lib/routeSplits";
+import {
+  alignStandardSpeedRouteWithFallback,
+  type RouteAlignmentResult,
+} from "./lib/routeAlignment";
 import { fuseStartEvidence, type FusedStartDecision, type StartEvidence } from "./lib/startSignalFusion";
-import { captureFrame, clamp, roundTime, sampleFrameAt, sampleZoneAverageColor, seekTo } from "./lib/videoFrameSampler";
-import { validateWallCalibration } from "./lib/wallCalibration";
+import { deriveAutomaticStartBodyZone, resolveAnalysisBodyZone } from "./lib/startRegion";
+import { captureFrame, clamp, roundTime, sampleFrameAt, sampleZoneOpponentColor, seekTo } from "./lib/videoFrameSampler";
+import { getVideoUiState } from "./lib/videoUiState";
+import { inferAutomaticWallCalibration, validateWallCalibration } from "./lib/wallCalibration";
 import type {
   Confidence,
-  BiomechanicsFrame,
-  BiomechanicsResult,
   BiomechanicsSession,
   DetectionCandidate,
   DetectionDebugReport,
@@ -30,7 +47,6 @@ import type {
   TimestampMarker,
   TimestampSource,
   VideoMetadata,
-  WallCalibration,
   ZoneId,
 } from "./types";
 
@@ -38,7 +54,6 @@ const ZONES: Array<{ id: ZoneId; label: string; tone: string }> = [
   { id: "startLight", label: "Start Light Zone", tone: "#7dd3fc" },
   { id: "startBody", label: "Start Body Zone", tone: "#f0abfc" },
   { id: "hold10", label: "Hold 10 Zone", tone: "#facc15" },
-  { id: "finishLight", label: "Finish Light Zone", tone: "#86efac" },
 ];
 
 const INITIAL_TIMESTAMPS: TimestampMarker[] = [
@@ -50,7 +65,7 @@ const INITIAL_TIMESTAMPS: TimestampMarker[] = [
   marker("finishPad", "Finish Pad"),
 ];
 
-const APP_VERSION = "0.4.0";
+const APP_VERSION = "0.19.0";
 const SESSION_STORAGE_KEY = "climbiq.analysisSessions.v1";
 
 type ZoneDisplayMode = "fit" | "scroll";
@@ -76,6 +91,41 @@ interface FusedStartEvidenceOutcome {
   decision: FusedStartDecision;
   automaticStart: StartSignalDetectionResult | null;
   audioReason: string;
+  analysisBodyZone?: NormalizedZone;
+  analysisLightZone?: NormalizedZone;
+  analysisLightCalibration?: StartLightCalibration;
+  analysisLaneCandidates?: AnalysisLaneCandidate[];
+}
+
+interface PendingAutomaticAnalysisContext {
+  analysisBodyZone?: NormalizedZone;
+  analysisLightZone?: NormalizedZone;
+  analysisLightCalibration?: StartLightCalibration;
+  analysisLaneCandidates?: AnalysisLaneCandidate[];
+}
+
+interface AnalysisLaneCandidate {
+  zone: NormalizedZone;
+  calibration: StartLightCalibration;
+  label: string;
+  startRawTime: number;
+  score: number;
+}
+
+interface AutomaticFinishOutcome {
+  rawTime: number;
+  zone: NormalizedZone;
+  calibration: StartLightCalibration;
+  confidence: Confidence;
+  accepted: boolean;
+}
+
+interface TimestampReviewTarget {
+  label: string;
+  suggestedRawTime: number;
+  confidence?: Confidence;
+  acceptLabel: string;
+  onAccept: (rawTime: number) => void;
 }
 
 function App() {
@@ -89,9 +139,12 @@ function App() {
   const pendingSessionVideoMetadataRef = useRef<VideoMetadata | null>(null);
   const pendingVideoFileNameRef = useRef<string | null>(null);
   const autoAnalysisAbortRef = useRef<AbortController | null>(null);
+  const pendingAutomaticContextRef = useRef<PendingAutomaticAnalysisContext | null>(null);
+  const automaticLaneCandidatesRef = useRef<AnalysisLaneCandidate[]>([]);
 
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
   const [metadata, setMetadata] = useState<VideoMetadata | null>(null);
+  const [videoLoadError, setVideoLoadError] = useState("");
   const [currentTime, setCurrentTime] = useState(0);
   const [jumpInput, setJumpInput] = useState("");
   const [capturedFrame, setCapturedFrame] = useState<string | null>(null);
@@ -130,6 +183,9 @@ function App() {
   const [movementPreviewRunning, setMovementPreviewRunning] = useState(false);
 
   const [officialTotalTime, setOfficialTotalTime] = useState("");
+  const [finishResult, setFinishResult] = useState<StartSignalDetectionResult | null>(null);
+  const [finishRunning, setFinishRunning] = useState(false);
+  const [finishStatus, setFinishStatus] = useState("");
   const [timestamps, setTimestamps] = useState<TimestampMarker[]>(INITIAL_TIMESTAMPS);
   const [copyStatus, setCopyStatus] = useState("");
   const [sessionName, setSessionName] = useState("Untitled climb analysis");
@@ -148,6 +204,8 @@ function App() {
   const [autoAnalysisRunning, setAutoAnalysisRunning] = useState(false);
   const [autoAnalysisStatus, setAutoAnalysisStatus] = useState("");
   const [startEvidenceStatus, setStartEvidenceStatus] = useState("");
+  const [timestampReview, setTimestampReview] = useState<TimestampReviewTarget | null>(null);
+  const [routeAlignment, setRouteAlignment] = useState<RouteAlignmentResult | null>(null);
 
   useEffect(() => {
     setSavedSessions(readSavedSessions());
@@ -223,6 +281,36 @@ function App() {
     };
   }, [officialTotalTime, startSignalRaw]);
 
+  const acceptedFinishRawTime = useMemo(
+    () => getTimestamp(timestamps, "finishPad").rawTime,
+    [timestamps],
+  );
+  const detectedFinishRawTime = finishResult?.detected && finishResult.rawTime !== undefined &&
+      startSignalRaw !== null && finishResult.rawTime > startSignalRaw
+    ? finishResult.rawTime
+    : null;
+  // Official timing is authoritative when supplied. Otherwise a verified but
+  // still-unaccepted light result can safely bound pose analysis and prevent
+  // a full-video descent trace while the user reviews the exact frame.
+  const analysisFinishFallbackRawTime = finishSuggestion?.rawTime ?? detectedFinishRawTime;
+  const freshBiomechanicsResult = useMemo(
+    () => selectBiomechanicsResultCoveringRange(biomechanics.result, {
+      startRawTime: startSignalRaw,
+      endRawTime: acceptedFinishRawTime ?? analysisFinishFallbackRawTime,
+      identityZone: zones.startBody,
+    }),
+    [acceptedFinishRawTime, analysisFinishFallbackRawTime, biomechanics.result, startSignalRaw, zones.startBody],
+  );
+  const finishTrimmedBiomechanics = useMemo(
+    () => freshBiomechanicsResult && biomechanics.calibration
+      ? trimBiomechanicsResultAtFinish(freshBiomechanicsResult, biomechanics.calibration, {
+          acceptedFinishRawTime: acceptedFinishRawTime ?? analysisFinishFallbackRawTime,
+        })
+      : null,
+    [acceptedFinishRawTime, analysisFinishFallbackRawTime, biomechanics.calibration, freshBiomechanicsResult],
+  );
+  const effectiveBiomechanicsResult = finishTrimmedBiomechanics?.result ?? freshBiomechanicsResult;
+
   const splitRows = useMemo(() => {
     const start = getTimestamp(timestamps, "startSignal").rawTime;
     const firstMovement = getTimestamp(timestamps, "firstMovement").rawTime;
@@ -245,6 +333,71 @@ function App() {
     ];
   }, [timestamps]);
 
+  const routeSplitAnalysis = useMemo(
+    () => effectiveBiomechanicsResult ? analyzeRouteSplits(effectiveBiomechanicsResult) : null,
+    [effectiveBiomechanicsResult],
+  );
+
+  const hold10Target = useMemo(
+    () => resolveHold10Target({
+      manualZone: zones.hold10,
+      calibration: biomechanics.calibration,
+      visualAlignment: routeAlignment,
+    }),
+    [biomechanics.calibration, routeAlignment, zones.hold10],
+  );
+  const hold10ImageOverride = hold10Target.source === "manual-zone"
+    ? hold10Target.imagePoint
+    : undefined;
+  // The digitized template is only a registration prior. It is too compressed
+  // to time a real hand contact without visual alignment or a manual zone.
+  const hold10WallTarget = hold10Target.source === "standard-template"
+    ? null
+    : hold10Target.wallTarget;
+
+  const hold10Contact = useMemo(
+    () => effectiveBiomechanicsResult && hold10WallTarget
+      ? detectHoldContact(effectiveBiomechanicsResult, biomechanics.calibration, hold10WallTarget, { holdLabel: "Hold 10" })
+      : null,
+    [biomechanics.calibration, effectiveBiomechanicsResult, hold10WallTarget],
+  );
+
+  useEffect(() => {
+    const suggestion = effectiveBiomechanicsResult && hold10WallTarget
+      ? getHold10ContactMarker(effectiveBiomechanicsResult, biomechanics.calibration, hold10WallTarget)
+      : null;
+    setTimestamps((current) => {
+      const existing = getTimestamp(current, "hold10");
+      const automaticExisting =
+        existing.source === "COM halfway estimate" ||
+        existing.source === "Hold contact detection" ||
+        existing.source === "Future / experimental";
+      if (!suggestion) {
+        if (!automaticExisting) {
+          return current;
+        }
+        return current.map((item) => item.id === "hold10"
+          ? { ...marker("hold10", item.label) }
+          : item);
+      }
+      if (existing.rawTime !== null && !automaticExisting) {
+        return current;
+      }
+      if (existing.rawTime !== null && Math.abs(existing.rawTime - suggestion.rawTime!) <= 0.001 &&
+          existing.source === "Hold contact detection") {
+        return current;
+      }
+      return recalculateTimestampClimbs(current.map((item) => item.id === "hold10"
+        ? {
+            ...item,
+            ...suggestion,
+            label: item.label,
+            source: "Hold contact detection" as const,
+          }
+        : item));
+    });
+  }, [biomechanics.calibration, effectiveBiomechanicsResult, hold10WallTarget]);
+
   const startFinalRaw = startResult?.rawTime !== undefined ? Math.max(0, roundTime(startResult.rawTime + startSignalOffset)) : undefined;
   const movementFinalRaw = movementResult?.rawTime !== undefined ? Math.max(0, roundTime(movementResult.rawTime + firstMovementOffset)) : undefined;
   const movementFinalClimb =
@@ -264,7 +417,7 @@ function App() {
       : calibrationReady && ["calibrated", "blocked", "manual"].includes(resolvedStartProfile)
       ? "Calibrated light transition"
       : "Generic color-distance detection";
-  const videoAnalysisRunning = frameTestRunning || startRunning || movementRunning || movementPreviewRunning || biomechanicsRunning || autoAnalysisRunning;
+  const videoAnalysisRunning = frameTestRunning || startRunning || movementRunning || movementPreviewRunning || finishRunning || biomechanicsRunning || autoAnalysisRunning;
 
   const zoneStageStyle = useMemo((): CSSProperties => {
     const width = metadata?.videoWidth || 16;
@@ -286,10 +439,14 @@ function App() {
   }, [metadata?.videoHeight, metadata?.videoWidth, zoneDisplayMode]);
 
   function resetAnalysisForNewVideo(fileName: string) {
+    pendingAutomaticContextRef.current = null;
+    automaticLaneCandidatesRef.current = [];
     setFrameDebug(null);
     setStartResult(null);
     setSuggestedStartRawTime(null);
     setMovementResult(null);
+    setFinishResult(null);
+    setFinishStatus("");
     setMovementPreviewFrames({});
     setMovementPreviewRunning(false);
     setStartSearchStart(0);
@@ -305,10 +462,13 @@ function App() {
     setCommittedLaunchMinDelay(0.1);
     setOfficialTotalTime("");
     setCapturedFrame(null);
+    pendingAutomaticContextRef.current = null;
     setZones({});
     setBiomechanics(createDefaultBiomechanicsSession());
+    setRouteAlignment(null);
     setBiomechanicsRunning(false);
     setStartEvidenceStatus("");
+    setTimestampReview(null);
     setTimestamps(INITIAL_TIMESTAMPS);
     setActiveSessionId(null);
     if (!sessionName || sessionName === "Untitled climb analysis") {
@@ -326,6 +486,11 @@ function App() {
     if (!file) {
       return;
     }
+
+    // Retain the File in app state/refs, then clear the native control so the
+    // same clip can be selected again after a decode or metadata error.
+    event.target.value = "";
+    setVideoLoadError("");
 
     if (previousObjectUrl.current) {
       URL.revokeObjectURL(previousObjectUrl.current);
@@ -353,6 +518,8 @@ function App() {
     setStartResult(null);
     setSuggestedStartRawTime(null);
     setMovementResult(null);
+    setFinishResult(null);
+    setFinishStatus("");
     setMovementPreviewFrames({});
     setMovementPreviewRunning(false);
     if (expectedSessionVideo) {
@@ -407,6 +574,19 @@ function App() {
     }
     video.currentTime = clamp(time, 0, Math.max(0, video.duration - 0.001));
     setCurrentTime(video.currentTime);
+  }
+
+  function reviewTimestamp(target: TimestampReviewTarget) {
+    const video = videoRef.current;
+    if (!video) {
+      return;
+    }
+    video.pause();
+    setTimestampReview(target);
+    jumpTo(target.suggestedRawTime);
+    window.requestAnimationFrame(() => {
+      document.getElementById("video-review")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
   }
 
   async function runWithVideoRestore<T>(
@@ -638,6 +818,10 @@ function App() {
     const width = Math.abs(draftZone.x2 - draftZone.x1);
     const height = Math.abs(draftZone.y2 - draftZone.y1);
     if (width > 0.005 && height > 0.005) {
+      pendingAutomaticContextRef.current = null;
+      if (draftZone.id === "startLight") {
+        invalidateStartLightDependents("Start-light region changed. Its colors will be learned again on the next analysis.");
+      }
       setZones((current) => ({ ...current, [draftZone.id]: normalizeZone(draftZone) }));
     }
     setDraftZone(null);
@@ -656,6 +840,7 @@ function App() {
     const userDrawnLightZone = zones.startLight && !zones.startLight.label.startsWith("Auto-detected")
       ? zones.startLight
       : undefined;
+    pendingAutomaticContextRef.current = null;
     setStartRunning(true);
     let reviewSeekTarget: number | null = null;
     try {
@@ -683,25 +868,36 @@ function App() {
               lightVisibility: startLightVisibility,
               profile: resolvedStartProfile,
               calibration: startLightCalibration,
+              colorSamplingMode: calibrationReady ? "opponent" : "average",
             }));
             return;
           }
 
           // Same fused light/beep/motion pipeline as Quick Analyze, so both buttons
           // always produce the same start time.
-          const { decision, automaticStart, audioReason } = await gatherFusedStartEvidence(
+          const {
+            decision,
+            automaticStart,
+            audioReason,
+            analysisBodyZone,
+            analysisLightZone,
+            analysisLightCalibration,
+            analysisLaneCandidates,
+          } = await gatherFusedStartEvidence(
             video,
             undefined,
             setVideoRestoreStatus,
           );
           setStartEvidenceStatus(`${decision.reason} Audio: ${audioReason}`);
           if (!decision.found || decision.rawTime === undefined || !automaticStart) {
+            pendingAutomaticContextRef.current = null;
             setStartResult(null);
             setAutoAnalysisStatus("Start could not be confirmed. Use the current-frame button or open Manual timing settings.");
             return;
           }
           setStartResult(automaticStart);
           if (decision.autoAccept) {
+            pendingAutomaticContextRef.current = null;
             const acceptedStart = Math.max(0, roundTime(decision.rawTime + startSignalOffset));
             acceptTimestamp(
               "startSignal",
@@ -715,8 +911,14 @@ function App() {
               },
             );
             setSuggestedStartRawTime(null);
-            setAutoAnalysisStatus(`Start Signal accepted at ${acceptedStart.toFixed(3)}s from the fused light, beep, and motion evidence.`);
+            setAutoAnalysisStatus(`Start Signal accepted at ${acceptedStart.toFixed(3)}s. ${decision.reason}`);
           } else {
+            pendingAutomaticContextRef.current = {
+              analysisBodyZone,
+              analysisLightZone,
+              analysisLightCalibration,
+              analysisLaneCandidates,
+            };
             setSuggestedStartRawTime(decision.rawTime);
             reviewSeekTarget = decision.rawTime;
             setAutoAnalysisStatus(
@@ -782,11 +984,13 @@ function App() {
 
     let sample;
     try {
-      sample = await sampleZoneAverageColor(video, video.currentTime, zone);
+      sample = await sampleZoneOpponentColor(video, video.currentTime, zone);
     } catch (error) {
       setCalibrationStatus(error instanceof Error ? `Calibration sample failed: ${error.message}` : "Calibration sample failed.");
       return;
     }
+    pendingAutomaticContextRef.current = null;
+    automaticLaneCandidatesRef.current = [];
     setStartLightCalibration((current) => {
       const next: StartLightCalibration = {
         ...current,
@@ -800,6 +1004,7 @@ function App() {
       }
       return next;
     });
+    clearFinishDependents();
     setCalibrationStatus(`${kind === "before" ? "Before-start" : "After-start"} sample set at ${sample.time.toFixed(3)}s.`);
   }
 
@@ -834,6 +1039,38 @@ function App() {
     }
   }
 
+  async function runAutomaticFinishDetection() {
+    const video = videoRef.current;
+    if (!video || !metadata?.metadataLoaded || startSignalRaw === null) {
+      setFinishStatus("Accept a Start Signal before finding the finish automatically.");
+      return;
+    }
+    setFinishRunning(true);
+    setFinishResult(null);
+    setFinishStatus("Watching the selected lane light for its finish reversal…");
+    try {
+      await runWithVideoRestore(
+        video,
+        () => detectAndMaybeAcceptFinish(
+          video,
+          startSignalRaw,
+          zones.startLight,
+          startLightCalibration,
+          "Accepted by automatic finish detection.",
+          undefined,
+          setFinishStatus,
+          automaticLaneCandidatesRef.current,
+        ),
+        "Automatic finish detection complete. Video restored to previous position.",
+        "finish detection",
+      );
+    } catch (error) {
+      setFinishStatus(error instanceof Error ? `Finish detection stopped: ${error.message}` : "Finish detection stopped.");
+    } finally {
+      setFinishRunning(false);
+    }
+  }
+
   /**
    * Shared start-evidence pipeline used by both Quick Analyze and the Start Timing
    * card's "Find start automatically" button so they always agree: lane-light
@@ -844,51 +1081,59 @@ function App() {
     signal: AbortSignal | undefined,
     onStatus: (message: string) => void,
   ): Promise<FusedStartEvidenceOutcome> {
+    automaticLaneCandidatesRef.current = [];
     const searchStart = clamp(startSearchStart, 0, Math.max(0, video.duration - 0.5));
-    const searchEnd = Math.min(
-      video.duration,
-      Math.max(
-        searchStart + 0.5,
-        Number.isFinite(startSearchEnd) ? startSearchEnd : 0,
-        Math.min(12, video.duration),
-      ),
-    );
-    onStatus("Scanning both lanes for faint start lights and listening for the countdown…");
-    const audioPromise: Promise<AudioStartResult> = videoFileRef.current
-      ? detectAudioStartSignal({
+    // Uploaded race clips often contain a long setup period. Automatic mode
+    // scans the complete clip; sustained post-start-state validation prevents
+    // the later finish reversal from being mistaken for another start.
+    const searchEnd = video.duration;
+    onStatus("Listening for two matching beeps and the different-pitch start beep…");
+    const audioStart: AudioStartResult = videoFileRef.current
+      ? await detectAudioStartSignal({
           file: videoFileRef.current,
           searchStart,
           searchEnd,
           signal,
         })
-      : Promise.resolve({
+      : {
           found: false,
           confidence: "None" as Confidence,
           reason: "The original local video file is unavailable for audio analysis.",
           segments: [],
-        });
+        };
+    onStatus(audioStart.found && audioStart.rawTime !== undefined
+      ? `Start-beep pattern found near ${audioStart.rawTime.toFixed(3)}s. Scanning both lanes for faint lights…`
+      : "Audio pattern was inconclusive. Scanning both lanes for faint lights…");
+    const trustedBodyZone = zones.startBody && !zones.startBody.label.startsWith("Automatic lane")
+      ? zones.startBody
+      : undefined;
     const automaticLight = await detectAutomaticStartLight({
       video,
       searchStart,
       searchEnd,
-      startBodyZone: zones.startBody,
+      startBodyZone: trustedBodyZone,
+      expectedStartTime: audioStart.matchedPattern === "two-same-then-different" && audioStart.confidence === "High"
+        ? audioStart.rawTime
+        : undefined,
       signal,
       onProgress: (processed, total) => {
-        onStatus(`Scanning lane lights: ${processed}/${total} frames… Audio is being checked too.`);
+        onStatus(`Scanning lane lights: ${processed}/${total} frames…`);
       },
     });
-    const colorResults = (automaticLight.laneResults ?? (automaticLight.result ? [automaticLight.result] : []))
-      .filter((result) => result.detected && result.rawTime !== undefined);
-    if (automaticLight.found && automaticLight.zone && automaticLight.calibration) {
-      setZones((current) => ({ ...current, startLight: automaticLight.zone }));
-      setStartLightCalibration(automaticLight.calibration);
-      setStartDetectionProfile("calibrated");
-      setCalibrationStatus(
-        `${automaticLight.laneCandidates?.length ?? 1} lane-light candidate${(automaticLight.laneCandidates?.length ?? 1) === 1 ? "" : "s"} found. Primary sensor is near ${Math.round(((automaticLight.zone.x1 + automaticLight.zone.x2) / 2) * 100)}% across and ${Math.round(((automaticLight.zone.y1 + automaticLight.zone.y2) / 2) * 100)}% down the frame.`,
-      );
-    }
+    const automaticLaneCandidates = automaticLight.laneCandidates ?? [];
+    const colorRecords: Array<{
+      result: StartSignalDetectionResult;
+      lane?: GreenBlueLaneCandidate;
+      label: string;
+    }> = (automaticLight.laneResults ?? (automaticLight.result ? [automaticLight.result] : []))
+      .map((result, index) => ({
+        result,
+        lane: automaticLaneCandidates[index],
+        label: `automatic lane light ${index + 1}`,
+      }))
+      .filter((record) => record.result.detected && record.result.rawTime !== undefined);
 
-    if (!colorResults.length && zones.startLight) {
+    if (!colorRecords.some((record) => record.result.confidence !== "Low") && zones.startLight) {
       onStatus("Automatic light search was inconclusive. Checking the saved Start Light Zone…");
       const savedZoneResult = await detectStartSignal({
           video,
@@ -899,37 +1144,45 @@ function App() {
           lightVisibility: startLightVisibility,
           profile: calibrationReady ? "calibrated" : "auto",
           calibration: startLightCalibration,
+          colorSamplingMode: calibrationReady ? "opponent" : "average",
           signal,
         });
       if (savedZoneResult.detected && savedZoneResult.rawTime !== undefined) {
-        colorResults.push(savedZoneResult);
+        colorRecords.push({ result: savedZoneResult, lane: undefined, label: "saved start-light zone" });
       }
     }
 
     if (signal?.aborted) {
       throw new PoseAnalysisCancelledError();
     }
-    const audioStart = await audioPromise;
     onStatus("Comparing lane lights, final beep, and body motion…");
-    const motionStart = await detectMotionBasedStartEstimate({
-      video,
-      zone: zones.startBody,
-      searchStart,
-      searchEnd,
-      reactionOffset: reactionTimeOffset,
-      sensitivity: startSensitivity,
-    });
+    const motionProbeZone = trustedBodyZone ??
+      (automaticLight.zone ? deriveAutomaticStartBodyZone(automaticLight.zone) : undefined);
+    const exactAudioTime = audioStart.matchedPattern === "two-same-then-different" &&
+        audioStart.confidence === "High"
+      ? audioStart.rawTime
+      : undefined;
+    const motionStart = motionProbeZone
+      ? await detectMotionBasedStartEstimate({
+          video,
+          zone: motionProbeZone,
+          searchStart: exactAudioTime === undefined ? searchStart : Math.max(searchStart, exactAudioTime - 0.25),
+          searchEnd: exactAudioTime === undefined ? searchEnd : Math.min(searchEnd, exactAudioTime + 0.9),
+          reactionOffset: reactionTimeOffset,
+          sensitivity: startSensitivity,
+        })
+      : null;
 
     if (signal?.aborted) {
       throw new PoseAnalysisCancelledError();
     }
 
-    const evidence: StartEvidence[] = colorResults.map((result, index) => ({
+    const evidence: StartEvidence[] = colorRecords.map(({ result, label }) => ({
       kind: "color",
       rawTime: result.rawTime!,
       confidence: result.confidence,
       reason: result.reason,
-      label: `lane light ${index + 1}`,
+      label,
     }));
     if (audioStart.found && audioStart.rawTime !== undefined) {
       evidence.push({
@@ -937,27 +1190,85 @@ function App() {
         rawTime: audioStart.rawTime,
         confidence: audioStart.confidence,
         reason: audioStart.reason,
-        label: "final countdown beep",
+        label: "changed-pitch final start beep",
       });
     }
-    if (motionStart.detected && motionStart.rawTime !== undefined) {
+    if (motionStart?.detected && motionStart.rawTime !== undefined) {
       evidence.push({
         kind: "motion",
         rawTime: motionStart.rawTime,
-        confidence: motionStart.confidence,
+        confidence: trustedBodyZone ? motionStart.confidence : "Low",
         reason: motionStart.reason,
-        label: "body motion estimate",
+        label: trustedBodyZone ? "body motion estimate" : "lane-localized body motion estimate",
       });
     }
     const decision = fuseStartEvidence(evidence);
     if (!decision.found || decision.rawTime === undefined) {
-      return { decision, automaticStart: null, audioReason: audioStart.reason };
+      return {
+        decision,
+        automaticStart: null,
+        audioReason: audioStart.reason,
+        analysisBodyZone: trustedBodyZone,
+      };
     }
 
-    const closestColor = colorResults
-      .filter((result) => result.rawTime !== undefined)
-      .sort((left, right) => Math.abs(left.rawTime! - decision.rawTime!) - Math.abs(right.rawTime! - decision.rawTime!))[0];
-    const baseResult = closestColor ?? (motionStart.detected ? motionStart : buildAudioStartResult(audioStart));
+    const supportingColorLabels = new Set(
+      decision.supportingEvidence
+        .filter((item) => item.kind === "color")
+        .map((item) => item.label),
+    );
+    const supportingColorRecords = colorRecords
+      .filter((record) =>
+        supportingColorLabels.has(record.label) ||
+        (record.result.confidence !== "Low" && Math.abs(record.result.rawTime! - decision.rawTime!) <= 0.35),
+      )
+      .sort((left, right) =>
+        Math.abs(left.result.rawTime! - decision.rawTime!) - Math.abs(right.result.rawTime! - decision.rawTime!) ||
+        (right.lane?.score ?? 0) - (left.lane?.score ?? 0),
+      );
+    const closestColorRecord = supportingColorRecords[0];
+    const analysisLaneCandidates = deduplicateAnalysisLaneCandidates(
+      supportingColorRecords.flatMap((record): AnalysisLaneCandidate[] => {
+        const zone = record.lane?.zone ??
+          (record.label === "saved start-light zone" ? zones.startLight : undefined);
+        const candidateCalibration = record.result.debug.calibration ?? record.lane?.calibration ??
+          (record.label === "saved start-light zone" && calibrationReady ? startLightCalibration : undefined);
+        if (!zone || !candidateCalibration?.beforeStartRGB || !candidateCalibration.afterStartRGB) {
+          return [];
+        }
+        return [{
+          zone,
+          calibration: candidateCalibration,
+          label: record.label,
+          startRawTime: record.result.rawTime!,
+          score: record.lane?.score ?? 0,
+        }];
+      }),
+    );
+    automaticLaneCandidatesRef.current = analysisLaneCandidates;
+    // A discovered lane is safe to use for athlete tracking only when that
+    // color cue actually supports the fused start decision. The detector may
+    // still expose rejected candidates for diagnostics, but those candidates
+    // must never steer first-movement or pose analysis.
+    const analysisBodyZone = resolveAnalysisBodyZone(trustedBodyZone, closestColorRecord?.lane?.zone);
+    const analysisLightZone = closestColorRecord?.lane?.zone ??
+      (closestColorRecord?.label === "saved start-light zone" ? zones.startLight : undefined);
+    const analysisLightCalibration = closestColorRecord?.result.debug.calibration ??
+      closestColorRecord?.lane?.calibration ??
+      (closestColorRecord?.label === "saved start-light zone" && calibrationReady ? startLightCalibration : undefined);
+    if (closestColorRecord?.lane) {
+      const selectedLane = closestColorRecord.lane;
+      clearFinishDependents();
+      setZones((current) => ({ ...current, startLight: selectedLane.zone }));
+      setStartLightCalibration(analysisLightCalibration ?? selectedLane.calibration);
+      setStartDetectionProfile("calibrated");
+      setCalibrationStatus(
+        `Verified ${closestColorRecord.label} near ${Math.round(((selectedLane.zone.x1 + selectedLane.zone.x2) / 2) * 100)}% across and ${Math.round(((selectedLane.zone.y1 + selectedLane.zone.y2) / 2) * 100)}% down the frame.`,
+      );
+    }
+    const supportsMotion = decision.supportingEvidence.some((item) => item.kind === "motion");
+    const baseResult = closestColorRecord?.result ??
+      (supportsMotion && motionStart?.detected ? motionStart : buildAudioStartResult(audioStart));
     const automaticStart: StartSignalDetectionResult = {
       ...baseResult,
       detected: true,
@@ -980,7 +1291,45 @@ function App() {
         detectedRawTime: decision.rawTime,
       },
     };
-    return { decision, automaticStart, audioReason: audioStart.reason };
+    return {
+      decision,
+      automaticStart,
+      audioReason: audioStart.reason,
+      analysisBodyZone,
+      analysisLightZone,
+      analysisLightCalibration,
+      analysisLaneCandidates,
+    };
+    setVideoLoadError("");
+  }
+
+  async function locateVisibleRouteHolds(
+    startRawTime: number,
+    endRawTime: number,
+    calibration: NonNullable<BiomechanicsSession["calibration"]>,
+    signal?: AbortSignal,
+    identityZoneOverride?: NormalizedZone,
+  ): Promise<RouteAlignmentResult> {
+    const video = videoRef.current;
+    if (!video) {
+      throw new Error("Load the video before locating route holds.");
+    }
+    const duration = Math.max(0.001, endRawTime - startRawTime);
+    const fractions = [0.04, 0.19, 0.36, 0.53, 0.7, 0.86, 0.96];
+    const frames: ImageData[] = [];
+    for (const fraction of fractions) {
+      if (signal?.aborted) {
+        throw new PoseAnalysisCancelledError();
+      }
+      const time = clamp(startRawTime + duration * fraction, 0, Math.max(0, video.duration - 0.001));
+      await seekTo(video, time);
+      frames.push(captureFrame(video).imageData);
+    }
+    const { result } = alignStandardSpeedRouteWithFallback(frames, calibration, {
+      startBodyZone: identityZoneOverride ?? zones.startBody,
+    });
+    setRouteAlignment(result);
+    return result;
   }
 
   async function runAutomaticAnalysis() {
@@ -998,25 +1347,44 @@ function App() {
     setStartResult(null);
     setSuggestedStartRawTime(null);
     setMovementResult(null);
+    setFinishResult(null);
+    setFinishStatus("");
     setMovementPreviewFrames({});
+    setRouteAlignment(null);
+    pendingAutomaticContextRef.current = null;
     let reviewSeekTarget: number | null = null;
 
     try {
       await runWithVideoRestore(
         video,
         async () => {
-          const { decision, automaticStart, audioReason } = await gatherFusedStartEvidence(
+          const {
+            decision,
+            automaticStart,
+            audioReason,
+            analysisBodyZone,
+            analysisLightZone,
+            analysisLightCalibration,
+            analysisLaneCandidates,
+          } = await gatherFusedStartEvidence(
             video,
             abortController.signal,
             setAutoAnalysisStatus,
           );
           setStartEvidenceStatus(`${decision.reason} Audio: ${audioReason}`);
           if (!decision.found || decision.rawTime === undefined || !automaticStart) {
+            pendingAutomaticContextRef.current = null;
             setAutoAnalysisStatus("Start could not be confirmed. Use the current-frame button or open Manual timing settings.");
             return;
           }
           setStartResult(automaticStart);
           if (!decision.autoAccept) {
+            pendingAutomaticContextRef.current = {
+              analysisBodyZone,
+              analysisLightZone,
+              analysisLightCalibration,
+              analysisLaneCandidates,
+            };
             setSuggestedStartRawTime(decision.rawTime);
             reviewSeekTarget = decision.rawTime;
             setAutoAnalysisStatus(
@@ -1038,74 +1406,14 @@ function App() {
             },
           );
 
-          setAutoAnalysisStatus("Start found. Detecting the first visible movement…");
-          const automaticMovementAccepted = await detectAndMaybeAcceptFirstMovement(
+          pendingAutomaticContextRef.current = null;
+          await continueAutomaticAnalysisAfterStart(
             video,
             acceptedStart,
+            { analysisBodyZone, analysisLightZone, analysisLightCalibration, analysisLaneCandidates },
             "Automatically accepted by Quick Analyze.",
             abortController.signal,
           );
-
-          const calibrationValidation = validateWallCalibration(biomechanics.calibration);
-          if (!calibrationValidation.valid || !biomechanics.calibration) {
-            setAutoAnalysisStatus(
-              `Timing finished${automaticMovementAccepted ? " and first movement was accepted" : "; first movement needs review"}. To add center of mass, do the one-time four-corner wall calibration below, then press Quick Analyze again.`,
-            );
-            return;
-          }
-
-          const acceptedFinish = getTimestamp(timestamps, "finishPad").rawTime;
-          const officialDuration = Number(officialTotalTime);
-          const inferredFinish = Number.isFinite(officialDuration) && officialDuration > 0
-            ? acceptedStart + officialDuration
-            : video.duration;
-          const poseEnd = Math.min(
-            video.duration,
-            acceptedFinish !== null && acceptedFinish > acceptedStart ? acceptedFinish : inferredFinish,
-          );
-          if (poseEnd <= acceptedStart + 0.2) {
-            throw new Error("The automatic pose range is too short. Check the accepted start and finish markers.");
-          }
-
-          const maxSafeFps = (poseEnd - acceptedStart) * biomechanics.settings.sampleFps > 450
-            ? 5
-            : biomechanics.settings.sampleFps;
-          const automaticSettings = { ...biomechanics.settings, sampleFps: maxSafeFps };
-          setBiomechanicsRunning(true);
-          setAutoAnalysisStatus("Timing finished. Following the climber and calculating center of mass…");
-          try {
-            const poseResult = await analyzePoseVideo({
-              video,
-              startRawTime: acceptedStart,
-              endRawTime: poseEnd,
-              settings: automaticSettings,
-              calibration: biomechanics.calibration,
-              identityZone: zones.startBody,
-              signal: abortController.signal,
-              onProgress: (progress) => {
-                if (progress.phase === "analyzing") {
-                  setAutoAnalysisStatus(`Following the climber: ${progress.processed}/${progress.total} frames…`);
-                }
-              },
-            });
-            setBiomechanics((current) => ({
-              ...current,
-              settings: automaticSettings,
-              result: poseResult,
-            }));
-            const selectedFrames = poseResult.metrics.selectedFrames ?? poseResult.metrics.detectedFrames;
-            if (poseResult.metrics.validFrames > 0) {
-              setAutoAnalysisStatus(
-                `Quick Analyze finished: ${poseResult.metrics.validFrames}/${poseResult.metrics.requestedFrames} usable COM frames${automaticMovementAccepted ? ", with start and first movement accepted." : "; first movement still needs review."}`,
-              );
-            } else if (poseResult.metrics.detectedFrames === 0) {
-              setAutoAnalysisStatus("Timing finished, but the pose scan still found no athlete. Recheck the wall corners and make the Start Body Zone surround the climber at the start.");
-            } else {
-              setAutoAnalysisStatus(`The athlete was tracked on ${selectedFrames} frames, but no frame had enough visible hips, knees, and shoulders for a reliable COM estimate.`);
-            }
-          } finally {
-            setBiomechanicsRunning(false);
-          }
         },
         "Quick Analyze finished. Video restored to its previous position.",
         "Quick Analyze",
@@ -1131,10 +1439,11 @@ function App() {
     acceptedStart: number,
     notePrefix: string,
     signal?: AbortSignal,
+    zoneOverride?: NormalizedZone,
   ): Promise<boolean> {
     const automaticMovement = await detectFirstMovement({
       video,
-      zone: zones.startBody,
+      zone: zoneOverride ?? zones.startBody,
       startSignalRawTime: acceptedStart,
       sensitivity: movementSensitivity,
       movementDefinition: firstMovementDefinition,
@@ -1168,17 +1477,328 @@ function App() {
     return accepted;
   }
 
-  async function acceptSuggestedStart() {
+  async function continueAutomaticAnalysisAfterStart(
+    video: HTMLVideoElement,
+    acceptedStart: number,
+    context: PendingAutomaticAnalysisContext,
+    notePrefix: string,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    setAutoAnalysisStatus("Start found. Checking the verified lane light for the finish…");
+    const automaticFinish = await detectAndMaybeAcceptFinish(
+      video,
+      acceptedStart,
+      context.analysisLightZone,
+      context.analysisLightCalibration,
+      notePrefix,
+      signal,
+      setAutoAnalysisStatus,
+      context.analysisLaneCandidates,
+    );
+    // If two lanes started together and only the fallback lane has a valid
+    // finish, use that same lane to localize the athlete. A user-drawn body zone
+    // remains authoritative.
+    const trustedBodyZone = zones.startBody && !zones.startBody.label.startsWith("Automatic lane")
+      ? zones.startBody
+      : undefined;
+    const analysisBodyZone = trustedBodyZone ??
+      (automaticFinish ? deriveAutomaticStartBodyZone(automaticFinish.zone) : context.analysisBodyZone);
+    // Persist the winning automatic lane so the result overlay and COM panel
+    // use the same identity region. Automatic zones remain replaceable on the
+    // next run; a genuinely user-drawn Start Body Zone stays authoritative.
+    if (!trustedBodyZone && analysisBodyZone) {
+      setZones((current) => ({ ...current, startBody: analysisBodyZone }));
+    }
+
+    setAutoAnalysisStatus("Start and lane identified. Detecting the first visible movement…");
+    const automaticMovementAccepted = await detectAndMaybeAcceptFirstMovement(
+      video,
+      acceptedStart,
+      notePrefix,
+      signal,
+      analysisBodyZone,
+    );
+
+    const officialDuration = Number(officialTotalTime);
+    const poseFinishBoundary = resolveAutomaticPoseFinishBoundary({
+      startRawTime: acceptedStart,
+      videoDuration: video.duration,
+      lightFinishRawTime: automaticFinish?.rawTime,
+      lightFinishAccepted: automaticFinish?.accepted,
+      officialTotalSeconds: officialDuration,
+    });
+    if (!poseFinishBoundary.ready || poseFinishBoundary.endRawTime === undefined) {
+      setAutoAnalysisStatus(
+        `Start and movement were analyzed, but COM was paused. ${poseFinishBoundary.reason} Review or set Finish Pad, then analyze center of mass.`,
+      );
+      return;
+    }
+
+    let analysisWallCalibration = biomechanics.calibration;
+    const savedCalibrationValidation = validateWallCalibration(analysisWallCalibration);
+    if (!savedCalibrationValidation.valid || analysisWallCalibration?.source === "automatic-approximate") {
+      setAutoAnalysisStatus("Timing finished. Estimating the selected 3 m wall lane for center of mass…");
+      await seekTo(video, Math.min(video.duration - 0.001, Math.max(0, acceptedStart + 0.05)));
+      if (signal?.aborted) {
+        throw new PoseAnalysisCancelledError();
+      }
+      const automaticCalibration = inferAutomaticWallCalibration({
+        imageData: captureFrame(video).imageData,
+        frameRawTime: video.currentTime,
+        identityZone: analysisBodyZone,
+        laneLightZone: automaticFinish?.zone ?? context.analysisLightZone,
+      });
+      if (automaticCalibration.calibration) {
+        analysisWallCalibration = automaticCalibration.calibration;
+        setBiomechanics((current) => ({
+          ...current,
+          calibration: automaticCalibration.calibration,
+          result: undefined,
+        }));
+      } else if (!savedCalibrationValidation.valid || analysisWallCalibration?.source === "automatic-approximate") {
+        setBiomechanics((current) => current.calibration?.source === "automatic-approximate"
+          ? { ...current, calibration: undefined, result: undefined }
+          : current);
+        setRouteAlignment(null);
+        setAutoAnalysisStatus(
+          `Timing finished${automaticMovementAccepted ? ", first movement was accepted" : "; first movement needs review"}, but center of mass needs a full-wall view. ${automaticCalibration.reason} You can mark four lane corners below as a fallback.`,
+        );
+        return;
+      }
+    }
+    if (!analysisWallCalibration || !validateWallCalibration(analysisWallCalibration).valid) {
+      setAutoAnalysisStatus("Timing finished, but no stable wall calibration was available for center-of-mass analysis.");
+      return;
+    }
+
+    const poseEnd = poseFinishBoundary.endRawTime;
+    if (poseEnd <= acceptedStart + 0.2) {
+      throw new Error("The automatic pose range is too short. Check the accepted start and finish markers.");
+    }
+
+    setAutoAnalysisStatus("Timing finished. Registering the 20 visible route holds...");
+    const locatedRoute = await locateVisibleRouteHolds(
+      acceptedStart,
+      poseEnd,
+      analysisWallCalibration,
+      signal,
+      analysisBodyZone,
+    );
+    const routeSummary = locatedRoute.aligned
+      ? ` ${locatedRoute.diagnostics.matchedHoldIds.length}/20 visible holds were registered to the video.`
+      : ` Hold markers were hidden because visual registration was not trustworthy: ${locatedRoute.reason}`;
+
+    const maxSafeFps = (poseEnd - acceptedStart) * biomechanics.settings.sampleFps > 450
+      ? 5
+      : biomechanics.settings.sampleFps;
+    const automaticSettings = {
+      ...biomechanics.settings,
+      sampleFps: maxSafeFps,
+      // Distant top-wall joints are often real but receive lower MediaPipe
+      // visibility. These remain conservative enough to require the torso and
+      // three quarters of modeled body mass.
+      // Upper-wall athletes can occupy only a few dozen source pixels. Keep a
+      // conservative torso/70%-mass floor while allowing lower-confidence
+      // distant joints to maintain the climb path.
+      minVisibility: Math.min(biomechanics.settings.minVisibility, 0.2),
+      minMassCoverage: Math.min(biomechanics.settings.minMassCoverage, 0.7),
+    };
+    setBiomechanicsRunning(true);
+    setAutoAnalysisStatus("Timing finished. Following the climber and calculating center of mass…");
+    try {
+      const poseResult = await analyzePoseVideo({
+        video,
+        startRawTime: acceptedStart,
+        endRawTime: poseEnd,
+        settings: automaticSettings,
+        calibration: analysisWallCalibration,
+        identityZone: analysisBodyZone,
+        signal,
+        onProgress: (progress) => {
+          if (progress.phase === "analyzing") {
+            setAutoAnalysisStatus(`Following the climber: ${progress.processed}/${progress.total} frames…`);
+          }
+        },
+      });
+      setBiomechanics((current) => ({
+        ...current,
+        settings: automaticSettings,
+        result: poseResult,
+      }));
+      const selectedFrames = poseResult.metrics.selectedFrames ?? poseResult.metrics.detectedFrames;
+      if (poseResult.metrics.validFrames > 0) {
+        const finishReviewNote = automaticFinish && !automaticFinish.accepted
+          ? ` Finish was bounded at ${automaticFinish.rawTime.toFixed(3)}s from verified light evidence and still needs frame review before it becomes an accepted time.`
+          : "";
+        setAutoAnalysisStatus(
+          `Quick Analyze finished: ${poseResult.metrics.validFrames}/${poseResult.metrics.requestedFrames} usable COM frames${automaticMovementAccepted ? ", with start and first movement accepted." : "; first movement still needs review."}${routeSummary}${finishReviewNote}`,
+        );
+      } else if (poseResult.metrics.detectedFrames === 0) {
+        setAutoAnalysisStatus("Timing finished, but the pose scan still found no athlete. Recheck the wall corners and make the Start Body Zone surround the climber at the start.");
+      } else {
+        setAutoAnalysisStatus(`The athlete was tracked on ${selectedFrames} frames, but no frame had enough visible hips, knees, and shoulders for a reliable COM estimate.`);
+      }
+    } finally {
+      setBiomechanicsRunning(false);
+    }
+  }
+
+  function handleVideoLoadError() {
+    const errorCode = videoRef.current?.error?.code;
+    const reason = errorCode === MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED
+      ? "This browser cannot decode the selected video format. Try an H.264 MP4 or choose another clip."
+      : "The selected video could not be opened. Try choosing the file again.";
+    setVideoLoadError(reason);
+    setSessionStatus(reason);
+  }
+
+  async function detectAndMaybeAcceptFinish(
+    video: HTMLVideoElement,
+    acceptedStart: number,
+    lightZone: NormalizedZone | undefined,
+    lightCalibration: StartLightCalibration | undefined,
+    notePrefix: string,
+    signal?: AbortSignal,
+    onStatus?: (message: string) => void,
+    laneCandidates: AnalysisLaneCandidate[] = [],
+  ): Promise<AutomaticFinishOutcome | null> {
+    const officialDuration = Number(officialTotalTime);
+    const expectedFinishTime = Number.isFinite(officialDuration) && officialDuration > 0
+      ? acceptedStart + officialDuration
+      : undefined;
+    const primaryCandidate: AnalysisLaneCandidate[] = lightZone
+      ? [{
+          zone: lightZone,
+          calibration: lightCalibration ?? {},
+          label: "selected lane light",
+          startRawTime: acceptedStart,
+          score: Number.MAX_SAFE_INTEGER,
+        }]
+      : [];
+    const candidates = deduplicateAnalysisLaneCandidates([...primaryCandidate, ...laneCandidates]).slice(0, 3);
+    if (!candidates.length) {
+      const missing = await detectFinishSignal({
+        video,
+        zone: undefined,
+        startSignalRawTime: acceptedStart,
+        calibration: {},
+        expectedFinishTime,
+        signal,
+      });
+      setFinishResult(missing);
+      setFinishStatus(missing.reason);
+      return null;
+    }
+
+    let bestReview: { result: StartSignalDetectionResult; candidate: AnalysisLaneCandidate; rank: number } | null = null;
+    for (let candidateIndex = 0; candidateIndex < candidates.length; candidateIndex += 1) {
+      const candidate = candidates[candidateIndex];
+      if (candidateIndex > 0) {
+        onStatus?.(`The first start-verified lane had no accepted finish. Checking lane ${candidateIndex + 1} of ${candidates.length}…`);
+      }
+      const result = await detectFinishSignal({
+        video,
+        zone: candidate.zone,
+        startSignalRawTime: acceptedStart,
+        calibration: candidate.calibration,
+        expectedFinishTime,
+        signal,
+        onProgress: (phase, processed, total) => {
+          onStatus?.(
+            `${phase === "coarse" ? "Scanning" : "Refining"} finish lane ${candidateIndex + 1}/${candidates.length}: ${processed}/${total} frames…`,
+          );
+        },
+      });
+      if (signal?.aborted) {
+        throw new PoseAnalysisCancelledError();
+      }
+      const agreesWithOfficial = expectedFinishTime === undefined ||
+        (result.rawTime !== undefined && Math.abs(result.rawTime - expectedFinishTime) <= 0.45);
+      const confidenceRank = result.confidence === "High" ? 3 : result.confidence === "Medium" ? 2 :
+        result.confidence === "Low" ? 1 : 0;
+      const reviewRank = (result.detected ? 10 : 0) + confidenceRank + (agreesWithOfficial ? 4 : 0) -
+        (expectedFinishTime !== undefined && result.rawTime !== undefined
+          ? Math.min(3, Math.abs(result.rawTime - expectedFinishTime))
+          : 0);
+      if (!bestReview || reviewRank > bestReview.rank) {
+        bestReview = { result, candidate, rank: reviewRank };
+      }
+
+      if (result.detected && result.rawTime !== undefined && result.confidence === "High" && agreesWithOfficial) {
+        setFinishResult(result);
+        setZones((current) => ({ ...current, startLight: candidate.zone }));
+        setStartLightCalibration(candidate.calibration);
+        setStartDetectionProfile("calibrated");
+        automaticLaneCandidatesRef.current = [
+          candidate,
+          ...candidates.filter((item) => item !== candidate),
+        ];
+        acceptTimestamp("finishPad", result.rawTime, "Finish light detection", result.confidence, {
+          detectedRawTime: result.rawTime,
+          note: `${notePrefix} ${result.reason}`,
+        });
+        const fallbackNote = candidateIndex > 0
+          ? ` The initially selected lane had no valid finish, so ClimbIQ matched the other start-verified lane.`
+          : "";
+        setFinishStatus(
+          `Finish accepted automatically at ${result.rawTime.toFixed(3)}s from the first verified return-color flash.${fallbackNote} ${result.reason}`,
+        );
+        return {
+          rawTime: result.rawTime,
+          zone: candidate.zone,
+          calibration: candidate.calibration,
+          confidence: result.confidence,
+          accepted: true,
+        };
+      }
+    }
+
+    const review = bestReview!;
+    setFinishResult(review.result);
+    setFinishStatus(review.result.reason);
+    if (
+      review.result.detected && review.result.rawTime !== undefined && expectedFinishTime !== undefined &&
+      Math.abs(review.result.rawTime - expectedFinishTime) > 0.45
+    ) {
+      setFinishStatus(
+        `Finish light suggests ${review.result.rawTime.toFixed(3)}s, but the official-time cross-check suggests ${expectedFinishTime.toFixed(3)}s. Review before accepting.`,
+      );
+    }
+    if (review.result.detected && review.result.rawTime !== undefined) {
+      automaticLaneCandidatesRef.current = [
+        review.candidate,
+        ...candidates.filter((item) => item !== review.candidate),
+      ];
+      return {
+        rawTime: review.result.rawTime,
+        zone: review.candidate.zone,
+        calibration: review.candidate.calibration,
+        confidence: review.result.confidence,
+        accepted: false,
+      };
+    }
+    return null;
+  }
+
+  async function acceptSuggestedStart(reviewedRawTime?: number) {
     const video = videoRef.current;
     if (suggestedStartRawTime === null) {
       return;
     }
     const source = startResult ? startSourceForResult(startResult) : "Fused start detection";
     const confidence: Confidence = startResult && startResult.confidence !== "None" ? startResult.confidence : "Medium";
-    const acceptedStart = Math.max(0, roundTime(suggestedStartRawTime + startSignalOffset));
+    const acceptedStart = reviewedRawTime === undefined
+      ? Math.max(0, roundTime(suggestedStartRawTime + startSignalOffset))
+      : Math.max(0, roundTime(reviewedRawTime));
+    const pendingContext = pendingAutomaticContextRef.current ?? {
+      analysisBodyZone: zones.startBody,
+      analysisLightZone: zones.startLight,
+      analysisLightCalibration: calibrationReady ? startLightCalibration : undefined,
+      analysisLaneCandidates: automaticLaneCandidatesRef.current,
+    };
     acceptTimestamp("startSignal", acceptedStart, source, confidence, {
       detectedRawTime: suggestedStartRawTime,
-      offsetApplied: startSignalOffset,
+      offsetApplied: roundTime(acceptedStart - suggestedStartRawTime),
       note: "Suggested by Quick Analyze and accepted after review.",
     });
     setSuggestedStartRawTime(null);
@@ -1186,24 +1806,34 @@ function App() {
       setAutoAnalysisStatus(`Start accepted at ${acceptedStart.toFixed(3)}s.`);
       return;
     }
+    const abortController = new AbortController();
+    autoAnalysisAbortRef.current = abortController;
     setAutoAnalysisRunning(true);
-    setAutoAnalysisStatus(`Start accepted at ${acceptedStart.toFixed(3)}s. Detecting the first visible movement…`);
+    setAutoAnalysisStatus(`Start accepted at ${acceptedStart.toFixed(3)}s. Continuing lane-specific analysis…`);
     try {
-      const movementAccepted = await runWithVideoRestore(
+      await runWithVideoRestore(
         video,
-        () => detectAndMaybeAcceptFirstMovement(video, acceptedStart, "Automatically detected after the reviewed start was accepted."),
-        "First movement search finished. Video restored to its previous position.",
-        "first movement detection",
-      );
-      setAutoAnalysisStatus(
-        movementAccepted
-          ? `Start accepted at ${acceptedStart.toFixed(3)}s and First Movement was detected automatically.`
-          : `Start accepted at ${acceptedStart.toFixed(3)}s. Review First Movement in its card below.`,
+        () => continueAutomaticAnalysisAfterStart(
+          video,
+          acceptedStart,
+          pendingContext,
+          "Automatically detected after the reviewed start was accepted.",
+          abortController.signal,
+        ),
+        "Reviewed-start analysis finished. Video restored to its previous position.",
+        "reviewed-start analysis",
       );
     } catch (error) {
-      setAutoAnalysisStatus(error instanceof Error ? `First movement search stopped: ${error.message}` : "First movement search stopped.");
+      if (abortController.signal.aborted) {
+        setAutoAnalysisStatus("Reviewed-start analysis cancelled. Accepted timing results were kept.");
+      } else {
+        setAutoAnalysisStatus(error instanceof Error ? `Reviewed-start analysis stopped: ${error.message}` : "Reviewed-start analysis stopped.");
+      }
     } finally {
+      pendingAutomaticContextRef.current = null;
+      autoAnalysisAbortRef.current = null;
       setAutoAnalysisRunning(false);
+      setBiomechanicsRunning(false);
     }
   }
 
@@ -1214,9 +1844,25 @@ function App() {
     confidence: Confidence,
     metadata?: { detectedRawTime?: number; offsetApplied?: number; note?: string },
   ) {
+    if (id === "startSignal") {
+      pendingAutomaticContextRef.current = null;
+      clearFinishDependents(false);
+    }
     setTimestamps((current) =>
       recalculateTimestampClimbs(
         current.map((item) =>
+          id === "startSignal" && item.id === "finishPad"
+            ? {
+                ...item,
+                rawTime: null,
+                climbTime: null,
+                detectedRawTime: null,
+                offsetApplied: 0,
+                note: undefined,
+                source: "Not set",
+                confidence: "None",
+              }
+            :
           item.id === id
             ? {
                 ...item,
@@ -1234,6 +1880,22 @@ function App() {
     );
   }
 
+  function clearFinishDependents(clearMarker = true) {
+    setFinishResult(null);
+    setFinishStatus("");
+    if (clearMarker) {
+      clearTimestamp("finishPad");
+    }
+  }
+
+  function invalidateStartLightDependents(message: string) {
+    pendingAutomaticContextRef.current = null;
+    automaticLaneCandidatesRef.current = [];
+    setStartLightCalibration({});
+    setCalibrationStatus(message);
+    clearFinishDependents();
+  }
+
   function clearTimestamp(id: TimestampMarker["id"]) {
     setTimestamps((current) =>
       current.map((item) =>
@@ -1242,6 +1904,9 @@ function App() {
               ...item,
               rawTime: null,
               climbTime: null,
+              detectedRawTime: undefined,
+              offsetApplied: undefined,
+              note: undefined,
               source: "Not set",
               confidence: "None",
             }
@@ -1268,6 +1933,7 @@ function App() {
       frameSamplingTest: frameDebug,
       startSignalDetection: startResult?.debug ?? null,
       firstMovementDetection: movementResult?.debug ?? null,
+      finishSignalDetection: finishResult?.debug ?? null,
       acceptedTimestamps: timestamps,
     };
   }
@@ -1286,6 +1952,9 @@ function App() {
     }
     if (movementResult?.debug.failureReason) {
       warnings.push(movementResult.debug.failureReason);
+    }
+    if (finishResult?.debug.failureReason) {
+      warnings.push(finishResult.debug.failureReason);
     }
     if (movementResult?.debug.movementAlreadyUnderway) {
       warnings.push("Movement appears to already be underway near Start Signal.");
@@ -1367,6 +2036,7 @@ function App() {
         startSignal: exportCandidates(startResult?.candidates ?? [], getTimestamp(timestamps, "startSignal")),
         firstMovement: exportCandidates(movementResult?.candidates ?? [], getTimestamp(timestamps, "firstMovement")),
         committedLaunch: exportCandidates(movementResult?.candidates ?? [], getTimestamp(timestamps, "committedLaunch")),
+        finishPad: exportCandidates(finishResult?.candidates ?? [], getTimestamp(timestamps, "finishPad")),
       },
       splitCalculations: splits,
       detectionWarnings: buildDetectionWarnings(),
@@ -1580,6 +2250,10 @@ function App() {
       setSessionStatus("Wait for the active video analysis to finish before loading another session.");
       return;
     }
+    // Review callbacks capture the marker/session that opened them. Closing
+    // the review prevents a frame accepted for one climb from mutating the
+    // session that is about to be loaded or duplicated.
+    setTimestampReview(null);
     const currentVideoMatches = Boolean(
       videoUrl && metadata?.metadataLoaded && session.videoMetadata && videoMetadataMatches(metadata, session.videoMetadata),
     );
@@ -1618,9 +2292,13 @@ function App() {
     setOfficialTotalTime(session.settings.officialTotalTime);
     setTimestamps(recalculateTimestampClimbs(mergeTimestampDefaults(session.timestamps ?? [])));
     setBiomechanics(sanitizeBiomechanicsSession(session.biomechanics));
+    setRouteAlignment(null);
+    pendingAutomaticContextRef.current = null;
     setStartResult(null);
     setSuggestedStartRawTime(null);
     setMovementResult(null);
+    setFinishResult(null);
+    setFinishStatus("");
     setFrameDebug(null);
     if (!currentVideoMatches) {
       setMetadata(session.videoMetadata ? { ...session.videoMetadata, metadataLoaded: false } : null);
@@ -1757,60 +2435,131 @@ function App() {
     }
   }
 
+  const { hasSelectedVideo, hasLoadedVideo } = getVideoUiState(videoUrl, Boolean(metadata?.metadataLoaded));
+  const acceptedMovementRawTime = getTimestamp(timestamps, "firstMovement").rawTime;
+  const acceptedFinish = getTimestamp(timestamps, "finishPad");
+  const acceptedStart = getTimestamp(timestamps, "startSignal");
+  const acceptedHold10 = getTimestamp(timestamps, "hold10");
+  const calculatedClimbTime =
+    startSignalRaw !== null && acceptedFinish.rawTime !== null
+      ? Math.max(0, acceptedFinish.rawTime - startSignalRaw)
+      : null;
+  const acceptedReactionTime =
+    startSignalRaw !== null && acceptedMovementRawTime !== null
+      ? Math.max(0, acceptedMovementRawTime - startSignalRaw)
+      : null;
+  const completedWorkflowSteps = [
+    hasLoadedVideo,
+    startSignalRaw !== null,
+    acceptedFinish.rawTime !== null,
+    Boolean(effectiveBiomechanicsResult),
+  ].filter(Boolean).length;
+  const analysisStage = autoAnalysisRunning
+    ? "Analyzing video"
+    : effectiveBiomechanicsResult
+      ? "Insights ready"
+      : acceptedFinish.rawTime !== null
+        ? "Timing ready"
+        : startSignalRaw !== null
+          ? "Start confirmed"
+          : hasLoadedVideo
+            ? "Ready to analyze"
+            : "Waiting for a video";
+
   return (
-    <main className="app-shell">
-      <header className="hero">
-        <div>
-          <p className="eyebrow">ClimbIQ Detection Lab</p>
-          <h1>Upload a climb. Let ClimbIQ find the important moments.</h1>
-          <p className="hero-copy">
-            Automatic green-to-blue start timing, first movement, and calibrated center-of-mass analysis—all on your device.
-          </p>
-        </div>
+    <main className="app-shell" id="top">
+      <header className="site-header">
+        <a className="brand" href="#top" aria-label="ClimbIQ home">
+          <strong>ClimbIQ</strong>
+        </a>
+        <nav className="site-nav" aria-label="Primary navigation">
+          <a href="#upload">Analyze</a>
+          {hasSelectedVideo && <a href="#video-review">Review</a>}
+          {hasSelectedVideo && <a href="#center-of-mass">Insights</a>}
+          <span>Runs locally</span>
+        </nav>
       </header>
 
-      <section className="layout-grid">
-        <Card title="1. Video Upload">
-          <input className="file-input" type="file" accept="video/*" onChange={handleVideoUpload} disabled={videoAnalysisRunning} />
-          <div className="meta-grid">
-            <Metric label="File" value={metadata?.fileName ?? "No video loaded"} />
-            <Metric label="Duration" value={metadata?.duration ? `${metadata.duration.toFixed(3)}s` : "Not loaded"} />
-            <Metric
-              label="Resolution"
-              value={metadata?.videoWidth ? `${metadata.videoWidth} x ${metadata.videoHeight}` : "Not loaded"}
-            />
-            <Metric label="Metadata" value={metadata?.metadataLoaded ? "Loaded" : "Waiting"} />
+      {!hasSelectedVideo && (
+        <section className="hero" aria-labelledby="hero-title">
+          <div className="hero-content">
+            <p className="eyebrow">Speed climbing video analysis</p>
+            <h1 id="hero-title">Analyze a speed-climbing run from video.</h1>
+            <p className="hero-copy">
+              Find the start, finish, first movement, center of mass, and route splits from one recording. No wearables or uploads required.
+            </p>
+            <div className="hero-actions">
+              <a className="button-link primary hero-primary" href="#upload">Analyze a climb</a>
+            </div>
           </div>
+        </section>
+      )}
+
+      {hasSelectedVideo && (
+        <nav className="workflow-nav" aria-label="Climb analysis workflow">
+          <a className={hasLoadedVideo ? "complete" : ""} href="#upload"><span>{hasLoadedVideo ? "✓" : "1"}</span> Video</a>
+          <a className={startSignalRaw !== null ? "complete" : ""} href="#review-tools"><span>{startSignalRaw !== null ? "✓" : "2"}</span> Review</a>
+          <a className={acceptedFinish.rawTime !== null ? "complete" : ""} href="#results"><span>{acceptedFinish.rawTime !== null ? "✓" : "3"}</span> Results</a>
+          <a className={effectiveBiomechanicsResult ? "complete" : ""} href="#center-of-mass"><span>{effectiveBiomechanicsResult ? "✓" : "4"}</span> Insights</a>
+          <div className="workflow-progress" aria-label={`${completedWorkflowSteps} of 4 steps complete`}>
+            <span style={{ width: `${completedWorkflowSteps * 25}%` }} />
+          </div>
+        </nav>
+      )}
+
+      <section className="layout-grid">
+        <Card id="upload" title={hasSelectedVideo ? "Video" : "Upload a video"} className="full launch-card">
+          <label className={hasSelectedVideo ? "upload-dropzone loaded" : "upload-dropzone"}>
+            <span className="upload-icon" aria-hidden="true">↑</span>
+            <span className="upload-copy">
+              <strong>{hasSelectedVideo ? metadata?.fileName : "Drop in a speed-climbing video"}</strong>
+              <small>{hasSelectedVideo
+                ? hasLoadedVideo ? "Ready to analyze · choose another video to replace it" : "Reading video details…"
+                : "MOV, MP4, or any video your browser can play"}</small>
+            </span>
+            <span className="upload-action">{hasSelectedVideo ? "Replace video" : "Choose video"}</span>
+            <input aria-label={hasSelectedVideo ? "Replace video" : "Choose video"} type="file" accept="video/*" onChange={handleVideoUpload} disabled={videoAnalysisRunning} />
+          </label>
+          {metadata?.metadataLoaded && (
+            <div className="video-meta-line" aria-label="Loaded video details">
+              <span><i /> Ready</span>
+              <span>{metadata.duration.toFixed(2)} seconds</span>
+              <span>{metadata.videoWidth} × {metadata.videoHeight}</span>
+              <span>Processed locally</span>
+            </div>
+          )}
+          {videoLoadError && <p className="analysis-error upload-error" role="alert">{videoLoadError}</p>}
           <div className="quick-analysis-box">
             <div>
-              <strong>Quick Analyze</strong>
+              <strong>{autoAnalysisRunning ? "Analyzing the run" : "Automatic analysis"}</strong>
               <p className="muted">
-                One click compares left/right lane lights, the countdown or single loud start beep, and body motion. The light search stays low in the frame, where the start box sits below the first two holds, and early rocking is ignored when the synchronized cues agree later.
+                Finds timing, first movement, the correct lane, athlete tracking, center of mass, and route splits.
               </p>
-            </div>
-            <div className="readiness-row" aria-label="Analysis readiness">
-              <span className="time-pill">
-                Start light: {zones.startLight?.label.startsWith("Auto-detected") ? "located automatically" : "automatic green → blue search"}
-              </span>
-              <span className="time-pill">Audio: countdown or single loud beep, detected locally</span>
-              <span className="time-pill">
-                Center of mass: {validateWallCalibration(biomechanics.calibration).valid ? "ready" : "needs one-time wall calibration"}
-              </span>
             </div>
             <div className="button-row">
               <button
-                className="primary"
+                className="primary analyze-button"
                 onClick={runAutomaticAnalysis}
                 disabled={!metadata?.metadataLoaded || videoAnalysisRunning}
               >
-                {autoAnalysisRunning ? "Analyzing climb…" : "Analyze climb automatically"}
+                {autoAnalysisRunning ? "Analyzing climb…" : hasLoadedVideo ? "Run full analysis" : hasSelectedVideo ? "Loading video…" : "Upload a video to begin"}
               </button>
               {autoAnalysisRunning && (
                 <button onClick={() => autoAnalysisAbortRef.current?.abort()}>Cancel</button>
               )}
               {!autoAnalysisRunning && suggestedStartRawTime !== null && (
-                <button className="primary" onClick={acceptSuggestedStart} disabled={videoAnalysisRunning}>
-                  Accept suggested start ({suggestedStartRawTime.toFixed(3)}s)
+                <button
+                  className="primary"
+                  onClick={() => reviewTimestamp({
+                    label: "Quick Analyze start",
+                    suggestedRawTime: Math.max(0, roundTime(suggestedStartRawTime + startSignalOffset)),
+                    confidence: startResult?.confidence ?? "Medium",
+                    acceptLabel: "Accept start",
+                    onAccept: (rawTime) => { void acceptSuggestedStart(rawTime); },
+                  })}
+                  disabled={videoAnalysisRunning}
+                >
+                  Review suggested start ({suggestedStartRawTime.toFixed(3)}s)
                 </button>
               )}
               {!autoAnalysisRunning && metadata?.metadataLoaded && (
@@ -1828,7 +2577,43 @@ function App() {
           </div>
         </Card>
 
-        <Card title="Analysis Session">
+        {hasSelectedVideo && (
+          <>
+        <section className="run-summary full" aria-live="polite">
+          <div className="run-summary-heading">
+            <div>
+              <h2>Results</h2>
+              <p>{calculatedClimbTime === null
+                ? "Run the analysis to calculate timing, tracking, and route splits."
+                : `Timing is locked from ${acceptedStart.source.toLowerCase()} to ${acceptedFinish.source.toLowerCase()}.`}</p>
+            </div>
+            <span className={calculatedClimbTime === null ? "summary-status" : "summary-status ready"}>
+              <i /> {calculatedClimbTime === null ? analysisStage : "Analysis ready"}
+            </span>
+          </div>
+          <div className="summary-metrics">
+            <div className="summary-primary-metric">
+              <span>Total climb</span>
+              <strong>{calculatedClimbTime === null ? "—" : calculatedClimbTime.toFixed(3)}<small>{calculatedClimbTime === null ? "" : "s"}</small></strong>
+              <small>{acceptedFinish.confidence} confidence</small>
+            </div>
+            <div><span>First movement</span><strong>{acceptedReactionTime === null ? "—" : `${acceptedReactionTime.toFixed(3)}s`}</strong><small>after start</small></div>
+            <div><span>Hold 10</span><strong>{acceptedHold10.climbTime === null ? "—" : `${acceptedHold10.climbTime.toFixed(3)}s`}</strong><small>{acceptedHold10.rawTime === null ? "awaiting contact" : "split time"}</small></div>
+            <div><span>Tracking quality</span><strong>{effectiveBiomechanicsResult?.metrics.quality ?? "—"}</strong><small>{effectiveBiomechanicsResult ? "on-device pose" : "run COM analysis"}</small></div>
+          </div>
+          <div className="summary-footer">
+            <p><strong>Review the analysis</strong><span>Check the video against the detected timestamps, then open insights for pace and center-of-mass details.</span></p>
+            <div className="button-row">
+              <a className="button-link" href="#video-review">Review video</a>
+              <a className="button-link primary" href="#center-of-mass">View insights</a>
+            </div>
+          </div>
+        </section>
+
+        <Card title="Save this analysis" className="full secondary-card session-card">
+          <details className="session-details">
+            <summary><span><strong>Session details & saved analyses</strong><small>Add an athlete name, notes, or reopen an earlier result.</small></span><span>Manage</span></summary>
+            <div className="session-details-content">
           <details className="help-details">
             <summary>Session name and athlete details</summary>
           <div className="form-grid">
@@ -1883,25 +2668,41 @@ function App() {
             Sessions save zones, timing, compact biomechanics results, settings, and notes in this browser. Videos stay local and are not uploaded.
           </p>
           {sessionStatus && <p className="status-message">{sessionStatus}</p>}
+            </div>
+          </details>
         </Card>
 
-        <Card title="2. Video Player" className="wide">
+        <Card id="video-review" title="Review the run" className="full video-review-card">
           <div className="video-viewport">
             <video
               ref={videoRef}
               src={videoUrl ?? undefined}
               className="video-player"
+              preload="metadata"
               controls={!videoAnalysisRunning}
               onLoadedMetadata={handleMetadataLoaded}
+              onError={handleVideoLoadError}
               onTimeUpdate={(event) => setCurrentTime(event.currentTarget.currentTime)}
               onSeeked={(event) => setCurrentTime(event.currentTarget.currentTime)}
             />
             <PoseVideoOverlay
-              result={biomechanics.result}
+              result={videoUrl && metadata?.metadataLoaded ? effectiveBiomechanicsResult : undefined}
+              calibration={biomechanics.calibration}
+              hold10ImageOverride={hold10ImageOverride}
+              alignedRouteHolds={routeAlignment?.holds.length
+                ? routeAlignment.holds.filter((hold) => Boolean(hold.observedImage))
+                : undefined}
               currentTime={currentTime}
               videoWidth={metadata?.videoWidth ?? 0}
               videoHeight={metadata?.videoHeight ?? 0}
             />
+            {autoAnalysisRunning && (
+              <div className="video-analysis-overlay" aria-hidden="true">
+                <span className="analysis-spinner" />
+                <strong>Reading climb</strong>
+                <small>{autoAnalysisStatus || "Synchronizing video signals…"}</small>
+              </div>
+            )}
           </div>
           <div className="player-controls">
             <button disabled={videoAnalysisRunning} onClick={() => (videoRef.current?.paused ? videoRef.current.play() : videoRef.current?.pause())}>
@@ -1921,10 +2722,72 @@ function App() {
             />
             <button disabled={videoAnalysisRunning} onClick={() => jumpTo(Number(jumpInput))}>Jump</button>
           </div>
+          {routeAlignment && (
+            <p className={routeAlignment.aligned || routeAlignment.holds.length ? "status-message" : "guidance"}>
+              {routeAlignment.aligned
+                ? `Route registered: ${routeAlignment.diagnostics.matchedHoldIds.length}/20 visible holds matched. Number markers now sit on the detected holds.`
+                : routeAlignment.holds.length
+                  ? `Partial route: ${routeAlignment.holds.length}/20 direct hold silhouettes matched. Uncertain markers and Hold 10 are hidden. ${routeAlignment.reason}`
+                  : `Route markers hidden: ${routeAlignment.reason}`}
+            </p>
+          )}
+          {timestampReview && (
+            <div className="timestamp-review" aria-live="polite">
+              <div className="timestamp-review-heading">
+                <div>
+                  <span className="review-eyebrow">Review before accepting</span>
+                  <strong>{timestampReview.label}</strong>
+                </div>
+                {timestampReview.confidence && <span className="review-confidence">{timestampReview.confidence} confidence</span>}
+              </div>
+              <div className="timestamp-review-times">
+                <div>
+                  <span>Suggested</span>
+                  <strong>{timestampReview.suggestedRawTime.toFixed(3)}s</strong>
+                </div>
+                <div>
+                  <span>Frame on screen</span>
+                  <strong>{currentTime.toFixed(3)}s</strong>
+                </div>
+                <div>
+                  <span>Adjustment</span>
+                  <strong>{formatSignedTime(currentTime - timestampReview.suggestedRawTime)}</strong>
+                </div>
+              </div>
+              <p>
+                Pause on the exact visual moment. Use the frame buttons above, then accept the frame currently shown in the player.
+              </p>
+              <div className="button-row timestamp-review-actions">
+                <button onClick={() => jumpTo(timestampReview.suggestedRawTime)}>Return to suggestion</button>
+                <button
+                  className="primary"
+                  onClick={() => {
+                    timestampReview.onAccept(currentTime);
+                    setTimestampReview(null);
+                  }}
+                >
+                  {timestampReview.acceptLabel} at {currentTime.toFixed(3)}s
+                </button>
+                <button onClick={() => setTimestampReview(null)}>Close review</button>
+              </div>
+            </div>
+          )}
           {videoRestoreStatus && <p className="status-message">{videoRestoreStatus}</p>}
         </Card>
 
-        <Card title="3. Optional Zones" className="wide">
+        <details className="advanced-workspace full" id="review-tools">
+          <summary>
+            <span><strong>Review & advanced tools</strong><small>Only open this when an automatic suggestion needs a closer look.</small></span>
+            <span className="advanced-summary-action">Open controls</span>
+          </summary>
+          <div className="advanced-workspace-grid">
+        <Card id="zones" title="Manual lane setup" className="full secondary-card">
+          <details className="section-details">
+            <summary>
+              <span>Open manual zone setup</span>
+              <small>Correct the athlete lane, start light, or projected Hold 10 only when automatic setup needs help.</small>
+            </summary>
+            <div className="section-details-content">
           <div className="toolbar">
             <button className="primary" onClick={captureCurrentFrameForZones} disabled={videoAnalysisRunning}>
               Capture Current Frame for Zone Setup
@@ -1936,11 +2799,31 @@ function App() {
                 </option>
               ))}
             </select>
-            <button disabled={videoAnalysisRunning} onClick={() => setZones((current) => omitZone(current, selectedZoneId))}>Delete selected zone</button>
-            <button disabled={videoAnalysisRunning} onClick={() => setZones({})}>Clear all zones</button>
+            <button
+              disabled={videoAnalysisRunning}
+              onClick={() => {
+                pendingAutomaticContextRef.current = null;
+                if (selectedZoneId === "startLight") {
+                  invalidateStartLightDependents("Start-light region deleted; its learned colors and finish were cleared.");
+                }
+                setZones((current) => omitZone(current, selectedZoneId));
+              }}
+            >
+              Delete selected zone
+            </button>
+            <button
+              disabled={videoAnalysisRunning}
+              onClick={() => {
+                pendingAutomaticContextRef.current = null;
+                invalidateStartLightDependents("All zones and lane-light calibration were cleared.");
+                setZones({});
+              }}
+            >
+              Clear all zones
+            </button>
           </div>
           <p className="muted zone-helper">
-            You normally do not need a Start Light Zone anymore. Add a Start Body Zone only when another person appears in the video, or draw a light zone manually if automatic green-to-blue search fails.
+            Zones are normally unnecessary. If two climbers are visible, draw one rough Start Body Zone around your climber so identity stays locked to that lane. Draw a Start Light Zone only if automatic sensor discovery fails. If the numbered route overlay places Hold 10 incorrectly, draw a small Hold 10 Zone over the real hold to correct contact timing.
           </p>
 
           {capturedFrame ? (
@@ -1973,21 +2856,23 @@ function App() {
             <p className="muted">Capture a frame to draw normalized detection zones.</p>
           )}
           <ZoneWarnings zones={zones} />
+            </div>
+          </details>
         </Card>
 
-        <Card title="4. Start Timing">
+        <Card id="timing" title="Start timing">
           <p className="muted">
-            Quick Analyze searches multiple scales and both lanes for faint green→blue lights in the lower frame (the start box always sits below the first two holds), detects the countdown or a single loud start beep locally, and compares them with motion. Conflicting cues are left for review instead of silently accepted.
+            Quick Analyze searches the full clip, ignores upper-wall activity, and timestamps the first real blue-directed change near the floor instead of treating a climber covering green as the start. The later clear blue state verifies the faint onset. Exact octave-up audio anchors timing, and first movement is measured above the light spill inside the selected athlete lane.
           </p>
           <details className="help-details">
             <summary>Manual timing settings</summary>
           <div className="form-grid">
             <label>
-              Search start
+              Ignore video before (seconds)
               <input type="number" value={startSearchStart} step="0.1" onChange={(event) => setStartSearchStart(Number(event.target.value))} />
             </label>
             <label>
-              Search end
+              Motion-fallback search end
               <input type="number" value={startSearchEnd} step="0.1" onChange={(event) => setStartSearchEnd(Number(event.target.value))} />
             </label>
             <label>
@@ -2076,8 +2961,7 @@ function App() {
             <button
               disabled={videoAnalysisRunning}
               onClick={() => {
-                setStartLightCalibration({});
-                setCalibrationStatus("Manual light calibration cleared.");
+                invalidateStartLightDependents("Manual light calibration and dependent finish timing were cleared.");
               }}
             >
               Clear light calibration
@@ -2113,6 +2997,17 @@ function App() {
               })
             }
             onJumpCandidate={(candidate, delta = 0) => jumpTo(Math.max(0, roundTime(candidate.rawTime + startSignalOffset + delta)))}
+            onReviewCandidate={(candidate) => reviewTimestamp({
+              label: `Start signal backup (${candidate.kind})`,
+              suggestedRawTime: Math.max(0, roundTime(candidate.rawTime + startSignalOffset)),
+              confidence: candidate.confidence,
+              acceptLabel: "Accept start",
+              onAccept: (rawTime) => acceptTimestamp("startSignal", rawTime, startSourceForCandidate(candidate), candidate.confidence, {
+                detectedRawTime: candidate.rawTime,
+                offsetApplied: roundTime(rawTime - candidate.rawTime),
+                note: `${candidate.reason} Reviewed against the video frame.`,
+              }),
+            })}
             getCandidateJumpTarget={(candidate) => Math.max(0, roundTime(candidate.rawTime + startSignalOffset))}
             onAccept={() =>
               startResult?.rawTime !== undefined &&
@@ -2122,6 +3017,17 @@ function App() {
                 note: startResult.debug.detectionMethod === "Motion-based start estimate" ? `${startResult.reason} Estimated from body motion, not light-detected. Review recommended.` : startResult.reason,
               })
             }
+            onReview={() => startResult?.rawTime !== undefined && reviewTimestamp({
+              label: "Suggested start signal",
+              suggestedRawTime: Math.max(0, roundTime(startResult.rawTime + startSignalOffset)),
+              confidence: startResult.confidence,
+              acceptLabel: "Accept start",
+              onAccept: (rawTime) => acceptTimestamp("startSignal", rawTime, startSourceForResult(startResult), startResult.confidence, {
+                detectedRawTime: startResult.rawTime!,
+                offsetApplied: roundTime(rawTime - startResult.rawTime!),
+                note: `${startResult.reason} Reviewed against the video frame.`,
+              }),
+            })}
             onJump={(delta = 0) => jumpTo(startFinalRaw !== undefined ? Math.max(0, roundTime(startFinalRaw + delta)) : undefined)}
             onReject={() => {
               setStartResult(null);
@@ -2132,7 +3038,7 @@ function App() {
           />
         </Card>
 
-        <Card title="5. First Movement">
+        <Card title="First movement">
           <p className="muted">Quick Analyze runs this automatically after the color-defined start. Open settings only when manual tuning is needed.</p>
           <details className="help-details">
             <summary>Manual movement settings</summary>
@@ -2212,6 +3118,20 @@ function App() {
               })
             }
             onJumpCandidate={(candidate, delta = 0) => jumpTo(Math.max(0, roundTime(candidate.rawTime + firstMovementOffset + delta)))}
+            onReviewCandidate={(candidate) => {
+              const definition = movementDefinitionForCandidate(candidate);
+              reviewTimestamp({
+                label: `${movementDefinitionLabel(definition)} backup`,
+                suggestedRawTime: Math.max(0, roundTime(candidate.rawTime + firstMovementOffset)),
+                confidence: candidate.confidence,
+                acceptLabel: `Accept ${movementDefinitionLabel(definition).toLowerCase()}`,
+                onAccept: (rawTime) => acceptTimestamp(definition === "committed" ? "committedLaunch" : "firstMovement", rawTime, "Body motion detection", candidate.confidence, {
+                  detectedRawTime: candidate.rawTime,
+                  offsetApplied: roundTime(rawTime - candidate.rawTime),
+                  note: `${candidate.reason} Reviewed against the video frame.`,
+                }),
+              });
+            }}
             getCandidateJumpTarget={(candidate) => Math.max(0, roundTime(candidate.rawTime + firstMovementOffset))}
             candidatePreviewFrames={movementPreviewFrames}
             defaultCandidateSource="Body motion detection"
@@ -2224,25 +3144,86 @@ function App() {
                 note: movementResult.reason,
               })
             }
+            onReview={() => movementResult?.rawTime !== undefined && reviewTimestamp({
+              label: `Suggested ${movementDefinitionLabel(firstMovementDefinition).toLowerCase()}`,
+              suggestedRawTime: Math.max(0, roundTime(movementResult.rawTime + firstMovementOffset)),
+              confidence: movementResult.confidence,
+              acceptLabel: `Accept ${movementDefinitionLabel(firstMovementDefinition).toLowerCase()}`,
+              onAccept: (rawTime) => acceptTimestamp(firstMovementDefinition === "committed" ? "committedLaunch" : "firstMovement", rawTime, "Body motion detection", movementResult.confidence, {
+                detectedRawTime: movementResult.rawTime!,
+                offsetApplied: roundTime(rawTime - movementResult.rawTime!),
+                note: `${movementResult.reason} Reviewed against the video frame.`,
+              }),
+            })}
             onJump={(delta = 0) => jumpTo(movementFinalRaw !== undefined ? Math.max(0, roundTime(movementFinalRaw + delta)) : undefined)}
             onReject={() => setMovementResult(null)}
             emptyText="First Movement not detected."
           />
         </Card>
 
-        <Card title="6. Official Finish Time">
+        <Card title="Finish timing">
+          <p className="muted">
+            ClimbIQ follows the same selected lane light after the start. It learns the during-climb state, timestamps the first persistent switch to the opposite calibrated state, and verifies it afterward—whether the video shows blue → green or green → blue.
+          </p>
+          <div className="button-row">
+            <button
+              className="primary"
+              disabled={videoAnalysisRunning || startSignalRaw === null || !zones.startLight || !calibrationReady}
+              onClick={runAutomaticFinishDetection}
+            >
+              {finishRunning ? "Finding finish…" : "Find finish automatically"}
+            </button>
+          </div>
+          {finishStatus && <p className="status-line">{finishStatus}</p>}
+          {finishResult?.detected && finishResult.rawTime !== undefined && startSignalRaw !== null && (
+            <div className="suggestion-card">
+              <h3>Detected lane-light finish</h3>
+              <p>Raw video time: {finishResult.rawTime.toFixed(3)}s</p>
+              <p>Climb time: {(finishResult.rawTime - startSignalRaw).toFixed(3)}s</p>
+              <p>Confidence: {finishResult.confidence}</p>
+              <p className="muted">{finishResult.reason}</p>
+              <div className="button-row review-first-actions">
+                <button
+                  className="primary"
+                  onClick={() => reviewTimestamp({
+                    label: "Suggested finish",
+                    suggestedRawTime: finishResult.rawTime!,
+                    confidence: finishResult.confidence,
+                    acceptLabel: "Accept finish",
+                    onAccept: (rawTime) => acceptTimestamp("finishPad", rawTime, "Finish light detection", finishResult.confidence, {
+                      detectedRawTime: finishResult.rawTime,
+                      offsetApplied: roundTime(rawTime - finishResult.rawTime!),
+                      note: `${finishResult.reason} Reviewed against the video frame.`,
+                    }),
+                  })}
+                >
+                  Review finish at video
+                </button>
+                <button onClick={() => acceptTimestamp("finishPad", finishResult.rawTime!, "Finish light detection", finishResult.confidence, {
+                  detectedRawTime: finishResult.rawTime,
+                  note: finishResult.reason,
+                })}>Accept without review</button>
+                <button onClick={() => setFinishResult(null)}>Dismiss</button>
+              </div>
+            </div>
+          )}
+          <hr />
           <label className="single-field">
-            Official total time
+            Official total time (optional cross-check)
             <input
               type="number"
               step="0.001"
               value={officialTotalTime}
               placeholder="13.125"
-              onChange={(event) => setOfficialTotalTime(event.target.value)}
+              onChange={(event) => {
+                setOfficialTotalTime(event.target.value);
+                setFinishResult(null);
+                setFinishStatus("Official-time cross-check changed. Rerun automatic finish detection if you want it compared.");
+              }}
             />
           </label>
           {startSignalRaw === null ? (
-            <p className="muted">Set Start Signal first, then official time can calculate Finish Pad.</p>
+            <p className="muted">Set Start Signal first; an official time can still calculate a fallback Finish Pad.</p>
           ) : finishSuggestion ? (
             <div className="suggestion-card">
               <h3>Suggested Finish Pad</h3>
@@ -2251,24 +3232,39 @@ function App() {
               <p>Source: Calculated from official total time, not video-detected</p>
               <p>Confidence: High</p>
               <p className="muted">Jump target: {finishSuggestion.rawTime.toFixed(3)}s raw</p>
-              <div className="button-row">
+              <div className="button-row review-first-actions">
                 <button
                   className="primary"
-                  onClick={() => acceptTimestamp("finishPad", finishSuggestion.rawTime, "Official total time", "High")}
+                  onClick={() => reviewTimestamp({
+                    label: "Official-time finish",
+                    suggestedRawTime: finishSuggestion.rawTime,
+                    confidence: "High",
+                    acceptLabel: "Accept finish",
+                    onAccept: (rawTime) => acceptTimestamp("finishPad", rawTime, "Official total time", "High", {
+                      detectedRawTime: finishSuggestion.rawTime,
+                      offsetApplied: roundTime(rawTime - finishSuggestion.rawTime),
+                      note: "Official-time finish reviewed against the video frame.",
+                    }),
+                  })}
                 >
-                  Accept Finish Pad
+                  Review finish at video
                 </button>
-                <button onClick={() => jumpTo(Math.max(0, roundTime(finishSuggestion.rawTime - 0.1)))}>Jump -0.10s</button>
-                <button onClick={() => jumpTo(finishSuggestion.rawTime)}>Jump exact</button>
-                <button onClick={() => jumpTo(roundTime(finishSuggestion.rawTime + 0.1))}>Jump +0.10s</button>
+                <button onClick={() => acceptTimestamp("finishPad", finishSuggestion.rawTime, "Official total time", "High")}>Accept without review</button>
               </div>
             </div>
           ) : (
             <p className="muted">Enter an official total time to calculate Finish Pad.</p>
           )}
         </Card>
+          </div>
+        </details>
 
-        <Card title="7. Results" className="full">
+        <Card id="results" title="Verified moments" className="full results-card">
+          <details className="results-details">
+            <summary>
+              <span><strong>Review or edit exact timing markers</strong><small>Automatic results stay untouched unless you change them here.</small></span>
+              <span>Open marker editor</span>
+            </summary>
           <div className="table-wrap">
             <table>
               <thead>
@@ -2291,7 +3287,22 @@ function App() {
                     <td>{item.confidence}</td>
                     <td>
                       <div className="table-actions">
-                        <button onClick={() => jumpTo(item.rawTime)}>Jump</button>
+                        <button
+                          disabled={item.rawTime === null}
+                          onClick={() => item.rawTime !== null && reviewTimestamp({
+                            label: item.label,
+                            suggestedRawTime: item.rawTime,
+                            confidence: item.confidence,
+                            acceptLabel: "Update marker",
+                            onAccept: (rawTime) => acceptTimestamp(item.id, rawTime, "Manual", "Medium", {
+                              detectedRawTime: item.rawTime ?? undefined,
+                              offsetApplied: item.rawTime === null ? undefined : roundTime(rawTime - item.rawTime),
+                              note: "Accepted time reviewed and adjusted in the video player.",
+                            }),
+                          })}
+                        >
+                          Review
+                        </button>
                         <button onClick={() => clearTimestamp(item.id)}>Clear</button>
                         <button onClick={() => acceptTimestamp(item.id, currentTime, "Manual", "Medium")}>Set current</button>
                         <input placeholder="Raw" onBlur={(event) => setTimestampFromInput(item.id, event.target.value, "raw")} />
@@ -2307,17 +3318,93 @@ function App() {
               </tbody>
             </table>
           </div>
+          </details>
         </Card>
 
-        <Card title="8. Splits">
-          <div className="split-grid">
-            {splitRows.map((row) => (
-              <Metric key={row.label} label={row.label} value={row.value === null ? "Not set" : `${row.value.toFixed(3)}s`} />
-            ))}
-          </div>
+        <Card id="splits" title="Performance splits" className="full splits-card">
+          {effectiveBiomechanicsResult && (
+            <>
+              <p className="muted">
+                Wall halves and thirds come from upward center-of-mass progress. Hold 10 is timed separately only when a tracked hand settles near the projected Hold 10 marker.
+              </p>
+              <div className={hold10Contact?.detected ? "hold-contact-summary detected" : "hold-contact-summary"}>
+                <div>
+                  <strong>Hold 10 hand contact</strong>
+                  <span>
+                    {hold10Contact?.detected && hold10Contact.climbTime !== undefined
+                      ? `${hold10Contact.climbTime.toFixed(3)}s after start · ${hold10Contact.hand} hand · ${hold10Contact.distanceMeters?.toFixed(2)} m from the projected hold center${hold10Contact.evidence?.contactScore === undefined ? "" : ` · ${hold10Contact.evidence.contactScore.toFixed(0)}/100 evidence`}`
+                      : hold10Contact?.reason ?? (hold10Target.source === "standard-template"
+                        ? "Hold 10 timing is paused until the visible route aligns or you mark a manual Hold 10 zone."
+                        : "Run center-of-mass analysis to check hand contact with Hold 10.")}
+                  </span>
+                  <small>{hold10Target.source === "standard-template"
+                    ? "The generic diagram is used only as a search prior; ClimbIQ will not time contact from its unregistered position."
+                    : hold10Target.reason}</small>
+                </div>
+                {hold10Contact?.detected && hold10Contact.rawTime !== undefined && (
+                  <button onClick={() => reviewTimestamp({
+                    label: "Detected Hold 10 hand contact",
+                    suggestedRawTime: hold10Contact.rawTime!,
+                    confidence: hold10Contact.confidence,
+                    acceptLabel: "Set Hold 10",
+                    onAccept: (rawTime) => acceptTimestamp("hold10", rawTime, "Manual", "Medium", {
+                      detectedRawTime: hold10Contact.rawTime,
+                      offsetApplied: roundTime(rawTime - hold10Contact.rawTime!),
+                      note: `${hold10Contact.reason} Reviewed against the exact video frame.`,
+                    }),
+                  })}>
+                    Review Hold 10
+                  </button>
+                )}
+              </div>
+              {finishTrimmedBiomechanics?.cutoff.source === "top-completion" && (
+                <p className="status-message">
+                  COM stopped at {finishTrimmedBiomechanics.cutoff.cutoffRawTime.toFixed(3)}s raw when the athlete completed the top. Post-finish descent is excluded from the path, speed, and splits.
+                </p>
+              )}
+            </>
+          )}
+          {routeSplitAnalysis?.available ? (
+            <>
+              <div className="split-grid automatic-split-grid">
+                <Metric
+                  label="Bottom wall half"
+                  value={routeSplitAnalysis.halfway.climbTime === undefined ? "Needs more tracking" : `${routeSplitAnalysis.halfway.climbTime.toFixed(3)}s`}
+                />
+                <Metric
+                  label="Top half"
+                  value={routeSplitAnalysis.halfway.climbTime === undefined || !effectiveBiomechanicsResult
+                    ? "Needs more tracking"
+                    : `${Math.max(0, effectiveBiomechanicsResult.endRawTime - effectiveBiomechanicsResult.startRawTime - routeSplitAnalysis.halfway.climbTime).toFixed(3)}s`}
+                />
+                {routeSplitAnalysis.sections.map((section) => (
+                  <Metric
+                    key={section.id}
+                    label={section.label}
+                    value={section.sectionTimeSeconds === undefined ? "Needs more tracking" : `${section.sectionTimeSeconds.toFixed(3)}s`}
+                  />
+                ))}
+              </div>
+              {routeSplitAnalysis.slowestSectionId && (
+                <p className="status-message">
+                  Slowest wall section: {routeSplitAnalysis.sections.find((section) => section.id === routeSplitAnalysis.slowestSectionId)?.label}. Open Center of Mass below to review that section in the video.
+                </p>
+              )}
+            </>
+          ) : (
+            <p className="guidance">Run center-of-mass analysis to calculate the bottom half, top half, and three wall-section splits automatically.</p>
+          )}
+          <details className="help-details">
+            <summary>Manual and contact-based splits</summary>
+            <div className="split-grid">
+              {splitRows.map((row) => (
+                <Metric key={row.label} label={row.label} value={row.value === null ? "Not set" : `${row.value.toFixed(3)}s`} />
+              ))}
+            </div>
+          </details>
         </Card>
 
-        <Card title="9. Center of Mass" className="full">
+        <Card id="center-of-mass" title="Performance insights" className="full insights-card">
           <BiomechanicsPanel
             key={`${videoUrl ?? "no-video"}:${activeSessionId ?? "unsaved-session"}`}
             videoRef={videoRef}
@@ -2325,17 +3412,26 @@ function App() {
             currentTime={currentTime}
             startRawTime={startSignalRaw}
             finishRawTime={getTimestamp(timestamps, "finishPad").rawTime}
+            fallbackFinishRawTime={analysisFinishFallbackRawTime}
             identityZone={zones.startBody}
             session={biomechanics}
+            displayResult={effectiveBiomechanicsResult}
+            finishCutoff={finishTrimmedBiomechanics?.cutoff}
             analysisBlocked={startRunning || movementRunning || movementPreviewRunning || frameTestRunning || autoAnalysisRunning}
-            onSessionChange={setBiomechanics}
+            onSessionChange={(nextSession) => {
+              if (nextSession.calibration !== biomechanics.calibration) {
+                setRouteAlignment(null);
+              }
+              setBiomechanics(nextSession);
+            }}
             onRunningChange={setBiomechanicsRunning}
             onJump={jumpTo}
             runVideoTask={runNamedVideoTask}
+            onLocateRoute={locateVisibleRouteHolds}
           />
         </Card>
 
-        <Card title="Export & Dataset" className="wide">
+        <Card id="export" title="Save & export" className="full secondary-card export-card">
           <p className="muted">
             Export a human-readable Obsidian note or machine-readable JSON dataset. Videos are not stored or uploaded.
           </p>
@@ -2380,15 +3476,34 @@ function App() {
             </ol>
           </details>
         </Card>
+          </>
+        )}
 
       </section>
+      {autoAnalysisRunning && (
+        <aside className="analysis-tray" aria-live="polite">
+          <span className="analysis-spinner" aria-hidden="true" />
+          <div><strong>ClimbIQ is analyzing your video</strong><small>{autoAnalysisStatus || "Finding the athlete, timing signals, and wall geometry…"}</small></div>
+          <button onClick={() => autoAnalysisAbortRef.current?.abort()}>Cancel</button>
+        </aside>
+      )}
     </main>
   );
 }
 
-function Card({ title, children, className = "" }: { title: string; children: React.ReactNode; className?: string }) {
+function Card({
+  id,
+  title,
+  children,
+  className = "",
+}: {
+  id?: string;
+  title: string;
+  children: React.ReactNode;
+  className?: string;
+}) {
   return (
-    <section className={`card ${className}`}>
+    <section id={id} className={`card ${className}`}>
       <h2>{title}</h2>
       {children}
     </section>
@@ -2644,6 +3759,8 @@ function DetectionCard({
   onAcceptCandidate,
   onAcceptCandidateAs,
   onJumpCandidate,
+  onReview,
+  onReviewCandidate,
   getCandidateJumpTarget,
   candidatePreviewFrames,
   defaultCandidateSource,
@@ -2666,6 +3783,8 @@ function DetectionCard({
   onAcceptCandidate?: (candidate: DetectionCandidate) => void;
   onAcceptCandidateAs?: (candidate: DetectionCandidate, definition: FirstMovementDefinition) => void;
   onJumpCandidate?: (candidate: DetectionCandidate, delta?: number) => void;
+  onReview?: () => void;
+  onReviewCandidate?: (candidate: DetectionCandidate) => void;
   getCandidateJumpTarget?: (candidate: DetectionCandidate) => number;
   candidatePreviewFrames?: Record<string, CandidatePreviewFrames>;
   defaultCandidateSource?: string;
@@ -2694,9 +3813,11 @@ function DetectionCard({
         <DetectionDebugSummary result={result} />
         <CandidateList
           candidates={candidates}
+          suggestedRawTime={result.rawTime}
           onAcceptCandidate={onAcceptCandidate}
           onAcceptCandidateAs={onAcceptCandidateAs}
           onJumpCandidate={onJumpCandidate}
+          onReviewCandidate={onReviewCandidate}
           getCandidateJumpTarget={getCandidateJumpTarget}
           candidatePreviewFrames={candidatePreviewFrames}
           defaultCandidateSource={defaultCandidateSource}
@@ -2728,16 +3849,6 @@ function DetectionCard({
           <small>{finalClimbTime !== undefined ? `${finalClimbTime.toFixed(3)}s climb` : `${(climbTime ?? 0).toFixed(3)}s climb`}</small>
         </div>
       </div>
-      {onOffsetChange && (
-        <div className="button-row compact-row">
-          {offsetButtons.map((buttonOffset) => (
-            <button key={buttonOffset} onClick={() => onOffsetChange(buttonOffset)}>
-              {buttonOffset.toFixed(2)}s
-            </button>
-          ))}
-          <button onClick={() => onOffsetChange(0)}>reset</button>
-        </div>
-      )}
       <p>Confidence: {result.confidence}</p>
       {"detectionMethod" in result.debug && result.debug.detectionMethod && <p>Source: {result.debug.detectionMethod}</p>}
       <p>Reason: {result.reason}</p>
@@ -2753,21 +3864,33 @@ function DetectionCard({
       )}
       <DetectionDebugSummary result={result} />
       <p className="muted">Jump target: {jumpTarget.toFixed(3)}s raw</p>
-      <div className="button-row">
-        <button className="primary" onClick={onAccept}>
-          {acceptLabel}
-        </button>
-        <button onClick={() => onJump(0)}>Jump to Suggestion</button>
-        <button onClick={() => onJump(-0.1)}>Jump -0.10s</button>
-        <button onClick={() => onJump(0)}>Jump exact</button>
-        <button onClick={() => onJump(0.1)}>Jump +0.10s</button>
+      <div className="button-row review-first-actions">
+        <button className="primary" onClick={onReview ?? (() => onJump(0))}>Review at video</button>
+        <button onClick={onAccept}>{acceptLabel} without review</button>
         <button onClick={onReject}>Reject</button>
       </div>
+      <details className="candidate-advanced">
+        <summary>Fine-tune this time</summary>
+        <p className="muted">Preview nearby frames, or apply a small correction before accepting.</p>
+        <div className="button-row compact-row">
+          <button onClick={() => onJump(-0.1)}>Preview -0.10s</button>
+          <button onClick={() => onJump(0)}>Preview exact</button>
+          <button onClick={() => onJump(0.1)}>Preview +0.10s</button>
+          {onOffsetChange && offsetButtons.map((buttonOffset) => (
+            <button key={buttonOffset} onClick={() => onOffsetChange(buttonOffset)}>
+              Correction {buttonOffset.toFixed(2)}s
+            </button>
+          ))}
+          {onOffsetChange && <button onClick={() => onOffsetChange(0)}>Reset correction</button>}
+        </div>
+      </details>
       <CandidateList
         candidates={candidates}
+        suggestedRawTime={result.rawTime}
         onAcceptCandidate={onAcceptCandidate}
         onAcceptCandidateAs={onAcceptCandidateAs}
         onJumpCandidate={onJumpCandidate}
+        onReviewCandidate={onReviewCandidate}
         getCandidateJumpTarget={getCandidateJumpTarget}
         candidatePreviewFrames={candidatePreviewFrames}
         defaultCandidateSource={defaultCandidateSource}
@@ -2779,18 +3902,22 @@ function DetectionCard({
 
 function CandidateList({
   candidates,
+  suggestedRawTime,
   onAcceptCandidate,
   onAcceptCandidateAs,
   onJumpCandidate,
+  onReviewCandidate,
   getCandidateJumpTarget,
   candidatePreviewFrames,
   defaultCandidateSource = "Detection",
   showMovementCandidateActions = false,
 }: {
   candidates: DetectionCandidate[];
+  suggestedRawTime?: number;
   onAcceptCandidate?: (candidate: DetectionCandidate) => void;
   onAcceptCandidateAs?: (candidate: DetectionCandidate, definition: FirstMovementDefinition) => void;
   onJumpCandidate?: (candidate: DetectionCandidate, delta?: number) => void;
+  onReviewCandidate?: (candidate: DetectionCandidate) => void;
   getCandidateJumpTarget?: (candidate: DetectionCandidate) => number;
   candidatePreviewFrames?: Record<string, CandidatePreviewFrames>;
   defaultCandidateSource?: string;
@@ -2800,63 +3927,176 @@ function CandidateList({
     return null;
   }
 
+  const rankedCandidates = [...candidates].sort(compareReviewCandidates);
+  const primaryCandidate = suggestedRawTime === undefined ? rankedCandidates[0] : undefined;
+  const referenceTime = suggestedRawTime ?? primaryCandidate?.rawTime;
+  const minimumBackupGap = showMovementCandidateActions ? 0.08 : 0.12;
+  const backupCandidate = referenceTime === undefined
+    ? undefined
+    : rankedCandidates.find((candidate) =>
+      candidate !== primaryCandidate &&
+      Math.abs(candidate.rawTime - referenceTime) >= minimumBackupGap,
+    );
+  const visibleCandidates = [primaryCandidate, backupCandidate].filter(
+    (candidate): candidate is DetectionCandidate => Boolean(candidate),
+  );
+  const hiddenCandidates = candidates.filter((candidate) => !visibleCandidates.includes(candidate));
+
   return (
     <div className="candidate-list">
-      <h4>Review candidates</h4>
-      {candidates.map((candidate) => {
-        const jumpTarget = getCandidateJumpTarget?.(candidate) ?? candidate.rawTime;
-        const previews = candidatePreviewFrames?.[movementCandidateKey(candidate)];
-
-        return (
-        <div key={`${candidate.rawTime}-${candidate.kind}`} className="candidate-row">
-          <div>
-            <strong>{candidate.rawTime.toFixed(3)}s</strong>
-            {candidate.climbTime !== undefined && <span>Climb {candidate.climbTime.toFixed(3)}s</span>}
-            <span>{candidate.kind} / score {candidate.score.toFixed(3)} / {candidate.confidence}</span>
-            <span>Source: {candidate.method ?? defaultCandidateSource}</span>
-            {(candidate.distanceToBefore !== undefined || candidate.distanceToAfter !== undefined) && (
-              <span>
-                Before {candidate.distanceToBefore?.toFixed(3) ?? "n/a"} / After {candidate.distanceToAfter?.toFixed(3) ?? "n/a"}
-              </span>
-            )}
-            {candidate.detectedMovementRawTime !== undefined && (
-              <span>
-                First movement {candidate.detectedMovementRawTime.toFixed(3)}s / reaction offset {candidate.reactionOffset?.toFixed(2) ?? "n/a"}s
-              </span>
-            )}
-            {candidate.persistenceFrames !== undefined && <span>Persistence: {candidate.persistenceFrames} sample{candidate.persistenceFrames === 1 ? "" : "s"}</span>}
-            {candidate.suspiciousFirstFrame && (
-              <span>Detection occurred very close to the first sampled frame. Verify this is real movement and not sampling noise.</span>
-            )}
-            {candidate.preloadFlag && <span>Possible preload / weight shift before committed launch.</span>}
-            {candidate.method === "Motion-based start estimate" && (
-              <span>Estimated from body motion, not light-detected. Review recommended.</span>
-            )}
-            {candidate.rgb && (
-              <span className="inline-swatch"><ColorSwatch rgb={candidate.rgb} /> Candidate RGB {candidate.rgb.r}, {candidate.rgb.g}, {candidate.rgb.b}</span>
-            )}
-            <p>{candidate.reason}{candidate.boundaryRisk ? " Edge-of-window candidate." : ""}</p>
-            <span className="muted">Jump target: {jumpTarget.toFixed(3)}s raw</span>
-            {previews && <CandidatePreviewStrip previews={previews} />}
-          </div>
-          <div className="candidate-actions">
-            <button onClick={() => onJumpCandidate?.(candidate, -0.1)}>Jump -0.10s</button>
-            <button onClick={() => onJumpCandidate?.(candidate, 0)}>Jump exact</button>
-            <button onClick={() => onJumpCandidate?.(candidate, 0.1)}>Jump +0.10s</button>
-            {showMovementCandidateActions ? (
-              <>
-                <button className="primary" onClick={() => onAcceptCandidateAs?.(candidate, "earliest")}>Accept as Earliest Motion</button>
-                <button className="primary" onClick={() => onAcceptCandidateAs?.(candidate, "committed")}>Accept as Committed Launch</button>
-              </>
-            ) : (
-              <button className="primary" onClick={() => onAcceptCandidate?.(candidate)}>Accept</button>
-            )}
-          </div>
-        </div>
-        );
-      })}
+      {visibleCandidates.length > 0 && (
+        <>
+          <h4>{suggestedRawTime === undefined ? "Best available options" : "Backup option"}</h4>
+          {visibleCandidates.map((candidate, index) => (
+            <CandidateRow
+              key={`${candidate.rawTime}-${candidate.kind}-${index}`}
+              candidate={candidate}
+              compact
+              label={primaryCandidate === candidate ? "Best available" : "Different timing"}
+              onAcceptCandidate={onAcceptCandidate}
+              onAcceptCandidateAs={onAcceptCandidateAs}
+              onJumpCandidate={onJumpCandidate}
+              onReviewCandidate={onReviewCandidate}
+              getCandidateJumpTarget={getCandidateJumpTarget}
+              candidatePreviewFrames={candidatePreviewFrames}
+              defaultCandidateSource={defaultCandidateSource}
+              showMovementCandidateActions={showMovementCandidateActions}
+            />
+          ))}
+        </>
+      )}
+      {hiddenCandidates.length > 0 && (
+        <details className="candidate-advanced">
+          <summary>Advanced: {hiddenCandidates.length} technical detector result{hiddenCandidates.length === 1 ? "" : "s"}</summary>
+          <p className="muted">These are supporting signals and near-duplicate timings. The automatic recommendation already considers them.</p>
+          {hiddenCandidates.map((candidate, index) => (
+            <CandidateRow
+              key={`${candidate.rawTime}-${candidate.kind}-${index}`}
+              candidate={candidate}
+              onAcceptCandidate={onAcceptCandidate}
+              onAcceptCandidateAs={onAcceptCandidateAs}
+              onJumpCandidate={onJumpCandidate}
+              onReviewCandidate={onReviewCandidate}
+              getCandidateJumpTarget={getCandidateJumpTarget}
+              candidatePreviewFrames={candidatePreviewFrames}
+              defaultCandidateSource={defaultCandidateSource}
+              showMovementCandidateActions={showMovementCandidateActions}
+            />
+          ))}
+        </details>
+      )}
     </div>
   );
+}
+
+function CandidateRow({
+  candidate,
+  compact = false,
+  label,
+  onAcceptCandidate,
+  onAcceptCandidateAs,
+  onJumpCandidate,
+  onReviewCandidate,
+  getCandidateJumpTarget,
+  candidatePreviewFrames,
+  defaultCandidateSource,
+  showMovementCandidateActions,
+}: {
+  candidate: DetectionCandidate;
+  compact?: boolean;
+  label?: string;
+  onAcceptCandidate?: (candidate: DetectionCandidate) => void;
+  onAcceptCandidateAs?: (candidate: DetectionCandidate, definition: FirstMovementDefinition) => void;
+  onJumpCandidate?: (candidate: DetectionCandidate, delta?: number) => void;
+  onReviewCandidate?: (candidate: DetectionCandidate) => void;
+  getCandidateJumpTarget?: (candidate: DetectionCandidate) => number;
+  candidatePreviewFrames?: Record<string, CandidatePreviewFrames>;
+  defaultCandidateSource: string;
+  showMovementCandidateActions: boolean;
+}) {
+  const jumpTarget = getCandidateJumpTarget?.(candidate) ?? candidate.rawTime;
+  const previews = candidatePreviewFrames?.[movementCandidateKey(candidate)];
+  const movementDefinition = movementDefinitionForCandidate(candidate);
+
+  return (
+    <div className={`candidate-row${compact ? " compact-candidate" : ""}`}>
+      <div>
+        <strong>{label ? `${label}: ` : ""}{candidate.rawTime.toFixed(3)}s</strong>
+        {candidate.climbTime !== undefined && <span>Climb {candidate.climbTime.toFixed(3)}s</span>}
+        <span>{compact ? `${candidate.confidence} confidence · ${candidate.kind}` : `${candidate.kind} / score ${candidate.score.toFixed(3)} / ${candidate.confidence}`}</span>
+        <span>Source: {candidate.method ?? defaultCandidateSource}</span>
+        {!compact && (candidate.distanceToBefore !== undefined || candidate.distanceToAfter !== undefined) && (
+          <span>
+            Before {candidate.distanceToBefore?.toFixed(3) ?? "n/a"} / After {candidate.distanceToAfter?.toFixed(3) ?? "n/a"}
+          </span>
+        )}
+        {!compact && candidate.detectedMovementRawTime !== undefined && (
+          <span>
+            First movement {candidate.detectedMovementRawTime.toFixed(3)}s / reaction offset {candidate.reactionOffset?.toFixed(2) ?? "n/a"}s
+          </span>
+        )}
+        {!compact && candidate.persistenceFrames !== undefined && <span>Persistence: {candidate.persistenceFrames} sample{candidate.persistenceFrames === 1 ? "" : "s"}</span>}
+        {candidate.suspiciousFirstFrame && (
+          <span>Detection occurred very close to the first sampled frame. Verify this is real movement and not sampling noise.</span>
+        )}
+        {candidate.preloadFlag && <span>Possible preload / weight shift before committed launch.</span>}
+        {candidate.method === "Motion-based start estimate" && (
+          <span>Estimated from body motion, not light-detected. Review recommended.</span>
+        )}
+        {!compact && candidate.rgb && (
+          <span className="inline-swatch"><ColorSwatch rgb={candidate.rgb} /> Candidate RGB {candidate.rgb.r}, {candidate.rgb.g}, {candidate.rgb.b}</span>
+        )}
+        <p>{candidate.reason}{candidate.boundaryRisk ? " Edge-of-window candidate." : ""}</p>
+        {!compact && <span className="muted">Jump target: {jumpTarget.toFixed(3)}s raw</span>}
+        {previews && <CandidatePreviewStrip previews={previews} />}
+      </div>
+      <div className="candidate-actions">
+        {!compact && <button onClick={() => onJumpCandidate?.(candidate, -0.1)}>Jump -0.10s</button>}
+        <button onClick={() => onReviewCandidate ? onReviewCandidate(candidate) : onJumpCandidate?.(candidate, 0)}>
+          {compact ? "Review at video" : "Jump exact"}
+        </button>
+        {!compact && <button onClick={() => onJumpCandidate?.(candidate, 0.1)}>Jump +0.10s</button>}
+        {showMovementCandidateActions ? (
+          compact ? (
+            <button className="primary" onClick={() => onAcceptCandidateAs?.(candidate, movementDefinition)}>
+              {movementDefinition === "committed" ? "Use as Committed Launch" : "Use as First Movement"}
+            </button>
+          ) : (
+            <>
+              <button className="primary" onClick={() => onAcceptCandidateAs?.(candidate, "earliest")}>Accept as Earliest Motion</button>
+              <button className="primary" onClick={() => onAcceptCandidateAs?.(candidate, "committed")}>Accept as Committed Launch</button>
+            </>
+          )
+        ) : (
+          <button className="primary" onClick={() => onAcceptCandidate?.(candidate)}>{compact ? "Use this time" : "Accept"}</button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function compareReviewCandidates(left: DetectionCandidate, right: DetectionCandidate) {
+  const confidenceDifference = confidenceRank(right.confidence) - confidenceRank(left.confidence);
+  if (confidenceDifference !== 0) {
+    return confidenceDifference;
+  }
+
+  const leftRisk = Number(Boolean(left.boundaryRisk)) + Number(Boolean(left.suspiciousFirstFrame));
+  const rightRisk = Number(Boolean(right.boundaryRisk)) + Number(Boolean(right.suspiciousFirstFrame));
+  if (leftRisk !== rightRisk) {
+    return leftRisk - rightRisk;
+  }
+
+  return right.score - left.score;
+}
+
+function confidenceRank(confidence: Confidence) {
+  return confidence === "High" ? 3 : confidence === "Medium" ? 2 : 1;
+}
+
+function movementDefinitionForCandidate(candidate: DetectionCandidate): FirstMovementDefinition {
+  const kind = candidate.kind.toLowerCase();
+  return kind.includes("committed") || kind.includes("largest early motion") ? "committed" : "earliest";
 }
 
 function CandidatePreviewStrip({ previews }: { previews: CandidatePreviewFrames }) {
@@ -2894,19 +4134,24 @@ function DetectionDebugSummary({
       ? `${debug.baselineRgb.r}, ${debug.baselineRgb.g}, ${debug.baselineRgb.b}`
       : "n/a";
     return (
-      <div className="detection-summary">
-        <span>Baseline RGB: {baseline}</span>
-        <span>Method: {debug.detectionMethod ?? "Generic color-distance detection"}</span>
-        <span>First crossing: {formatOptionalTime(debug.firstThresholdCrossingTime)}</span>
-        <span>Strongest signal: {formatOptionalTime(debug.strongestSignalTime)}</span>
-        <span>Selected: {formatOptionalTime(debug.selectedCandidateTime)}</span>
-        {debug.selectedCandidateReason && <span>{debug.selectedCandidateReason}</span>}
-      </div>
+      <details className="technical-details">
+        <summary>Technical detection details</summary>
+        <div className="detection-summary">
+          <span>Baseline RGB: {baseline}</span>
+          <span>Method: {debug.detectionMethod ?? "Generic color-distance detection"}</span>
+          <span>First crossing: {formatOptionalTime(debug.firstThresholdCrossingTime)}</span>
+          <span>Strongest signal: {formatOptionalTime(debug.strongestSignalTime)}</span>
+          <span>Selected: {formatOptionalTime(debug.selectedCandidateTime)}</span>
+          {debug.selectedCandidateReason && <span>{debug.selectedCandidateReason}</span>}
+        </div>
+      </details>
     );
   }
 
   return (
-    <div className="detection-summary">
+    <details className="technical-details">
+      <summary>Technical motion details</summary>
+      <div className="detection-summary">
       <span>Start Signal used: {formatOptionalTime(debug.startSignalRawTime)}</span>
       <span>Window: {formatOptionalTime(debug.searchWindowStart)} to {formatOptionalTime(debug.searchWindowEnd)}</span>
       <span>Sample rate: {debug.sampleRateFps?.toFixed(0) ?? "n/a"} fps</span>
@@ -2949,7 +4194,8 @@ function DetectionDebugSummary({
           candidates={result.candidates ?? []}
         />
       )}
-    </div>
+      </div>
+    </details>
   );
 }
 
@@ -3031,13 +4277,13 @@ function buildAudioStartResult(audio: AudioStartResult): StartSignalDetectionRes
       confidence: audio.confidence,
       reason: audio.reason,
       score: audio.sequence?.length ?? 0,
-      kind: "Final countdown beep",
-      method: "Audio countdown detection",
+      kind: "Changed-pitch final start beep",
+      method: "Pitch-coded start audio detection",
       persistenceFrames: audio.sequence?.length,
     }] : [],
     debug: {
       zoneExists: false,
-      detectionMethod: "Audio countdown detection",
+      detectionMethod: "Pitch-coded start audio detection",
       framesSampled: audio.segments.length,
       maxColorDistance: 0,
       threshold: 0,
@@ -3116,6 +4362,11 @@ function yesNo(value: boolean) {
 
 function formatTime(value: number | null) {
   return value === null ? "Not set" : `${value.toFixed(3)}s`;
+}
+
+function formatSignedTime(value: number) {
+  const rounded = Math.abs(value) < 0.0005 ? 0 : value;
+  return `${rounded >= 0 ? "+" : ""}${rounded.toFixed(3)}s`;
 }
 
 function formatOptionalTime(value: number | undefined) {
@@ -3329,183 +4580,6 @@ function mergeTimestampDefaults(values: TimestampMarker[]) {
   }));
 }
 
-function createDefaultBiomechanicsSession(): BiomechanicsSession {
-  return {
-    version: 1,
-    settings: { ...DEFAULT_BIOMECHANICS_SETTINGS },
-  };
-}
-
-function compactBiomechanicsSession(session: BiomechanicsSession): BiomechanicsSession {
-  const sanitized = sanitizeBiomechanicsSession(session);
-  if (!sanitized.result) {
-    return sanitized;
-  }
-  return {
-    ...sanitized,
-    result: {
-      ...sanitized.result,
-      frames: sanitized.result.frames.map((frame) => ({ ...frame, landmarks: [] })),
-    },
-  };
-}
-
-function sanitizeBiomechanicsSession(value: unknown): BiomechanicsSession {
-  const fallback = createDefaultBiomechanicsSession();
-  if (!value || typeof value !== "object") {
-    return fallback;
-  }
-  const candidate = value as any;
-  const settings = {
-    sampleFps: [5, 10, 15].includes(Number(candidate.settings?.sampleFps))
-      ? Number(candidate.settings.sampleFps)
-      : fallback.settings.sampleFps,
-    minVisibility: boundedNumber(candidate.settings?.minVisibility, 0.2, 0.9, fallback.settings.minVisibility),
-    minMassCoverage: boundedNumber(candidate.settings?.minMassCoverage, 0.8, 1, fallback.settings.minMassCoverage),
-    smoothingWindowSeconds: boundedNumber(
-      candidate.settings?.smoothingWindowSeconds,
-      0.1,
-      0.35,
-      fallback.settings.smoothingWindowSeconds,
-    ),
-    anthropometricModel: "athletevision-published-male-reference" as const,
-  };
-
-  const calibrationCandidate = candidate.calibration as WallCalibration | undefined;
-  const calibration = validateWallCalibration(calibrationCandidate).valid ? calibrationCandidate : undefined;
-  const resultCandidate = candidate.result;
-  if (!calibration || !resultCandidate || typeof resultCandidate !== "object") {
-    return { version: 1, settings, calibration };
-  }
-
-  const startRawTime = finiteNumber(resultCandidate.startRawTime);
-  const endRawTime = finiteNumber(resultCandidate.endRawTime);
-  if (startRawTime === undefined || endRawTime === undefined || startRawTime < 0 || endRawTime <= startRawTime) {
-    return { version: 1, settings, calibration };
-  }
-
-  const frames = Array.isArray(resultCandidate.frames)
-    ? (resultCandidate.frames as unknown[])
-        .slice(0, 450)
-        .map((frame) => sanitizeBiomechanicsFrame(frame, settings.minMassCoverage))
-        .filter((frame): frame is BiomechanicsFrame => Boolean(frame))
-    : [];
-  if (!frames.length) {
-    return { version: 1, settings, calibration };
-  }
-  const recomputed = applyTrajectoryKinematics(frames, settings, calibration);
-  const result: BiomechanicsResult = {
-    version: 1,
-    createdAt: typeof resultCandidate.createdAt === "string" ? resultCandidate.createdAt : new Date().toISOString(),
-    method: "MediaPipe Pose Landmarker",
-    model: "Pose Landmarker Full",
-    modelVersion: "float16/1",
-    coordinateSystem: "calibrated-wall-plane",
-    startRawTime,
-    endRawTime,
-    identityZone: sanitizeBiomechanicsIdentityZone(resultCandidate.identityZone),
-    settings,
-    frames: recomputed.frames,
-    metrics: recomputed.metrics,
-    warnings: recomputed.warnings,
-  };
-  return { version: 1, settings, calibration, result };
-}
-
-function sanitizeBiomechanicsFrame(value: unknown, minMassCoverage: number): BiomechanicsFrame | null {
-  if (!value || typeof value !== "object") {
-    return null;
-  }
-  const candidate = value as any;
-  const rawTime = finiteNumber(candidate.rawTime);
-  const climbTime = finiteNumber(candidate.climbTime);
-  if (rawTime === undefined || climbTime === undefined || rawTime < 0) {
-    return null;
-  }
-  const landmarks = Array.isArray(candidate.landmarks)
-    ? candidate.landmarks.slice(0, 33).flatMap((landmark: any) => {
-        const index = Number(landmark?.index);
-        const x = finiteNumber(landmark?.x);
-        const y = finiteNumber(landmark?.y);
-        const z = finiteNumber(landmark?.z);
-        const visibility = finiteNumber(landmark?.visibility);
-        if (!Number.isInteger(index) || index < 0 || index > 32 || x === undefined || y === undefined || z === undefined ||
-          visibility === undefined || x < -0.25 || x > 1.25 || y < -0.25 || y > 1.25 || visibility < 0 || visibility > 1) {
-          return [];
-        }
-        return [{ index, x, y, z, visibility }];
-      })
-    : [];
-  const imageCom = sanitizeNormalizedPoint(candidate.imageCom);
-  const wallCom = sanitizeWallPoint(candidate.wallCom);
-  const massCoverage = boundedNumber(candidate.massCoverage, 0, 1, 0);
-  const meanVisibility = boundedNumber(candidate.meanVisibility, 0, 1, 0);
-  const valid = Boolean(candidate.valid && imageCom && wallCom && massCoverage >= minMassCoverage);
-  const poseSelected = typeof candidate.poseSelected === "boolean"
-    ? candidate.poseSelected
-    : landmarks.length > 0 || valid;
-  const poseDetected = typeof candidate.poseDetected === "boolean"
-    ? candidate.poseDetected
-    : poseSelected;
-  const poseCandidateCount = Number.isInteger(candidate.poseCandidateCount)
-    ? Math.max(0, Math.min(2, Number(candidate.poseCandidateCount)))
-    : poseDetected ? 1 : 0;
-  return {
-    rawTime,
-    climbTime,
-    poseDetected,
-    poseSelected,
-    poseCandidateCount,
-    landmarks,
-    imageCom,
-    wallCom,
-    massCoverage,
-    meanVisibility,
-    valid,
-    warning: typeof candidate.warning === "string" ? candidate.warning.slice(0, 500) : undefined,
-  };
-}
-
-function sanitizeNormalizedPoint(value: any) {
-  const x = finiteNumber(value?.x);
-  const y = finiteNumber(value?.y);
-  return x !== undefined && y !== undefined && x >= -0.25 && x <= 1.25 && y >= -0.25 && y <= 1.25
-    ? { x, y }
-    : undefined;
-}
-
-function sanitizeWallPoint(value: any) {
-  const xMeters = finiteNumber(value?.xMeters);
-  const yMeters = finiteNumber(value?.yMeters);
-  return xMeters !== undefined && yMeters !== undefined && xMeters >= -10 && xMeters <= 10 && yMeters >= -10 && yMeters <= 30
-    ? { xMeters, yMeters }
-    : undefined;
-}
-
-function sanitizeBiomechanicsIdentityZone(value: any): NormalizedZone | undefined {
-  if (!value || value.id !== "startBody") {
-    return undefined;
-  }
-  const x1 = finiteNumber(value.x1);
-  const y1 = finiteNumber(value.y1);
-  const x2 = finiteNumber(value.x2);
-  const y2 = finiteNumber(value.y2);
-  if ([x1, y1, x2, y2].some((coordinate) => coordinate === undefined || coordinate < 0 || coordinate > 1)) {
-    return undefined;
-  }
-  return { id: "startBody", label: "Start Body Zone", x1: x1!, y1: y1!, x2: x2!, y2: y2! };
-}
-
-function finiteNumber(value: unknown): number | undefined {
-  const number = typeof value === "number" ? value : Number(value);
-  return Number.isFinite(number) ? number : undefined;
-}
-
-function boundedNumber(value: unknown, min: number, max: number, fallback: number): number {
-  const number = finiteNumber(value);
-  return number === undefined || number < min || number > max ? fallback : number;
-}
-
 function videoMetadataMatches(actual: VideoMetadata, expected: VideoMetadata): boolean {
   if (actual.fileName !== expected.fileName) {
     return false;
@@ -3515,6 +4589,23 @@ function videoMetadataMatches(actual: VideoMetadata, expected: VideoMetadata): b
   const durationTolerance = Math.max(0.1, Math.abs(expected.duration) * 0.005);
   const durationMatches = !expected.duration || Math.abs(actual.duration - expected.duration) <= durationTolerance;
   return dimensionsMatch && durationMatches;
+}
+
+function deduplicateAnalysisLaneCandidates(candidates: AnalysisLaneCandidate[]): AnalysisLaneCandidate[] {
+  const unique: AnalysisLaneCandidate[] = [];
+  for (const candidate of candidates) {
+    const centerX = (candidate.zone.x1 + candidate.zone.x2) / 2;
+    const centerY = (candidate.zone.y1 + candidate.zone.y2) / 2;
+    const duplicate = unique.some((existing) => {
+      const existingX = (existing.zone.x1 + existing.zone.x2) / 2;
+      const existingY = (existing.zone.y1 + existing.zone.y2) / 2;
+      return Math.hypot(centerX - existingX, centerY - existingY) < 0.035;
+    });
+    if (!duplicate) {
+      unique.push(candidate);
+    }
+  }
+  return unique;
 }
 
 function normalizedZonesEqual(left?: NormalizedZone, right?: NormalizedZone): boolean {

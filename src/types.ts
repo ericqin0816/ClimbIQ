@@ -15,7 +15,10 @@ export type TimestampSource =
   | "Fused start detection"
   | "Motion-based estimate"
   | "Body motion detection"
+  | "Finish light detection"
   | "Official total time"
+  | "COM halfway estimate"
+  | "Hold contact detection"
   | "Future / experimental";
 
 export interface NormalizedZone {
@@ -254,6 +257,11 @@ export interface WallCalibration {
   heightMeters: number;
   corners: WallCalibrationCorner[];
   staticCameraConfirmed: boolean;
+  /** Manual corner marking or an approximate lane inferred from a video frame. */
+  source?: "manual" | "automatic-approximate";
+  /** Automatic calibration is intentionally never presented as manual-quality. */
+  confidence?: "High" | "Medium" | "Low";
+  reason?: string;
 }
 
 export interface PoseLandmarkPoint extends NormalizedPoint {
@@ -367,5 +375,6 @@ export interface DetectionDebugReport {
   frameSamplingTest: FrameSamplingDebug | null;
   startSignalDetection: StartSignalDebug | null;
   firstMovementDetection: FirstMovementDebug | null;
+  finishSignalDetection: StartSignalDebug | null;
   acceptedTimestamps: TimestampMarker[];
 }

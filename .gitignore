@@ -3,6 +3,10 @@ dist/
 .local-npm/
 .vite/
 *.log
+*.tsbuildinfo
+coverage/
+playwright-report/
+test-results/
 
 .vercel
 .env*

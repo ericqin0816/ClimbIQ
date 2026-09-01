@@ -143,6 +143,47 @@ export async function sampleZoneAverageColor(
   };
 }
 
+/**
+ * Samples the pixels carrying the strongest green-vs-blue opponent signal.
+ * Automatic lane sensors are often only a few pixels inside a mostly gray crop;
+ * averaging the entire crop erases them before calibrated refinement begins.
+ */
+export async function sampleZoneOpponentColor(
+  video: HTMLVideoElement,
+  time: number,
+  zone: NormalizedZone,
+): Promise<{ time: number; averageRgb: RGB; pixelZone: ZonePixelRect }> {
+  await seekTo(video, time);
+  const { imageData, pixelZone } = captureZoneImageData(video, zone);
+  return {
+    time: video.currentTime,
+    averageRgb: computeOpponentWeightedRgb(imageData),
+    pixelZone,
+  };
+}
+
+/**
+ * Captures one crop and returns both the strongest absolute green/blue pixels
+ * and pixels ranked toward a requested opponent-color direction. Finish lights
+ * can contain residual bright blue pixels during their first faint green flash;
+ * an absolute-only rank keeps selecting those old blue pixels and hides onset.
+ */
+export async function sampleZoneOpponentColors(
+  video: HTMLVideoElement,
+  time: number,
+  zone: NormalizedZone,
+  targetDirection: number,
+): Promise<{ time: number; averageRgb: RGB; directionalRgb: RGB; pixelZone: ZonePixelRect }> {
+  await seekTo(video, time);
+  const { imageData, pixelZone } = captureZoneImageData(video, zone);
+  return {
+    time: video.currentTime,
+    averageRgb: computeOpponentWeightedRgb(imageData),
+    directionalRgb: computeDirectionalOpponentWeightedRgb(imageData, targetDirection),
+    pixelZone,
+  };
+}
+
 export async function sampleZoneMotion(
   video: HTMLVideoElement,
   timeA: number,
@@ -215,6 +256,56 @@ export function computeAverageRgb(imageData: ImageData): RGB {
     r: Math.round(r / count),
     g: Math.round(g / count),
     b: Math.round(b / count),
+  };
+}
+
+export function computeOpponentWeightedRgb(imageData: ImageData): RGB {
+  const pixels: Array<{ score: number; r: number; g: number; b: number }> = [];
+  for (let index = 0; index < imageData.data.length; index += 4) {
+    const r = imageData.data[index] ?? 0;
+    const g = imageData.data[index + 1] ?? 0;
+    const b = imageData.data[index + 2] ?? 0;
+    const total = Math.max(1, r + g + b);
+    const opponent = Math.abs(g - b) / total;
+    const brightnessWeight = 0.35 + 0.65 * Math.sqrt(total / 765);
+    pixels.push({ score: opponent * brightnessWeight, r, g, b });
+  }
+  if (!pixels.length) {
+    return { r: 0, g: 0, b: 0 };
+  }
+  pixels.sort((left, right) => right.score - left.score);
+  const selectedCount = Math.min(64, Math.max(2, Math.ceil(pixels.length * 0.12)));
+  const selected = pixels.slice(0, selectedCount);
+  return {
+    r: Math.round(selected.reduce((sum, pixel) => sum + pixel.r, 0) / selected.length),
+    g: Math.round(selected.reduce((sum, pixel) => sum + pixel.g, 0) / selected.length),
+    b: Math.round(selected.reduce((sum, pixel) => sum + pixel.b, 0) / selected.length),
+  };
+}
+
+/** Selects the sensor pixels that point most strongly toward green (+1) or blue (-1). */
+export function computeDirectionalOpponentWeightedRgb(imageData: ImageData, targetDirection: number): RGB {
+  const direction = Math.sign(targetDirection) || 1;
+  const pixels: Array<{ score: number; r: number; g: number; b: number }> = [];
+  for (let index = 0; index < imageData.data.length; index += 4) {
+    const r = imageData.data[index] ?? 0;
+    const g = imageData.data[index + 1] ?? 0;
+    const b = imageData.data[index + 2] ?? 0;
+    const total = Math.max(1, r + g + b);
+    const opponent = direction * (g - b) / total;
+    const brightnessWeight = 0.35 + 0.65 * Math.sqrt(total / 765);
+    pixels.push({ score: opponent * brightnessWeight, r, g, b });
+  }
+  if (!pixels.length) {
+    return { r: 0, g: 0, b: 0 };
+  }
+  pixels.sort((left, right) => right.score - left.score);
+  const selectedCount = Math.min(64, Math.max(2, Math.ceil(pixels.length * 0.12)));
+  const selected = pixels.slice(0, selectedCount);
+  return {
+    r: Math.round(selected.reduce((sum, pixel) => sum + pixel.r, 0) / selected.length),
+    g: Math.round(selected.reduce((sum, pixel) => sum + pixel.g, 0) / selected.length),
+    b: Math.round(selected.reduce((sum, pixel) => sum + pixel.b, 0) / selected.length),
   };
 }
 

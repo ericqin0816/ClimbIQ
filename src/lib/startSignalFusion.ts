@@ -53,13 +53,25 @@ export function fuseStartEvidence(evidence: StartEvidence[]): FusedStartDecision
   const ranked = clusters
     .map((cluster) => ({ cluster, score: clusterScore(cluster) }))
     .sort((left, right) => right.score - left.score);
-  const best = ranked[0].cluster;
+  const exactAudioCluster = clusters.find((cluster) =>
+    cluster.some((item) => item.kind === "audio" && item.confidence === "High"),
+  );
+  // High audio is reserved for the exact same/same/different start protocol.
+  // It cannot be outvoted by an unrelated Medium color + Low passerby-motion pair.
+  const best = exactAudioCluster ?? ranked[0].cluster;
+  const bestRanked = ranked.find((entry) => entry.cluster === best) ?? ranked[0];
   const sources = new Set(best.map((item) => item.kind));
   const strongColor = best.some((item) => item.kind === "color" && item.confidence !== "Low");
   const strongAudio = best.some((item) => item.kind === "audio" && item.confidence !== "Low");
-  const colorCount = best.filter((item) => item.kind === "color").length;
-  const conflict = ranked.length > 1 && ranked[1].score >= ranked[0].score * 0.78 &&
-    Math.abs(weightedTime(ranked[1].cluster) - weightedTime(best)) > AGREEMENT_SECONDS;
+  const strongMotion = best.some((item) => item.kind === "motion" && item.confidence !== "Low");
+  const colorCount = best.filter((item) => item.kind === "color" && item.confidence !== "Low").length;
+  const competing = ranked.find((entry) =>
+    entry.cluster !== best &&
+    entry.cluster.some((item) => item.confidence === "High") &&
+    entry.score >= bestRanked.score * 0.78 &&
+    Math.abs(weightedTime(entry.cluster) - weightedTime(best)) > AGREEMENT_SECONDS,
+  );
+  const conflict = Boolean(competing);
 
   let confidence: Confidence;
   let autoAccept = false;
@@ -71,13 +83,14 @@ export function fuseStartEvidence(evidence: StartEvidence[]): FusedStartDecision
     autoAccept = !conflict;
   } else if (strongColor) {
     confidence = best.some((item) => item.kind === "motion") ? "Medium" : best.find((item) => item.kind === "color")!.confidence;
-    autoAccept = !conflict && confidence !== "Low";
+    autoAccept = !conflict && confidence === "High";
   } else if (strongAudio) {
     const audioConfidence = best.find((item) => item.kind === "audio")!.confidence;
-    confidence = sources.has("motion") ? "Medium" : audioConfidence;
+    confidence = audioConfidence === "High" ? "High" : strongMotion ? "Medium" : audioConfidence;
     // Two independent cue types agreeing (beep + launch motion) is trustworthy
-    // enough to write a reviewable timestamp automatically.
-    autoAccept = !conflict && (audioConfidence === "High" || sources.has("motion"));
+    // enough to write a timestamp automatically, but weak motion cannot corroborate
+    // a non-protocol audio cue.
+    autoAccept = !conflict && (audioConfidence === "High" || strongMotion);
   } else {
     confidence = "Low";
   }
@@ -104,19 +117,32 @@ export function fuseStartEvidence(evidence: StartEvidence[]): FusedStartDecision
 }
 
 function clusterScore(cluster: StartEvidence[]): number {
-  const sourceDiversity = new Set(cluster.map((item) => item.kind)).size;
-  const colorCount = cluster.filter((item) => item.kind === "color").length;
+  const reliable = cluster.filter((item) => item.confidence !== "Low");
+  const sourceDiversity = new Set(reliable.map((item) => item.kind)).size;
+  const colorCount = reliable.filter((item) => item.kind === "color").length;
   return cluster.reduce((sum, item) => sum + evidenceWeight(item), 0) + sourceDiversity * 1.8 + Math.max(0, colorCount - 1) * 1.5;
 }
 
 function weightedTime(cluster: StartEvidence[]): number {
-  // The light transition is frame-accurate while audio carries speaker/encoding
-  // latency, so when light evidence exists it alone defines the timestamp and
-  // audio/motion only confirm it. Audio is used when there is no light; motion
-  // only when it is the sole cue.
+  // High audio is reserved for the exact official pitch sequence and defines the
+  // clock. Otherwise a refined light defines time; motion only corroborates it.
   const colorItems = cluster.filter((item) => item.kind === "color");
+  const reliableColorItems = colorItems.filter((item) => item.confidence === "High" || item.confidence === "Medium");
+  const highAudioItems = cluster.filter((item) => item.kind === "audio" && item.confidence === "High");
   const nonMotion = cluster.filter((item) => item.kind !== "motion");
-  const values = colorItems.length ? colorItems : nonMotion.length ? nonMotion : cluster;
+  // One faint/coarse light cannot override the exact pitch-coded audio time. Two
+  // agreeing lanes, or any refined Medium/High light, remain frame-accurate anchors.
+  const values = highAudioItems.length
+    ? highAudioItems
+    : reliableColorItems.length
+      ? reliableColorItems
+      : colorItems.length >= 2
+      ? colorItems
+      : colorItems.length
+          ? colorItems
+          : nonMotion.length
+            ? nonMotion
+            : cluster;
   const totalWeight = values.reduce((sum, item) => sum + evidenceWeight(item), 0);
   return values.reduce((sum, item) => sum + item.rawTime * evidenceWeight(item), 0) / Math.max(totalWeight, 1e-6);
 }

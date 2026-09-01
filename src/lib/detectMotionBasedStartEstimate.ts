@@ -7,6 +7,7 @@ import type {
   StartSignalDetectionResult,
 } from "../types";
 import { captureZoneImageData, normalizedZoneToPixelRect, sampleFramesInRange, seekTo } from "./videoFrameSampler";
+import { adaptiveMotionThreshold, causalSmoothMotion } from "./motionSignal";
 
 interface DetectMotionBasedStartOptions {
   video: HTMLVideoElement;
@@ -94,8 +95,12 @@ export async function detectMotionBasedStartEstimate({
   debug.framesSampled = times.length;
   debug.maxColorDistance = roundMetric(motionSamples.reduce((max, sample) => Math.max(max, sample.smoothedMotionScore), 0));
 
-  const baseline = median(motionSamples.slice(0, Math.min(5, motionSamples.length)).map((sample) => sample.smoothedMotionScore));
-  const finalThreshold = Math.min(FIXED_THRESHOLDS[sensitivity], baseline + DYNAMIC_ADDS[sensitivity]);
+  const baselineWindow = motionSamples.slice(0, Math.min(5, motionSamples.length)).map((sample) => sample.smoothedMotionScore);
+  const finalThreshold = adaptiveMotionThreshold(
+    baselineWindow,
+    FIXED_THRESHOLDS[sensitivity],
+    DYNAMIC_ADDS[sensitivity],
+  );
   debug.threshold = roundMetric(finalThreshold);
   const requiredFrames = REQUIRED_FRAMES[sensitivity];
   const candidates = buildCandidates({
@@ -131,11 +136,11 @@ export async function detectMotionBasedStartEstimate({
 function createFallbackStartBodyZone(): NormalizedZone {
   return {
     id: "startBody",
-    label: "Automatic lower-center body region",
-    x1: 0.12,
-    y1: 0.35,
-    x2: 0.88,
-    y2: 1,
+    label: "Automatic lower-wall body region",
+    x1: 0.08,
+    y1: 0.42,
+    x2: 0.92,
+    y2: 0.94,
   };
 }
 
@@ -237,12 +242,7 @@ function computeSensitiveMotionScore(frameA: ImageData, frameB: ImageData): numb
 }
 
 function smoothMotionSamples(samples: Array<{ motionScore: number; smoothedMotionScore: number }>): void {
-  for (let index = 0; index < samples.length; index += 1) {
-    const previous = samples[index - 1]?.motionScore ?? samples[index].motionScore;
-    const current = samples[index].motionScore;
-    const next = samples[index + 1]?.motionScore ?? samples[index].motionScore;
-    samples[index].smoothedMotionScore = roundMetric((previous + current + next) / 3);
-  }
+  causalSmoothMotion(samples);
 }
 
 function findMotionOnsetIndex(samples: Array<{ smoothedMotionScore: number }>, spikeIndex: number, threshold: number): number {

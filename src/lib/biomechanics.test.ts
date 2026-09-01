@@ -83,6 +83,44 @@ describe("trajectory kinematics", () => {
     expect(result.metrics.averageSpeedMps).toBeCloseTo(1, 6);
   });
 
+  it("rejects an implausible in-wall raw jump before smoothing or path metrics", () => {
+    const frames = [
+      frame(0, 1, 1),
+      frame(0.1, 1.1, 1.1),
+      frame(0.2, 2.5, 5),
+      frame(0.3, 1.2, 1.2),
+      frame(0.4, 1.3, 1.3),
+    ];
+    const result = applyTrajectoryKinematics(frames, DEFAULT_BIOMECHANICS_SETTINGS, calibration);
+    const rejected = result.frames.find((sample) => sample.rawTime === 0.2)!;
+
+    expect(rejected.warning).toContain("Implausible raw wall-plane displacement");
+    expect(rejected.smoothedWallCom).toBeUndefined();
+    expect(rejected.speedMps).toBeUndefined();
+    expect(result.metrics.validFrames).toBe(4);
+    expect(result.metrics.pathLengthMeters).toBeCloseTo(Math.hypot(0.1, 0.1) * 2, 6);
+    expect(result.metrics.averageSpeedMps).toBeCloseTo(Math.SQRT2, 6);
+    expect(result.warnings.some((warning) => warning.includes("excluded before smoothing"))).toBe(true);
+  });
+
+  it("uses extrapolated frames as hard path boundaries", () => {
+    const frames = [
+      frame(0, 1, 1),
+      frame(0.1, 1.1, 1.1),
+      frame(0.2, 3.5, 5),
+      frame(0.3, 1.2, 1.2),
+      frame(0.4, 1.3, 1.3),
+    ];
+    const result = applyTrajectoryKinematics(frames, DEFAULT_BIOMECHANICS_SETTINGS, calibration);
+    const rejected = result.frames.find((sample) => sample.rawTime === 0.2)!;
+
+    expect(rejected.extrapolated).toBe(true);
+    expect(rejected.smoothedWallCom).toBeUndefined();
+    expect(result.metrics.validFrames).toBe(4);
+    expect(result.metrics.pathLengthMeters).toBeCloseTo(Math.hypot(0.1, 0.1) * 2, 6);
+    expect(result.metrics.averageSpeedMps).toBeCloseTo(Math.SQRT2, 6);
+  });
+
   it("separates raw person detection from safely selected climber tracking", () => {
     const frames = [0, 0.1, 0.2].map((time) => ({
       ...frame(time, 1.5, time),
@@ -131,8 +169,26 @@ describe("trajectory kinematics", () => {
     for (const sample of secondPass.frames) {
       expect(countOccurrences(sample.warning, sourceWarning)).toBe(1);
       expect(countOccurrences(sample.warning, "COM lies outside the calibrated wall quadrilateral.")).toBe(1);
-      expect(countOccurrences(sample.warning, "Implausible wall-plane speed; review pose and calibration.")).toBe(1);
+      expect(countOccurrences(sample.warning, "Implausible wall-plane speed; review pose and calibration.")).toBe(0);
+      expect(sample.smoothedWallCom).toBeUndefined();
+      expect(sample.speedMps).toBeUndefined();
     }
+    expect(secondPass.metrics.pathLengthMeters).toBeUndefined();
+    expect(secondPass.warnings.some((warning) => warning.includes("outside the calibrated wall"))).toBe(true);
+  });
+
+  it("labels automatic wall scale as approximate and caps reported quality", () => {
+    const automaticCalibration = {
+      ...calibration,
+      source: "automatic-approximate" as const,
+      confidence: "Medium" as const,
+      reason: "Approximate left-lane geometry inferred from frame evidence.",
+    };
+    const frames = Array.from({ length: 10 }, (_, index) => frame(index / 10, 1.5, 1 + index * 0.2));
+    const result = applyTrajectoryKinematics(frames, DEFAULT_BIOMECHANICS_SETTINGS, automaticCalibration);
+
+    expect(result.metrics.quality).toBe("Medium");
+    expect(result.warnings.some((warning) => warning.includes("inferred automatically") && warning.includes("approximate"))).toBe(true);
   });
 });
 

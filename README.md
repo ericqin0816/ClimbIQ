@@ -1,8 +1,33 @@
 # ClimbIQ Detection Lab
 
-ClimbIQ Detection Lab is the web-based proof of the core video-detection and biomechanics engine for ClimbIQ. It is intentionally not the full ClimbIQ product yet. There are no athlete profiles, comparison pages, mobile apps, backend services, cloud storage, or AI coach in this version.
+**Local-first video analysis for speed climbing.** ClimbIQ turns an ordinary race video into reviewable timing markers, route splits, and wall-projected biomechanics without uploading the video.
 
-The goal is to prove that a local speed climbing video can be loaded in the browser, sampled frame by frame, and converted into useful climb timestamps.
+[Try the live detection lab](https://climbiq-detection-lab-ericqin0816s-projects.vercel.app)
+
+![ClimbIQ: Every frame. Race-ready insight.](public/og.png)
+
+## What It Does
+
+- Detects the official start protocol from synchronized audio and timing-light evidence.
+- Finds first movement and finish timing while keeping every suggested timestamp reviewable frame by frame.
+- Tracks the selected athlete through a standardized 15 m speed wall with MediaPipe Pose Landmarker.
+- Estimates a 2D wall-projected center-of-mass path, speed, efficiency, route sections, and Hold 10 contact.
+- Processes videos entirely in the browser; videos are never uploaded or stored by ClimbIQ.
+- Exports portable JSON datasets and Obsidian-ready training notes.
+
+## Why This Project Exists
+
+ClimbIQ Detection Lab is a working proof of the core video-detection and biomechanics engine for a larger ClimbIQ product. Its purpose is to show that a local speed-climbing video can be sampled frame by frame and converted into useful, inspectable performance data.
+
+This repository focuses on the analysis engine. Athlete profiles, comparison pages, native mobile apps, backend services, cloud storage, and an AI coach are intentionally outside the current scope.
+
+## Built With
+
+- React 19, TypeScript, and Vite
+- MediaPipe Pose Landmarker running on-device with WebAssembly
+- `HTMLVideoElement`, Canvas, and Web Audio APIs for local media analysis
+- Vitest for deterministic detection and biomechanics tests
+- Vercel for the public web deployment
 
 ## Why Web First
 
@@ -23,48 +48,80 @@ Speed climbing phone videos are difficult for pose detection. The climber can be
 
 - start signal from an automatically located green-to-blue light transition
 - first movement from pixel motion inside the climber's starting body zone
-- finish pad from official total time after the detected start signal
+- finish from the selected lane light returning to its learned pre-start state, with official total time as an optional fallback
 
 ClimbIQ now includes optional pose analysis, but pose never changes accepted timing markers. This separation prevents a missed or occluded landmark from silently moving the authoritative Start Signal, First Movement, or Finish Pad timestamps.
 
 ## Experimental Biomechanics
 
-After accepting timing markers, the **Biomechanics & Center of Mass** panel can run MediaPipe Pose Landmarker locally against sampled video frames. The workflow is:
+Quick Analyze runs MediaPipe Pose Landmarker locally after it has an accepted, official, or verified review-level finish boundary. It never falls back to the full video when finish evidence is missing, so setup footage and the descent cannot silently become part of the climb. It automatically estimates the selected 3 m lane from the upper timing lights and wall-to-mat edge, follows the athlete through the climb range, and builds the center-of-mass path and speed charts. The automatic wall scale is explicitly labeled approximate.
+
+For more precise metre and m/s output, the **Center of Mass** panel still supports a manual four-corner calibration:
 
 1. Capture a frame showing the complete standardized speed lane.
 2. Mark bottom-left, bottom-right, top-right, and top-left lane corners.
 3. Confirm that the camera is fixed with no pan, tilt, shake, or zoom.
-4. Analyze the accepted Start-to-Finish range at 5, 10, or 15 fps.
+4. Analyze the accepted Start-to-Finish range at 5, 10, or 15 fps, or let Quick Analyze run it automatically.
 5. Review the synchronized skeleton, wall-projected center-of-mass path, speed chart, quality rating, and frame table.
 
-The four-corner calibration solves a perspective transform from intrinsic video coordinates to the standardized 3 m × 15 m wall plane. Pose joints are projected into wall coordinates before segment centers and whole-body center of mass are calculated.
+Both automatic and manual lane geometry solve a perspective transform from intrinsic video coordinates to the standardized 3 m × 15 m wall plane. Manual corners provide the higher-accuracy metric scale. Pose joints are projected into wall coordinates before segment centers and whole-body center of mass are calculated.
 
 The COM calculation uses the 12-segment mass and segment-center ratios published by Pandurevic et al. for an adult-male reference population. The result is labeled as an estimated 2D wall projection. It is not a 3D, force, or clinical measurement and may not match every athlete's body proportions.
 
-Velocity is fit from nearby timestamped COM samples rather than assuming perfectly uniform video frames. Gaps longer than 0.25 seconds are not bridged. Low visible-body coverage, extrapolated points, implausible speeds, sparse sampling, and multi-person ambiguity produce warnings instead of being silently accepted.
+Velocity is fit from nearby timestamped COM samples rather than assuming perfectly uniform video frames. Gaps longer than 0.25 seconds are not bridged. Extrapolated points and implausible projected jumps are rejected before smoothing, split the trajectory, and cannot inflate path, gain, efficiency, coverage, or speed metrics. Low visible-body coverage, sparse sampling, and multi-person ambiguity produce warnings instead of being silently accepted.
+
+Pose inference begins with a real canvas crop of the selected lane so the distant climber remains large enough for the model; detected joints are mapped back into full-video coordinates for the overlay and wall projection. Tiny upper-wall crops are upscaled to a detector-friendly raster, lead upward as the climber progresses, and retry above the previous anchor instead of centering the larger athlete below. If detection is missed, ClimbIQ expands once, then scans the wall instead of retrying the same empty crop forever. Short tracking losses first search around the last known athlete position before a wider recovery scan.
+
+Top-wall tracking scales the crop with the lane's perspective, and repeated misses stay near and above the last reliable athlete position instead of resetting to the floor. Pose anchors are permanently constrained to the calibrated selected-lane trapezoid, with a horizontal continuity gate that prevents a neighboring climber from taking over after a tracking gap. Lower-confidence distant joints can contribute to an approximate result when the torso and at least 75% of modeled body mass remain usable. Implausible tracking-jump speed spikes are excluded from charts and metrics, and visible trail gaps are not connected with misleading lines.
+
+COM has a second climb-completion guard for late or previously saved finish ranges. A result is clipped at the first credible top completion only when the athlete reached the upper wall or Hold 20 and then shows a continuous, substantial, downward-dominant descent without returning to the top. Normal upward backsteps, brief drops, tracking gaps, and rebounds do not trigger it. Frames after the cutoff are removed from the wall path, speed chart, video overlay, frame table, splits, and recomputed metrics. Correcting a finish earlier can reuse and safely shorten an existing longer analysis; moving it later still requires new frames.
+
+## Automatic Route Splits
+
+Center-of-mass results also calculate the bottom half, top half, and lower/middle/top wall thirds. Split crossings use upward-only COM progress and are never interpolated across tracking gaps longer than 0.25 seconds. ClimbIQ identifies the slowest complete wall section and provides a direct video-review jump. Wall halfway is only a section boundary and never populates Hold 10.
+
+## Visually Registered Holds And Hold 10 Contact
+
+The supplied standardized-route diagram is used as a route-pattern prior, not as a final overlay. ClimbIQ samples several frames strictly between the accepted start and finish, segments persistent red/pink holds, and jointly registers the complete 20-hold pattern with one bounded affine or projective correction. Matched number markers are placed on the detected hold centroids; hidden holds use the jointly fitted route position. A stricter expanded search is allowed only when it has at least 12 unique matches and materially lower residual error. It affects hold markers and Hold 10 contact only, never COM calibration or metric speed.
+
+Tiny red bolt dots are rejected by minimum component area and shape gates before route fitting. Only direct macro-hold matches are displayed; fitted or ambiguous markers remain hidden. When an anchored route consensus is trustworthy but Hold 10 itself is not directly visible, ClimbIQ may display that verified subset while pausing automatic Hold 10 contact. A validated manual Hold 10 Zone remains authoritative.
+
+Strongly oblique views are supported by the wall homography when the camera is fixed, but the four actual selected-lane corners must be marked when automatic geometry includes off-wall room or cannot represent visibly sloped top/bottom edges. Automatic calibration now measures wall-surface support and refuses misleading metre/m/s output in that case. Post-finish camera movement is harmless because route sampling and COM analysis stop at the accepted finish.
+
+Hold 10 timing uses a robust hand point from the visible index, pinky, and thumb landmarks, with the wrist as a fallback. Confirmation is based on elapsed dwell time at 5, 10, or 15 fps rather than a fixed frame count. Median filtering absorbs one bad hand landmark, a single short tracking gap can be bridged, and a longer loss starts a new candidate. The detector rejects fast fly-bys, competing Hold 9/11 proximity, missing hand evidence, and every COM-height-only crossing. Contact onset is refined at the tight confirmation boundary instead of being backdated to the broad search-radius entry.
+
+Each accepted candidate includes deterministic evidence diagnostics and remains reviewable frame-by-frame. Compact saved sessions retain the hand landmarks required to reproduce the same Hold 10 result after reload. A stale pose result cannot populate Hold 10, route splits, or the video overlay after the accepted start, finish, or selected athlete changes. Manual Hold 10 zones are validated and projected once for both detection and overlay; malformed or off-wall corrections fall back to visual route registration or pause contact timing.
+
+Suggested timestamps open a dedicated video-review workflow before acceptance. The review panel displays the suggested raw time, exact frame currently on screen, adjustment amount, frame-step controls, and an action that accepts the displayed frame. Sticky workflow navigation and collapsed manual/diagnostic sections reduce long-page scrolling.
 
 ## Start Signal Detection
 
-Quick Analyze scans several pixel scales and keeps spatially separate left/right lane candidates for regions that are green before the climb, change to blue, and remain blue. Normalized chromaticity helps retain faint lights and floor glows across different angles. It rejects static green objects, green-to-red changes, and brief blue motion. Because the start box is always mounted at the base of the wall below the first and second holds, candidates in the upper frame are rejected outright, lower-frame candidates are boosted, and a drawn Start Body Zone pulls the search toward the climber's lane. Each likely sensor is rescanned at 30 fps to refine the transition time.
+Quick Analyze scans the complete clip at several pixel scales and keeps spatially separate left/right lane candidates. Automatic discovery is restricted to the lower 58% of the image because the climber, start holds, and lane sensor are near the bottom. A start must move in the blue direction and reach a verified blue state within the next 0.5 seconds; merely hiding or weakening green cannot backdate a later real start. The blue state may later reverse at the finish without invalidating the start. Higher-resolution refinement samples the strongest green/blue opponent pixels, while trimmed frame-color correction removes exposure drift and large foreground occlusions.
 
-The original local video's audio track is decoded on-device and searched for a regular three-to-five-tone countdown; the final tonal burst becomes an independent start cue. The final beep may be longer and louder than the countdown beeps without breaking the match, and when no repeated pattern exists, a single tonal beep that clearly stands out from everything else in the window is used as a medium-confidence start cue. Light, audio, and motion times are clustered together. Agreement between light and audio—or matching left/right lane lights—earns high confidence, and an agreeing beep plus launch motion is accepted automatically at medium confidence. Early motion that disagrees with synchronized cues is treated as setup rocking. Motion alone is never auto-accepted, conflicting strong cues require review, and the user can always set the current frame as Start. When review is needed, the player seeks to the suggested start frame and a one-click **Accept suggested start** button writes the timestamp and continues with first-movement detection.
+The original local video's audio track is decoded on-device for the known start protocol: a spoken “ready,” two matching preparation beeps near 554 Hz, then an octave-up final beep near 1.1 kHz. ClimbIQ does not transcribe the spoken word. Browser audio is low-pass filtered while it is resampled, preventing high-frequency gym noise from folding into fake beep pitches. It extracts stable pitch sub-runs from noisy speech and can recover the quiet octave harmonic even when a louder voice masks it. High confidence is reserved for the correctly spaced, genuinely matching pair plus octave-up final cue; the earliest valid protocol becomes the authoritative start clock. Generic tones remain review-only.
 
 ## First Movement Detection
 
-The user draws a Start Body Zone around the climber's body in the start position. The detector samples from Start Signal to Start Signal + 2.0 seconds, compares consecutive crops inside the zone, smooths the motion score, builds an early baseline, and returns the first sustained motion spike.
+When the user has not drawn a Start Body Zone, Quick Analyze derives the athlete's lane from the selected light. The automatic body region stops above the light-spill centroid, preventing the electronic color change from becoming fake body motion. Motion uses causal smoothing plus a median/MAD baseline and is only corroborating evidence around the accepted audio/light cue. When two climbers are visible, drawing one rough Start Body Zone tells ClimbIQ which lane controls athlete tracking and the finish.
 
 This does not rely on wrist tracking.
 
-## Finish From Official Time
+## Automatic Finish Detection
 
-The finish timestamp is calculated, not video-detected:
+After start acceptance, ClimbIQ reuses that lane-light region. For the supplied timing system, it requires a stable blue climb state, timestamps the first connected faint green-directed change, tolerates one brief blue/dark/occluded frame during the flash sequence, and requires a sustained chromatic green return state for verification. Neutral or dark occlusion cannot anchor or confirm a finish, disconnected old flashes are rejected, and the earliest genuinely verified transition wins over later duplicates even when a later duplicate is closer to an optional official-time cross-check. Directional pixel sampling keeps faint green evidence from being hidden by brighter residual blue pixels. The direction is still learned from calibration so reverse-polarity systems remain supported.
+
+When two lanes start together, ClimbIQ retains every lane that supported the accepted start. If the nearly tied first choice never produces a valid finish, the app checks the other start-verified lane sequentially and carries the winning lane into movement and athlete tracking. This prevents tiny browser interpolation differences—or the other climber's light—from making automatic finish detection fail.
+
+Official total time remains available as a fallback or cross-check:
 
 ```text
 Finish Pad raw time = Start Signal raw time + Official total time
 Finish Pad climb time = Official total time
 ```
 
-The app labels this source clearly as official-total-time based.
+The app labels light-detected and official-time-derived finishes separately.
+
+A High-confidence finish can be accepted automatically. A verified review-level finish can bound COM while its exact frame awaits review. If neither light evidence nor an official duration supplies a finish boundary, Quick Analyze pauses before pose analysis instead of scanning through the end of the clip.
 
 ## Run The Project
 

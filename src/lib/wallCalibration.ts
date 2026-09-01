@@ -1,5 +1,7 @@
 import type {
+  Confidence,
   NormalizedPoint,
+  NormalizedZone,
   WallCalibration,
   WallCalibrationCorner,
   WallCornerId,
@@ -12,6 +14,30 @@ export interface CalibrationValidation {
   valid: boolean;
   error?: string;
   matrix?: HomographyMatrix;
+}
+
+export interface AutomaticWallCalibrationDiagnostics {
+  topY: number;
+  bottomY: number;
+  topMarkerSupport: number;
+  bottomEdgeContrast: number;
+  /** Fraction of the proposed lane interior that still looks like wall surface. */
+  wallSurfaceSupport?: number;
+  selectedLane: "left" | "right";
+}
+
+export interface AutomaticWallCalibrationResult {
+  calibration?: WallCalibration;
+  confidence: Confidence;
+  reason: string;
+  diagnostics?: AutomaticWallCalibrationDiagnostics;
+}
+
+export interface InferAutomaticWallCalibrationOptions {
+  imageData: Pick<ImageData, "data" | "width" | "height">;
+  frameRawTime: number;
+  identityZone?: NormalizedZone;
+  laneLightZone?: NormalizedZone;
 }
 
 export const SPEED_WALL_WIDTH_METERS = 3;
@@ -43,10 +69,207 @@ export function buildWallCalibration(
     widthMeters: SPEED_WALL_WIDTH_METERS,
     heightMeters: SPEED_WALL_HEIGHT_METERS,
     staticCameraConfirmed,
+    source: "manual",
+    confidence: "High",
     corners: WALL_CORNER_TEMPLATE.map((corner, index) => ({
       ...corner,
       image: { ...imagePoints[index] },
     })),
+  };
+}
+
+/**
+ * Infers an approximate 3 m lane from a fixed-camera video frame. Timing
+ * lights anchor the top, the wall-to-mat luminance step anchors the bottom,
+ * and the accepted athlete region chooses one half of the two-lane wall.
+ * Manual four-corner calibration remains the higher-accuracy metric option.
+ */
+export function inferAutomaticWallCalibration({
+  imageData,
+  frameRawTime,
+  identityZone,
+  laneLightZone,
+}: InferAutomaticWallCalibrationOptions): AutomaticWallCalibrationResult {
+  const { width, height, data } = imageData;
+  if (!Number.isInteger(width) || !Number.isInteger(height) || width < 64 || height < 96 ||
+      !data || data.length < width * height * 4) {
+    return { confidence: "Low", reason: "The captured video frame is unavailable or too small for automatic wall calibration." };
+  }
+  if (!Number.isFinite(frameRawTime) || frameRawTime < 0) {
+    return { confidence: "Low", reason: "The calibration frame time is invalid." };
+  }
+
+  const laneHint = identityZone ?? laneLightZone;
+  if (!laneHint) {
+    return { confidence: "Low", reason: "Automatic wall calibration needs the selected athlete lane from start analysis." };
+  }
+  const hintX = clampNumber((laneHint.x1 + laneHint.x2) / 2, 0, 1);
+  const markers = detectUpperTimingLights(data, width, height);
+  const bottomEdge = detectWallMatBoundary(data, width, height);
+  if (markers.support < 6) {
+    return {
+      confidence: "Low",
+      reason: "The complete 15 m wall is not visible clearly enough to locate its upper timing-light edge. Mark the four lane corners manually.",
+    };
+  }
+  const hintBottom = laneLightZone
+    ? (laneLightZone.y1 + laneLightZone.y2) / 2 + 0.075
+    : Math.max(laneHint.y1, laneHint.y2) + 0.055;
+  const bottomY = bottomEdge.contrast >= 12
+    ? bottomEdge.y
+    : clampNumber(hintBottom, 0.72, 0.95);
+  const topY = markers.support >= 6
+    ? clampNumber(markers.y - 0.018, 0.005, 0.32)
+    : clampNumber(bottomY - 0.72, 0.025, 0.2);
+  const verticalSpan = bottomY - topY;
+
+  if (verticalSpan < 0.48) {
+    return {
+      confidence: "Low",
+      reason: "The complete 15 m wall is not visible clearly enough to infer a stable calibration.",
+      diagnostics: {
+        topY: roundMetric(topY),
+        bottomY: roundMetric(bottomY),
+        topMarkerSupport: markers.support,
+        bottomEdgeContrast: roundMetric(bottomEdge.contrast),
+        selectedLane: hintX < 0.5 ? "left" : "right",
+      },
+    };
+  }
+
+  // Normalized x/y have different pixel scales in a portrait frame. Include
+  // image aspect before applying a conservative perspective expansion.
+  const aspect = height / width;
+  let fullBottomWidth = clampNumber(verticalSpan * aspect * 0.6, 0.58, 0.96);
+  let fullTopWidth = clampNumber(verticalSpan * aspect * 0.36, 0.3, fullBottomWidth * 0.78);
+  const markerCenter = markers.support >= 6 ? markers.centerX : 0.5;
+  const selectedLane = hintX < markerCenter ? "left" : "right";
+  const centerFromLaneHint = selectedLane === "left"
+    ? hintX + fullBottomWidth / 4
+    : hintX - fullBottomWidth / 4;
+  const fullBottomCenter = clampNumber(markerCenter * 0.65 + centerFromLaneHint * 0.35, 0.36, 0.64);
+  const fullTopCenter = clampNumber(markerCenter, 0.38, 0.62);
+  fullBottomWidth = fitSpanWidth(fullBottomCenter, fullBottomWidth);
+  fullTopWidth = fitSpanWidth(fullTopCenter, fullTopWidth);
+
+  const bottomLeft = selectedLane === "left"
+    ? fullBottomCenter - fullBottomWidth / 2
+    : fullBottomCenter;
+  const bottomRight = selectedLane === "left"
+    ? fullBottomCenter
+    : fullBottomCenter + fullBottomWidth / 2;
+  const topLeft = selectedLane === "left"
+    ? fullTopCenter - fullTopWidth / 2
+    : fullTopCenter;
+  const topRight = selectedLane === "left"
+    ? fullTopCenter
+    : fullTopCenter + fullTopWidth / 2;
+
+  const inferredCorners = {
+    bottomLeft: { x: bottomLeft, y: bottomY },
+    bottomRight: { x: bottomRight, y: bottomY },
+    topRight: { x: topRight, y: topY },
+    topLeft: { x: topLeft, y: topY },
+  };
+  const wallSurfaceSupport = measureWallSurfaceSupport(data, width, height, inferredCorners);
+  // Strongly oblique views can make the symmetric width estimate include a
+  // window, beam, or the room beside the wall. A mathematically valid
+  // homography through invented corners is still physically wrong, so refuse
+  // metric COM and ask for four real lane corners instead of claiming Medium.
+  if (wallSurfaceSupport < 0.86) {
+    return {
+      confidence: "Low",
+      reason: "The proposed lane includes too much non-wall area for trustworthy perspective or speed metrics. This oblique view needs four manual lane corners.",
+      diagnostics: {
+        topY: roundMetric(topY),
+        bottomY: roundMetric(bottomY),
+        topMarkerSupport: markers.support,
+        bottomEdgeContrast: roundMetric(bottomEdge.contrast),
+        wallSurfaceSupport: roundMetric(wallSurfaceSupport),
+        selectedLane,
+      },
+    };
+  }
+
+  const detectedTop = markers.support >= 6;
+  const detectedBottom = bottomEdge.contrast >= 12;
+  const confidence: Confidence = detectedTop && detectedBottom ? "Medium" : "Low";
+  const reason = detectedTop && detectedBottom
+    ? `Approximate ${selectedLane}-lane geometry inferred from the upper timing lights and wall-to-mat edge.`
+    : `Approximate ${selectedLane}-lane geometry inferred with ${detectedTop ? "a detected wall top" : "an estimated wall top"} and ${detectedBottom ? "a detected wall base" : "an estimated wall base"}.`;
+
+  const calibration = buildWallCalibration([
+    { x: bottomLeft, y: bottomY },
+    { x: bottomRight, y: bottomY },
+    { x: topRight, y: topY },
+    { x: topLeft, y: topY },
+  ], frameRawTime, true);
+  calibration.source = "automatic-approximate";
+  calibration.confidence = confidence;
+  calibration.reason = reason;
+  const validation = validateWallCalibration(calibration);
+  if (!validation.valid) {
+    return { confidence: "Low", reason: validation.error ?? "Automatic wall geometry was not stable enough to use." };
+  }
+
+  return {
+    calibration,
+    confidence,
+    reason,
+    diagnostics: {
+      topY: roundMetric(topY),
+      bottomY: roundMetric(bottomY),
+      topMarkerSupport: markers.support,
+      bottomEdgeContrast: roundMetric(bottomEdge.contrast),
+      wallSurfaceSupport: roundMetric(wallSurfaceSupport),
+      selectedLane,
+    },
+  };
+}
+
+function measureWallSurfaceSupport(
+  data: Uint8ClampedArray | ArrayLike<number>,
+  width: number,
+  height: number,
+  corners: {
+    bottomLeft: NormalizedPoint;
+    bottomRight: NormalizedPoint;
+    topRight: NormalizedPoint;
+    topLeft: NormalizedPoint;
+  },
+): number {
+  let wallLike = 0;
+  let sampled = 0;
+  const columns = 10;
+  const rows = 16;
+  for (let row = 0; row < rows; row += 1) {
+    const v = (row + 0.5) / rows;
+    const left = interpolatePoint(corners.bottomLeft, corners.topLeft, v);
+    const right = interpolatePoint(corners.bottomRight, corners.topRight, v);
+    for (let column = 0; column < columns; column += 1) {
+      const u = (column + 0.5) / columns;
+      const point = interpolatePoint(left, right, u);
+      const x = Math.max(0, Math.min(width - 1, Math.round(point.x * (width - 1))));
+      const y = Math.max(0, Math.min(height - 1, Math.round(point.y * (height - 1))));
+      const offset = (y * width + x) * 4;
+      const red = data[offset];
+      const green = data[offset + 1];
+      const blue = data[offset + 2];
+      const chroma = Math.max(red, green, blue) - Math.min(red, green, blue);
+      const luminance = red * 0.2126 + green * 0.7152 + blue * 0.0722;
+      sampled += 1;
+      if (chroma < 45 && luminance > 35 && luminance < 220) {
+        wallLike += 1;
+      }
+    }
+  }
+  return sampled ? wallLike / sampled : 0;
+}
+
+function interpolatePoint(start: NormalizedPoint, end: NormalizedPoint, amount: number): NormalizedPoint {
+  return {
+    x: start.x + (end.x - start.x) * amount,
+    y: start.y + (end.y - start.y) * amount,
   };
 }
 
@@ -177,6 +400,133 @@ export function projectImagePointToWall(point: NormalizedPoint, matrix: Homograp
     throw new Error("Wall projection produced an invalid coordinate.");
   }
   return { xMeters, yMeters };
+}
+
+interface UpperTimingLightDetection {
+  y: number;
+  centerX: number;
+  support: number;
+}
+
+function detectUpperTimingLights(
+  data: Uint8ClampedArray | ArrayLike<number>,
+  width: number,
+  height: number,
+): UpperTimingLightDetection {
+  const binHeight = Math.max(2, Math.round(height * 0.008));
+  const xStart = Math.round(width * 0.06);
+  const xEnd = Math.round(width * 0.94);
+  const xStep = Math.max(1, Math.floor(width / 540));
+  const bins: Array<{ y: number; xs: number[] }> = [];
+  for (let yStart = Math.round(height * 0.015); yStart < height * 0.36; yStart += binHeight) {
+    const xs: number[] = [];
+    for (let y = yStart; y < Math.min(height, yStart + binHeight); y += 1) {
+      for (let x = xStart; x < xEnd; x += xStep) {
+        const offset = (y * width + x) * 4;
+        const red = data[offset];
+        const green = data[offset + 1];
+        const blue = data[offset + 2];
+        const maximum = Math.max(red, green, blue);
+        const minimum = Math.min(red, green, blue);
+        const isRed = red - green > 35 && red - blue > 35;
+        const isGreen = green - red > 24 && green - blue > 18;
+        if (maximum > 95 && maximum - minimum > 42 && (isRed || isGreen)) {
+          xs.push(x / width);
+        }
+      }
+    }
+    bins.push({ y: (yStart + binHeight / 2) / height, xs });
+  }
+
+  const sampledBinArea = ((xEnd - xStart) / xStep) * binHeight;
+  const requiredSupport = Math.max(6, Math.round(sampledBinArea * 0.0015));
+  for (let index = 0; index < bins.length; index += 1) {
+    const cluster = [bins[index - 1], bins[index], bins[index + 1]].filter(Boolean);
+    const xs = cluster.flatMap((bin) => bin.xs);
+    if (xs.length < requiredSupport || bins[index].xs.length < 2) {
+      continue;
+    }
+    xs.sort((left, right) => left - right);
+    // A trimmed center stops one large red hold near an edge from pulling the
+    // inferred two-lane wall away from the actual timing-light row.
+    const trim = Math.floor(xs.length * 0.12);
+    const centered = xs.slice(trim, Math.max(trim + 1, xs.length - trim));
+    return {
+      y: bins[index].y,
+      centerX: centered.reduce((sum, value) => sum + value, 0) / centered.length,
+      support: xs.length,
+    };
+  }
+  return { y: 0.1, centerX: 0.5, support: 0 };
+}
+
+function detectWallMatBoundary(
+  data: Uint8ClampedArray | ArrayLike<number>,
+  width: number,
+  height: number,
+): { y: number; contrast: number } {
+  const xStart = Math.round(width * 0.14);
+  const xEnd = Math.round(width * 0.86);
+  const xStep = Math.max(1, Math.floor((xEnd - xStart) / 72));
+  const yStep = Math.max(1, Math.round(height / 260));
+  const offsets = [0.012, 0.02, 0.028].map((fraction) => Math.max(2, Math.round(height * fraction)));
+  const samples: Array<{ y: number; contrast: number }> = [];
+
+  for (let y = Math.round(height * 0.62); y <= height * 0.96; y += yStep) {
+    const above: number[] = [];
+    const below: number[] = [];
+    for (let x = xStart; x < xEnd; x += xStep) {
+      for (const offsetY of offsets) {
+        above.push(pixelLuminance(data, width, x, Math.max(0, y - offsetY)));
+        below.push(pixelLuminance(data, width, x, Math.min(height - 1, y + offsetY)));
+      }
+    }
+    samples.push({ y: y / height, contrast: median(above) - median(below) });
+  }
+
+  const peak = samples.reduce((best, sample) => sample.contrast > best.contrast ? sample : best,
+    { y: 0.88, contrast: Number.NEGATIVE_INFINITY });
+  if (!Number.isFinite(peak.contrast) || peak.contrast < 5) {
+    return { y: 0.88, contrast: Math.max(0, peak.contrast) };
+  }
+  const peakIndex = samples.indexOf(peak);
+  let onsetIndex = peakIndex;
+  while (onsetIndex > 0 && peak.y - samples[onsetIndex - 1].y <= 0.065 &&
+      samples[onsetIndex - 1].contrast >= peak.contrast * 0.48) {
+    onsetIndex -= 1;
+  }
+  return { y: samples[onsetIndex].y, contrast: peak.contrast };
+}
+
+function pixelLuminance(
+  data: Uint8ClampedArray | ArrayLike<number>,
+  width: number,
+  x: number,
+  y: number,
+): number {
+  const offset = (y * width + x) * 4;
+  return data[offset] * 0.299 + data[offset + 1] * 0.587 + data[offset + 2] * 0.114;
+}
+
+function median(values: number[]): number {
+  if (!values.length) {
+    return 0;
+  }
+  values.sort((left, right) => left - right);
+  const middle = Math.floor(values.length / 2);
+  return values.length % 2 ? values[middle] : (values[middle - 1] + values[middle]) / 2;
+}
+
+function fitSpanWidth(center: number, requestedWidth: number): number {
+  return Math.max(0.12, Math.min(requestedWidth, center * 2, (1 - center) * 2));
+}
+
+function clampNumber(value: number, minimum: number, maximum: number): number {
+  return Math.min(maximum, Math.max(minimum, value));
+}
+
+function roundMetric(value: number): number {
+  return Math.round(value * 10000) / 10000;
 }
 
 function orderCorners(corners: WallCalibrationCorner[]): WallCalibrationCorner[] | null {

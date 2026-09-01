@@ -9,7 +9,13 @@ import type {
   StartSignalDebug,
   StartSignalDetectionResult,
 } from "../types";
-import { computeColorDistance, normalizedZoneToPixelRect, sampleFramesInRange, sampleZoneAverageColor } from "./videoFrameSampler";
+import {
+  computeColorDistance,
+  normalizedZoneToPixelRect,
+  sampleFramesInRange,
+  sampleZoneAverageColor,
+  sampleZoneOpponentColor,
+} from "./videoFrameSampler";
 
 interface DetectStartSignalOptions {
   video: HTMLVideoElement;
@@ -21,6 +27,7 @@ interface DetectStartSignalOptions {
   profile?: StartDetectionProfile;
   calibration?: StartLightCalibration;
   fps?: number;
+  colorSamplingMode?: "average" | "opponent";
   signal?: AbortSignal;
 }
 
@@ -52,6 +59,7 @@ export async function detectStartSignal({
   profile = "auto",
   calibration,
   fps = 10,
+  colorSamplingMode = "average",
   signal,
 }: DetectStartSignalOptions): Promise<StartSignalDetectionResult> {
   const threshold = SENSITIVITY_THRESHOLDS[sensitivity];
@@ -87,7 +95,9 @@ export async function detectStartSignal({
   try {
     for (const time of times) {
       throwIfCancelled(signal);
-      const sample = await sampleZoneAverageColor(video, time, zone);
+      const sample = colorSamplingMode === "opponent"
+        ? await sampleZoneOpponentColor(video, time, zone)
+        : await sampleZoneAverageColor(video, time, zone);
       throwIfCancelled(signal);
       debug.samples.push({
         time: sample.time,
@@ -123,20 +133,24 @@ export async function detectStartSignal({
   }
 
   smoothColorDistances(debug.samples);
-  applyCalibrationDistances(debug.samples, calibration);
+  const effectiveCalibration = hasCalibration(calibration)
+    ? adaptCalibrationToSampledZone(debug.samples, calibration)
+    : calibration;
+  debug.calibration = effectiveCalibration;
+  applyCalibrationDistances(debug.samples, effectiveCalibration);
   debug.firstThresholdCrossingTime = debug.samples.find((sample) => (sample.smoothedColorDistance ?? 0) >= threshold)?.time;
   const strongestSample = getStrongestSample(debug.samples);
   debug.strongestSignalTime = strongestSample?.time;
 
   const requiredFrames = REQUIRED_FRAMES[sensitivity];
-  const shouldUseCalibration = hasCalibration(calibration) && (profile === "auto" || profile === "calibrated" || profile === "blocked" || profile === "manual");
+  const shouldUseCalibration = hasCalibration(effectiveCalibration) && (profile === "auto" || profile === "calibrated" || profile === "blocked" || profile === "manual");
   if (shouldUseCalibration) {
     const calibratedResult = detectCalibratedTransition({
       samples: debug.samples,
       searchStart,
       searchEnd,
       requiredFrames: profile === "blocked" ? Math.max(1, requiredFrames - 1) : requiredFrames,
-      calibration: calibration as RequiredCalibration,
+      calibration: effectiveCalibration as RequiredCalibration,
       manualReviewOnly: profile === "manual",
       blockedMode: profile === "blocked" || lightVisibility === "blocked",
     });
@@ -312,7 +326,86 @@ function buildStartCandidates({
     .slice(0, manualReviewOnly ? 5 : 3);
 }
 
-type RequiredCalibration = Required<Pick<StartLightCalibration, "beforeStartRGB" | "afterStartRGB" | "colorDelta">>;
+export type RequiredCalibration = Required<Pick<StartLightCalibration, "beforeStartRGB" | "afterStartRGB" | "colorDelta">>;
+
+export interface VerifiedGreenDeparture {
+  onsetIndex: number;
+  confirmationIndex: number;
+  confirmationFrames: number;
+  departureThreshold: number;
+  baselineDistance: number;
+}
+
+/**
+ * Finds the first durable departure from the calibrated green state, but only
+ * returns it when a later run of blue-like frames verifies that the light really
+ * changed. This timestamps the beginning of a green-to-blue fade instead of its
+ * midpoint while still rejecting compression flicker and one-frame occlusions.
+ */
+export function findVerifiedGreenDeparture(
+  samples: StartSignalDebug["samples"],
+  calibration: RequiredCalibration,
+  requiredBlueFrames: number,
+): VerifiedGreenDeparture | undefined {
+  const minAfterAdvantage = Math.max(0.35, calibration.colorDelta * 0.06);
+  const blueDistanceLimit = calibration.colorDelta * 0.72;
+  const confirmationIndex = samples.findIndex((sample, index) =>
+    isBlueConfirmation(sample, minAfterAdvantage, blueDistanceLimit) &&
+    countBlueConfirmationFrames(samples, index, minAfterAdvantage, blueDistanceLimit) >= requiredBlueFrames,
+  );
+  if (confirmationIndex < 0) {
+    return undefined;
+  }
+
+  const beforeLikeDistances = samples
+    .slice(0, confirmationIndex)
+    .filter((sample) => (sample.distanceToBefore ?? Infinity) <= (sample.distanceToAfter ?? -Infinity))
+    .map((sample) => sample.distanceToBefore ?? 0);
+  if (beforeLikeDistances.length < 2) {
+    return undefined;
+  }
+  // Only the lowest-distance portion represents the stable initial green run.
+  // Including a long gradual fade here inflates MAD until the true onset vanishes.
+  const stablePool = [...beforeLikeDistances]
+    .sort((left, right) => left - right)
+    .slice(0, Math.max(2, Math.ceil(beforeLikeDistances.length * 0.3)));
+  const baselineDistance = medianNumber(stablePool);
+  const baselineDeviation = medianNumber(stablePool.map((value) => Math.abs(value - baselineDistance)));
+  const departureThreshold = Math.max(
+    0.65,
+    calibration.colorDelta * 0.035,
+    baselineDistance + Math.max(0.45, baselineDeviation * 4),
+  );
+
+  for (let index = 2; index <= confirmationIndex; index += 1) {
+    const previousStable = [samples[index - 2], samples[index - 1]].every((sample) =>
+      (sample.distanceToBefore ?? Infinity) < departureThreshold,
+    );
+    if (!previousStable || (samples[index].distanceToBefore ?? 0) < departureThreshold) {
+      continue;
+    }
+    const lookAheadEnd = Math.min(confirmationIndex + 1, index + 3);
+    const departureFrames = samples
+      .slice(index, lookAheadEnd)
+      .filter((sample) => (sample.distanceToBefore ?? 0) >= departureThreshold)
+      .length;
+    if (departureFrames >= Math.min(2, lookAheadEnd - index)) {
+      return {
+        onsetIndex: index,
+        confirmationIndex,
+        confirmationFrames: countBlueConfirmationFrames(
+          samples,
+          confirmationIndex,
+          minAfterAdvantage,
+          blueDistanceLimit,
+        ),
+        departureThreshold: roundMetric(departureThreshold),
+        baselineDistance: roundMetric(baselineDistance),
+      };
+    }
+  }
+  return undefined;
+}
 
 function detectCalibratedTransition({
   samples,
@@ -332,44 +425,58 @@ function detectCalibratedTransition({
   blockedMode: boolean;
 }): { selected?: DetectionCandidate; candidates: DetectionCandidate[]; failureReason?: string } {
   const candidates = new Map<string, DetectionCandidate>();
-  const minAfterAdvantage = Math.max(2, calibration.colorDelta * 0.08);
-
-  samples.forEach((sample, index) => {
-    const distanceToBefore = sample.distanceToBefore ?? 0;
-    const distanceToAfter = sample.distanceToAfter ?? 0;
-    const afterAdvantage = distanceToBefore - distanceToAfter;
-    // A frame only counts as after-start when it is decisively closer to the calibrated
-    // blue AND actually resembles it. Marginal closeness is noise, and noise selected
-    // here becomes a wrong early start because ranking prefers the earliest candidate.
-    const afterLike = afterAdvantage >= minAfterAdvantage && distanceToAfter <= calibration.colorDelta * 0.75;
-    const persistenceFrames = countAfterLikeFrames(samples, index, minAfterAdvantage);
-    const boundaryRisk = isNearEnd(sample.time, searchEnd) || isNearStart(sample.time, searchStart);
-    const weakEarly = blockedMode && afterAdvantage >= minAfterAdvantage * 0.4;
-
-    if (afterLike || weakEarly) {
-      const kind = weakEarly && !afterLike ? "Earliest weak calibrated shift" : "Calibrated light transition";
-      const confidence = getCalibratedConfidence({
+  const minAfterAdvantage = Math.max(0.35, calibration.colorDelta * 0.06);
+  const verified = findVerifiedGreenDeparture(samples, calibration, requiredFrames);
+  if (verified) {
+    const onset = samples[verified.onsetIndex];
+    const confirmation = samples[verified.confirmationIndex];
+    const confirmationAdvantage = (confirmation.distanceToBefore ?? 0) - (confirmation.distanceToAfter ?? 0);
+    const boundaryRisk = isNearEnd(onset.time, searchEnd) || isNearStart(onset.time, searchStart);
+    const candidate: DetectionCandidate = {
+      rawTime: onset.time,
+      confidence: getCalibratedConfidence({
         colorDelta: calibration.colorDelta,
-        afterAdvantage,
-        persistenceFrames,
+        afterAdvantage: confirmationAdvantage,
+        persistenceFrames: verified.confirmationFrames,
         requiredFrames,
         boundaryRisk,
-      });
-      candidates.set(candidateKey(sample.time, kind), {
+      }),
+      reason: `First sustained departure from calibrated green; blue was verified ${verified.confirmationFrames} frame${verified.confirmationFrames === 1 ? "" : "s"} later.`,
+      score: roundMetric(Math.max(minAfterAdvantage, confirmationAdvantage)),
+      kind: "Verified green departure",
+      method: "Calibrated green departure with blue verification",
+      rgb: onset.averageRgb,
+      distanceToBefore: roundMetric(onset.distanceToBefore ?? 0),
+      distanceToAfter: roundMetric(onset.distanceToAfter ?? 0),
+      boundaryRisk,
+      persistenceFrames: verified.confirmationFrames,
+    };
+    candidates.set(candidateKey(onset.time, candidate.kind), candidate);
+  } else if (blockedMode) {
+    const weakIndex = samples.findIndex((sample, index) =>
+      index >= 2 &&
+      (sample.distanceToBefore ?? 0) >= Math.max(2.5, calibration.colorDelta * 0.04) &&
+      [samples[index - 2], samples[index - 1]].every((previous) =>
+        (previous.distanceToBefore ?? Infinity) < Math.max(2.5, calibration.colorDelta * 0.04),
+      ),
+    );
+    if (weakIndex >= 0) {
+      const sample = samples[weakIndex];
+      candidates.set(candidateKey(sample.time, "Earliest weak calibrated shift"), {
         rawTime: sample.time,
-        confidence,
-        reason: `Frame became closer to calibrated after-start color for ${persistenceFrames} consecutive sample${persistenceFrames === 1 ? "" : "s"}.`,
-        score: roundMetric(afterAdvantage),
-        kind,
-        method: "Calibrated light transition",
+        confidence: "Low",
+        reason: "The light began departing from calibrated green, but a clear blue confirmation was blocked.",
+        score: roundMetric((sample.distanceToBefore ?? 0) - (sample.distanceToAfter ?? 0)),
+        kind: "Earliest weak calibrated shift",
+        method: "Calibrated green departure (unverified)",
         rgb: sample.averageRgb,
-        distanceToBefore: roundMetric(distanceToBefore),
-        distanceToAfter: roundMetric(distanceToAfter),
-        boundaryRisk,
-        persistenceFrames,
+        distanceToBefore: roundMetric(sample.distanceToBefore ?? 0),
+        distanceToAfter: roundMetric(sample.distanceToAfter ?? 0),
+        boundaryRisk: isNearEnd(sample.time, searchEnd) || isNearStart(sample.time, searchStart),
+        persistenceFrames: 1,
       });
     }
-  });
+  }
 
   const rankedAll = Array.from(candidates.values())
     .sort((a, b) => candidateRank(a, Math.max(1, calibration.colorDelta), requiredFrames, blockedMode) - candidateRank(b, Math.max(1, calibration.colorDelta), requiredFrames, blockedMode));
@@ -380,7 +487,7 @@ function detectCalibratedTransition({
     : rankedAll.find((candidate) =>
       !candidate.boundaryRisk &&
       (candidate.persistenceFrames ?? 0) >= requiredFrames &&
-      candidate.score >= minAfterAdvantage,
+      (candidate.kind === "Verified green departure" || candidate.score >= minAfterAdvantage),
     );
   const ranked = (selected ? [selected, ...rankedAll.filter((candidate) => candidate !== selected)] : rankedAll)
     .slice(0, manualReviewOnly ? 5 : 3);
@@ -410,11 +517,77 @@ function applyCalibrationDistances(samples: StartSignalDebug["samples"], calibra
   }
 }
 
-function countAfterLikeFrames(samples: StartSignalDebug["samples"], startIndex: number, minAfterAdvantage: number): number {
+function isBlueConfirmation(
+  sample: StartSignalDebug["samples"][number],
+  minAfterAdvantage: number,
+  blueDistanceLimit: number,
+): boolean {
+  const advantage = (sample.distanceToBefore ?? 0) - (sample.distanceToAfter ?? 0);
+  return advantage >= minAfterAdvantage && (sample.distanceToAfter ?? Infinity) <= blueDistanceLimit;
+}
+
+export function adaptCalibrationToSampledZone(
+  samples: StartSignalDebug["samples"],
+  calibration: RequiredCalibration & StartLightCalibration,
+): RequiredCalibration & StartLightCalibration {
+  const beforeTime = calibration.calibrationFrameBeforeTime;
+  const afterTime = calibration.calibrationFrameAfterTime;
+  if (beforeTime === undefined || afterTime === undefined) {
+    return calibration;
+  }
+  const beforeSamples = samples
+    .filter((sample) => sample.time >= beforeTime - 0.3 && sample.time <= beforeTime + 0.06)
+    .sort((left, right) => Math.abs(left.time - beforeTime) - Math.abs(right.time - beforeTime))
+    .slice(0, 6);
+  const afterSamples = samples
+    .filter((sample) => sample.time >= afterTime - 0.06 && sample.time <= afterTime + 0.35)
+    .sort((left, right) => Math.abs(left.time - afterTime) - Math.abs(right.time - afterTime))
+    .slice(0, 6);
+  if (beforeSamples.length < 2 || afterSamples.length < 2) {
+    return calibration;
+  }
+  const beforeStartRGB = averageRgb(beforeSamples.map((sample) => sample.averageRgb));
+  const afterStartRGB = averageRgb(afterSamples.map((sample) => sample.averageRgb));
+  const colorDelta = computeColorDistance(beforeStartRGB, afterStartRGB);
+  if (colorDelta < 0.75) {
+    return calibration;
+  }
+  // Opponent-weighted sampling can lock onto the strongest *blue* residual in
+  // both windows, producing a large Euclidean delta while erasing the actual
+  // green-vs-blue separation needed later for finish detection. Preserve the
+  // coarse discovery calibration whenever adaptation collapses or reverses its
+  // signed opponent span (observed in both 12.24 and 12.42).
+  const originalOpponentChange = greenBlueOpponent(calibration.afterStartRGB) -
+    greenBlueOpponent(calibration.beforeStartRGB);
+  const adaptedOpponentChange = greenBlueOpponent(afterStartRGB) - greenBlueOpponent(beforeStartRGB);
+  if (
+    Math.abs(adaptedOpponentChange) < Math.max(3, Math.abs(originalOpponentChange) * 0.35) ||
+    Math.sign(adaptedOpponentChange) !== Math.sign(originalOpponentChange)
+  ) {
+    return calibration;
+  }
+  return {
+    ...calibration,
+    beforeStartRGB,
+    afterStartRGB,
+    colorDelta: roundMetric(colorDelta),
+  };
+}
+
+function greenBlueOpponent(rgb: RGB): number {
+  const total = Math.max(1, rgb.r + rgb.g + rgb.b);
+  return (rgb.g - rgb.b) / total * 180;
+}
+
+function countBlueConfirmationFrames(
+  samples: StartSignalDebug["samples"],
+  startIndex: number,
+  minAfterAdvantage: number,
+  blueDistanceLimit: number,
+): number {
   let count = 0;
   for (let index = startIndex; index < samples.length; index += 1) {
-    const advantage = (samples[index].distanceToBefore ?? 0) - (samples[index].distanceToAfter ?? 0);
-    if (advantage >= minAfterAdvantage) {
+    if (isBlueConfirmation(samples[index], minAfterAdvantage, blueDistanceLimit)) {
       count += 1;
     } else {
       break;
@@ -477,8 +650,8 @@ function smoothColorDistances(samples: StartSignalDebug["samples"]): void {
   for (let index = 0; index < samples.length; index += 1) {
     const previous = samples[index - 1]?.colorDistance ?? samples[index].colorDistance;
     const current = samples[index].colorDistance;
-    const next = samples[index + 1]?.colorDistance ?? samples[index].colorDistance;
-    samples[index].smoothedColorDistance = roundMetric((previous + current + next) / 3);
+    // Causal smoothing cannot leak a future transition into the preceding frame.
+    samples[index].smoothedColorDistance = roundMetric((previous + current * 2) / 3);
   }
 
   for (let index = 0; index < samples.length; index += 1) {
@@ -579,6 +752,17 @@ function averageNumber(values: number[]): number {
     return 0;
   }
   return values.reduce((sum, value) => sum + value, 0) / values.length;
+}
+
+function medianNumber(values: number[]): number {
+  if (!values.length) {
+    return 0;
+  }
+  const sorted = [...values].sort((left, right) => left - right);
+  const middle = Math.floor(sorted.length / 2);
+  return sorted.length % 2
+    ? sorted[middle]
+    : (sorted[middle - 1] + sorted[middle]) / 2;
 }
 
 function candidateKey(time: number, kind: string): string {

@@ -39,8 +39,8 @@ export interface ComEstimate<TPoint> {
 
 export const DEFAULT_BIOMECHANICS_SETTINGS: BiomechanicsSettings = {
   sampleFps: 10,
-  minVisibility: 0.35,
-  minMassCoverage: 0.8,
+  minVisibility: 0.25,
+  minMassCoverage: 0.75,
   smoothingWindowSeconds: 0.2,
   anthropometricModel: "athletevision-published-male-reference",
 };
@@ -63,8 +63,25 @@ export const BODY_SEGMENTS: SegmentDefinition[] = [
 
 const DERIVED_FRAME_WARNINGS = [
   "COM lies outside the calibrated wall quadrilateral.",
+  "Implausible raw wall-plane displacement; review pose and calibration.",
   "Implausible wall-plane speed; review pose and calibration.",
 ] as const;
+
+// Even world-class 15 m runs do not produce sustained 2D COM speeds near the
+// 7-10 m/s spikes created by an identity jump or bad projection. Hide those
+// samples instead of stretching the chart and presenting them as performance.
+export const MAX_PLAUSIBLE_COM_SPEED_MPS = 5.5;
+export const RAW_COM_DISPLACEMENT_WARNING = "Implausible raw wall-plane displacement; review pose and calibration.";
+export const FITTED_COM_SPEED_WARNING = "Implausible wall-plane speed; review pose and calibration.";
+
+/** True when a projected COM sample must not contribute to a path or speed chart. */
+export function isTrajectoryFrameExcluded(frame: BiomechanicsFrame): boolean {
+  return Boolean(
+    frame.extrapolated ||
+    frame.warning?.includes(RAW_COM_DISPLACEMENT_WARNING) ||
+    frame.warning?.includes(FITTED_COM_SPEED_WARNING),
+  );
+}
 
 const LANDMARK_INDEX: Record<string, number> = {
   head: 0,
@@ -150,12 +167,14 @@ export function applyTrajectoryKinematics(
       if (fittedX && fittedY) {
         frame.smoothedWallCom = { xMeters: fittedX.position, yMeters: fittedY.position };
         if (fittedX.velocity !== undefined && fittedY.velocity !== undefined) {
-          frame.velocityXMps = fittedX.velocity;
-          frame.velocityYMps = fittedY.velocity;
-          frame.verticalSpeedMps = fittedY.velocity;
-          frame.speedMps = Math.hypot(fittedX.velocity, fittedY.velocity);
-          if (frame.speedMps > 10) {
-            frame.warning = appendWarning(frame.warning, "Implausible wall-plane speed; review pose and calibration.");
+          const speedMps = Math.hypot(fittedX.velocity, fittedY.velocity);
+          if (speedMps > MAX_PLAUSIBLE_COM_SPEED_MPS) {
+            frame.warning = appendWarning(frame.warning, FITTED_COM_SPEED_WARNING);
+          } else {
+            frame.velocityXMps = fittedX.velocity;
+            frame.velocityYMps = fittedY.velocity;
+            frame.verticalSpeedMps = fittedY.velocity;
+            frame.speedMps = speedMps;
           }
         }
       }
@@ -173,20 +192,23 @@ export function applyTrajectoryKinematics(
       ? frame.poseSelected
       : frame.landmarks.length > 0 || frame.poseDetected,
   ).length;
-  const validFrames = frames.filter((frame) => frame.valid && frame.wallCom).length;
+  const acceptedComFrames = frames.filter((frame) =>
+    frame.valid && frame.wallCom && !isTrajectoryFrameExcluded(frame),
+  );
+  const validFrames = acceptedComFrames.length;
   const detectionCoverage = requestedFrames ? detectedFrames / requestedFrames : 0;
   const trackingCoverage = requestedFrames ? selectedFrames / requestedFrames : 0;
   const validCoverage = requestedFrames ? validFrames / requestedFrames : 0;
   const meanMassCoverage = validFrames
-    ? frames.filter((frame) => frame.valid).reduce((sum, frame) => sum + frame.massCoverage, 0) / validFrames
+    ? acceptedComFrames.reduce((sum, frame) => sum + frame.massCoverage, 0) / validFrames
     : 0;
 
   let pathLengthMeters = 0;
   let activeDuration = 0;
   let observedChordMeters = 0;
   let observedVerticalGainMeters = 0;
-  for (const chunk of chunks) {
-    const smoothed = chunk.filter((frame) => frame.smoothedWallCom);
+  const metricChunks = buildMetricChunks(frames);
+  for (const smoothed of metricChunks) {
     if (smoothed.length >= 2) {
       activeDuration += smoothed[smoothed.length - 1].rawTime - smoothed[0].rawTime;
       observedChordMeters += wallDistance(smoothed[0].smoothedWallCom!, smoothed[smoothed.length - 1].smoothedWallCom!);
@@ -215,6 +237,11 @@ export function applyTrajectoryKinematics(
     "Anthropometric weights use the published adult male reference model and may not match every athlete.",
     "Metric output is valid only for a fixed camera with no pan, tilt, shake, or zoom.",
   ];
+  if (calibration.source === "automatic-approximate") {
+    warnings.push(
+      `Wall scale was inferred automatically and is approximate${calibration.reason ? `: ${calibration.reason}` : "."} Mark the four lane corners manually when precise metre and m/s values matter.`,
+    );
+  }
   if (detectionCoverage < 0.8) {
     warnings.push("Person detection coverage is below 80%; check the wall crop and selected time range.");
   }
@@ -227,19 +254,28 @@ export function applyTrajectoryKinematics(
   if (frames.some((frame) => frame.extrapolated)) {
     warnings.push("Some COM estimates fall outside the calibrated wall quadrilateral and are extrapolated.");
   }
-  if (chunks.length > 1) {
+  if (frames.some((frame) => frame.warning?.includes(RAW_COM_DISPLACEMENT_WARNING))) {
+    warnings.push("Implausible raw COM jumps were excluded before smoothing, path metrics, and charts.");
+  }
+  if (frames.some((frame) => frame.warning?.includes(FITTED_COM_SPEED_WARNING))) {
+    warnings.push("Implausible COM speed spikes were excluded from velocity metrics and charts.");
+  }
+  if (metricChunks.length > 1) {
     warnings.push("Tracking contains gaps; path, gain, and efficiency use continuous observed spans only.");
   }
   if (peakSpeedMps === undefined) {
     warnings.push("Peak speed is hidden because the sample rate or usable sample count is too low.");
   }
 
-  const quality = trackingCoverage >= 0.9 && validCoverage >= 0.85 && meanMassCoverage >= 0.92 &&
-      !frames.some((frame) => frame.extrapolated || (frame.speedMps ?? 0) > 10)
+  let quality: BiomechanicsMetrics["quality"] = trackingCoverage >= 0.9 && validCoverage >= 0.85 && meanMassCoverage >= 0.92 &&
+      !frames.some((frame) => frame.extrapolated || frame.warning?.includes("Implausible wall-plane speed"))
     ? "High"
     : trackingCoverage >= 0.7 && validCoverage >= 0.6 && meanMassCoverage >= settings.minMassCoverage
       ? "Medium"
       : "Needs review";
+  if (calibration.source === "automatic-approximate") {
+    quality = calibration.confidence === "Low" || quality === "Needs review" ? "Needs review" : "Medium";
+  }
 
   return {
     frames,
@@ -342,12 +378,58 @@ function addMidpointJoint(joints: Map<string, ResolvedJoint>, name: string, left
 }
 
 function buildContinuousChunks(frames: BiomechanicsFrame[]): BiomechanicsFrame[][] {
-  const valid = frames.filter((frame) => frame.valid && frame.wallCom);
   const chunks: BiomechanicsFrame[][] = [];
-  for (const frame of valid) {
-    const current = chunks[chunks.length - 1];
-    if (!current || frame.rawTime - current[current.length - 1].rawTime > 0.25) {
-      chunks.push([frame]);
+  let current: BiomechanicsFrame[] | undefined;
+  for (const frame of frames) {
+    if (!frame.valid || !frame.wallCom) {
+      continue;
+    }
+    if (frame.extrapolated) {
+      current = undefined;
+      continue;
+    }
+
+    const previous = current?.[current.length - 1];
+    if (previous?.wallCom) {
+      const elapsed = frame.rawTime - previous.rawTime;
+      if (elapsed > 0.25) {
+        current = undefined;
+      } else if (elapsed > 1e-9 && wallDistance(previous.wallCom, frame.wallCom) / elapsed > MAX_PLAUSIBLE_COM_SPEED_MPS) {
+        frame.warning = appendWarning(frame.warning, RAW_COM_DISPLACEMENT_WARNING);
+        current = undefined;
+        continue;
+      }
+    }
+
+    if (!current) {
+      current = [frame];
+      chunks.push(current);
+    } else {
+      current.push(frame);
+    }
+  }
+  return chunks;
+}
+
+/**
+ * Rebuilds the final path after fitting so a rejected sample is a hard visual
+ * and metric boundary rather than being bridged by its two neighbors.
+ */
+function buildMetricChunks(frames: BiomechanicsFrame[]): BiomechanicsFrame[][] {
+  const chunks: BiomechanicsFrame[][] = [];
+  let current: BiomechanicsFrame[] | undefined;
+  for (const frame of frames) {
+    if (isTrajectoryFrameExcluded(frame)) {
+      current = undefined;
+      continue;
+    }
+    if (!frame.smoothedWallCom) {
+      continue;
+    }
+    const previous = current?.[current.length - 1];
+    if (!current || !previous || frame.rawTime - previous.rawTime > 0.25) {
+      current = [frame];
+      chunks.push(current);
     } else {
       current.push(frame);
     }
