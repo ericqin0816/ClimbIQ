@@ -2278,9 +2278,13 @@ function App() {
 
   async function copyDebugReport() {
     const report = JSON.stringify(buildDebugReport(), null, 2);
-    await navigator.clipboard.writeText(report);
-    setCopyStatus("Copied");
-    window.setTimeout(() => setCopyStatus(""), 1800);
+    try {
+      await navigator.clipboard.writeText(report);
+      setCopyStatus("Copied");
+      window.setTimeout(() => setCopyStatus(""), 1800);
+    } catch {
+      setCopyStatus("Copy failed. Use the JSON download instead.");
+    }
   }
 
   function buildDetectionWarnings() {
@@ -2508,8 +2512,12 @@ function App() {
   }
 
   async function copyObsidianNote() {
-    await navigator.clipboard.writeText(buildObsidianMarkdown());
-    setExportStatus("Obsidian note copied.");
+    try {
+      await navigator.clipboard.writeText(buildObsidianMarkdown());
+      setExportStatus("Obsidian note copied.");
+    } catch {
+      setExportStatus("Clipboard access was blocked. Use Download report instead.");
+    }
   }
 
   function downloadMarkdown() {
@@ -2519,8 +2527,12 @@ function App() {
   }
 
   async function copyDatasetJson() {
-    await navigator.clipboard.writeText(JSON.stringify(buildDatasetExport(), null, 2));
-    setExportStatus("Dataset JSON copied.");
+    try {
+      await navigator.clipboard.writeText(JSON.stringify(buildDatasetExport(), null, 2));
+      setExportStatus("Dataset JSON copied.");
+    } catch {
+      setExportStatus("Clipboard access was blocked. Use Download data instead.");
+    }
   }
 
   function downloadDatasetJson() {

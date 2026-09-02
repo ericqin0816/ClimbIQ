@@ -201,14 +201,23 @@ export function analyzeFinishColorSamples(
     : frameInterval >= 0.075
       ? frameInterval * 2.25
       : Math.max(0.1, frameInterval * 3.25);
+  // Baseline pixels naturally wobble more than the faint-onset threshold.
+  // Use a bounded fraction of the strict transition threshold when proving a
+  // stable source state, while onset backtracking below remains conservative.
+  const sourceStabilityThreshold = Math.max(onsetThreshold, signalThreshold * 0.75);
   const candidates: DetectionCandidate[] = [];
 
   for (let index = 2; index < samples.length - 1; index += 1) {
-    const previousStable = hasStableSourceBefore(samples, projected, index, onsetThreshold, 0.5);
+    const previousStable = hasStableSourceBefore(samples, projected, index, sourceStabilityThreshold, 0.5);
+    // The first transitional frame can still resemble the source color, but a
+    // source-state noise spike must not anchor the finish unless the very next
+    // sample continues toward the verified reversal.
+    const immediateContinuation = projected[index + 1] >= onsetThreshold && plausibleLightLevel[index + 1];
     // A strict transition anchor must retain plausible colored-light evidence.
     // Neutral occlusion can move opponent color away from blue, but its missing
     // chroma must never become the timestamp just because real green appears later.
-    if (!previousStable || projected[index] < signalThreshold || !plausibleLightLevel[index]) {
+    if (!previousStable || projected[index] < signalThreshold || !plausibleLightLevel[index] ||
+        (!targetDirected[index] && !immediateContinuation)) {
       continue;
     }
     const horizonEnd = findLastIndexAtOrBefore(samples, samples[index].time + maxVerificationSeconds);

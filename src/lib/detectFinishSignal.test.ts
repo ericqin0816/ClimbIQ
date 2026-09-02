@@ -307,6 +307,30 @@ describe("same-lane automatic finish detection", () => {
     expect(result.detected).toBe(true);
     expect(result.rawTime).toBeCloseTo(0.8, 6);
   });
+
+  it("does not invent a finish across seeded climb-state color and exposure noise", () => {
+    for (let seed = 1; seed <= 80; seed += 1) {
+      const random = seededRandom(seed);
+      const noisyBlue = Array.from({ length: 32 }, (_, index) => {
+        const exposure = Math.round(Math.sin(index / 5) * 7);
+        return jitter(blue, random, 5, exposure);
+      });
+      expect(analyzeFinishColorSamples(seriesAtFps(noisyBlue, 10), calibration).detected, `seed ${seed}`).toBe(false);
+    }
+  });
+
+  it("keeps detecting a sustained reversal across seeded sensor noise", () => {
+    for (let seed = 1; seed <= 50; seed += 1) {
+      const random = seededRandom(seed * 17);
+      const colors = [
+        ...Array.from({ length: 12 }, () => jitter(blue, random, 4)),
+        ...Array.from({ length: 16 }, () => jitter(green, random, 4)),
+      ];
+      const result = analyzeFinishColorSamples(seriesAtFps(colors, 10), calibration);
+      expect(result.detected, `seed ${seed}: ${result.reason}`).toBe(true);
+      expect(result.rawTime, `seed ${seed}`).toBeCloseTo(1.2, 1);
+    }
+  });
 });
 
 function series(colors: RGB[]): FinishColorSample[] {
@@ -326,5 +350,18 @@ function mix(from: RGB, to: RGB, amount: number): RGB {
     r: Math.round(from.r + (to.r - from.r) * amount),
     g: Math.round(from.g + (to.g - from.g) * amount),
     b: Math.round(from.b + (to.b - from.b) * amount),
+  };
+}
+
+function jitter(color: RGB, random: () => number, amount: number, exposure = 0): RGB {
+  const channel = (value: number) => Math.max(0, Math.min(255, Math.round(value + exposure + (random() * 2 - 1) * amount)));
+  return { r: channel(color.r), g: channel(color.g), b: channel(color.b) };
+}
+
+function seededRandom(seed: number): () => number {
+  let state = seed >>> 0;
+  return () => {
+    state = (state * 1664525 + 1013904223) >>> 0;
+    return state / 0x100000000;
   };
 }
