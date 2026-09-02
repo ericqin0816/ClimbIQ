@@ -1932,12 +1932,16 @@ function App() {
     // that same lane for the finish timing indicator. The upper search discovers
     // its own fixed patch, so perspective does not require the top and bottom
     // lights to share one x coordinate.
+    // Keep this fallback anchored to the preferred start lane. A weak lower
+    // review candidate in another lane is not strong enough evidence to switch
+    // athlete identity before searching the angled upper wall.
+    const upperLaneCandidate = candidates[0];
     onStatus?.("The lower lane light did not verify a finish. Searching the angled upper timing indicators…");
     const { detectTopFinishSignal } = await import("./lib/detectTopFinishSignal");
     const upperFinish = await detectTopFinishSignal({
       video,
       startSignalRawTime: acceptedStart,
-      laneHintZone: review.candidate.zone,
+      laneHintZone: upperLaneCandidate.zone,
       expectedFinishTime,
       signal,
       onProgress: (phase, processed, total) => {
@@ -1955,8 +1959,8 @@ function App() {
       setFinishResult(upperFinish.result);
       setZones((current) => ({ ...current, finishLight: upperFinish.zone }));
       automaticLaneCandidatesRef.current = [
-        review.candidate,
-        ...candidates.filter((item) => item !== review.candidate),
+        upperLaneCandidate,
+        ...candidates.filter((item) => item !== upperLaneCandidate),
       ];
       if (upperFinish.result.confidence === "High" && upperAgreesWithOfficial) {
         acceptTimestamp("finishPad", upperFinish.result.rawTime, "Finish light detection", upperFinish.result.confidence, {
@@ -1970,8 +1974,8 @@ function App() {
           rawTime: upperFinish.result.rawTime,
           // Keep the lower start-verified lane for athlete identity and wall
           // calibration; the separately saved finishLight zone is only timing.
-          zone: review.candidate.zone,
-          calibration: review.candidate.calibration,
+          zone: upperLaneCandidate.zone,
+          calibration: upperLaneCandidate.calibration,
           confidence: upperFinish.result.confidence,
           accepted: true,
         };
@@ -1983,8 +1987,8 @@ function App() {
       );
       return {
         rawTime: upperFinish.result.rawTime,
-        zone: review.candidate.zone,
-        calibration: review.candidate.calibration,
+        zone: upperLaneCandidate.zone,
+        calibration: upperLaneCandidate.calibration,
         confidence: upperFinish.result.confidence,
         accepted: false,
       };
