@@ -98,7 +98,7 @@ When the route center cannot be registered, a separate review-only fallback can 
 
 Each detected candidate includes deterministic evidence diagnostics and remains reviewable frame-by-frame. Detection never writes an accepted Hold 10 marker by itself: the user must review and set the exact contact frame before either race-phase split appears. Compact saved sessions retain the hand landmarks required to reproduce the same Hold 10 result after reload. A stale pose result cannot populate Hold 10, route splits, or the video overlay after the accepted start, finish, or selected athlete changes. Changing or clearing Start invalidates all dependent markers; an earlier corrected Finish clears markers that now fall outside the climb. Imported session timestamps are range/order checked and unknown evidence labels are downgraded. Manual Hold 10 zones are validated and projected once for both detection and overlay; malformed or off-wall corrections fall back to visual route registration or pause contact timing.
 
-Saved and imported sessions also revalidate video metadata, normalize detection-zone corners, reject zero-area or non-finite zones, recompute calibration color distance from valid RGB samples, and discard out-of-video calibration frames. Marker chronology is enforced from earliest motion through Hold 10, so invalid edits cannot create negative exported splits. Invalid official totals are ignored rather than steering finish ranking or truncating pose analysis. If browser storage is unavailable or full, ClimbIQ keeps the current analysis on screen and tells the user to export session JSON instead of claiming it was saved.
+Saved and imported sessions also revalidate video metadata, normalize detection-zone corners, preserve only recognized automatic-zone provenance, reject zero-area or non-finite zones, recompute calibration color distance from valid RGB samples, and discard out-of-video calibration frames. Restored biomechanics frames are restricted to their saved Start→Finish range and have climb-relative times recomputed. Marker chronology is enforced from earliest motion through Hold 10, so invalid edits cannot create negative exported splits. Invalid official totals are ignored rather than steering finish ranking or truncating pose analysis. If browser storage is unavailable or full, ClimbIQ keeps the current analysis on screen and tells the user to export session JSON instead of claiming it was saved.
 
 Suggested timestamps open a dedicated video-review workflow before acceptance. The review panel displays the suggested raw time, exact frame currently on screen, adjustment amount, frame-step controls, and an action that accepts the displayed frame. Sticky workflow navigation and collapsed manual/diagnostic sections reduce long-page scrolling.
 
@@ -140,8 +140,7 @@ A High-confidence finish can be accepted automatically. A verified review-level 
 ```bash
 npm install
 npm run dev
-npm run typecheck
-npm run test
+npm run check
 ```
 
 Open the dev server URL, upload a local climbing video, and press **Run full analysis**. Zones are optional unless another person appears in frame or automatic light discovery needs manual help.

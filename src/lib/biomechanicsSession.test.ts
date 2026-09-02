@@ -40,6 +40,33 @@ describe("compact biomechanics session", () => {
     expect(after?.rawTime).toBe(before?.rawTime);
     expect(after?.source).toBe("Hold contact detection");
   });
+
+  it("drops out-of-range frames and recomputes climb time from the saved Start", () => {
+    const calibration = buildWallCalibration([
+      { x: 0, y: 1 },
+      { x: 1, y: 1 },
+      { x: 1, y: 0 },
+      { x: 0, y: 0 },
+    ], 0, true);
+    const result = makeResult([
+      { ...makeFrame(9.9, { x: 0.4, y: 0.5 }), climbTime: 999 },
+      { ...makeFrame(10.5, { x: 0.4, y: 0.5 }), climbTime: 999 },
+      { ...makeFrame(12.1, { x: 0.4, y: 0.5 }), climbTime: 999 },
+    ]);
+    result.startRawTime = 10;
+    result.endRawTime = 12;
+
+    const restored = sanitizeBiomechanicsSession({
+      version: 1,
+      calibration,
+      settings: result.settings,
+      result,
+    });
+
+    expect(restored.result?.frames).toHaveLength(1);
+    expect(restored.result?.frames[0]).toMatchObject({ rawTime: 10.5, climbTime: 0.5 });
+    expect(restored.result?.metrics.requestedFrames).toBe(1);
+  });
 });
 
 function makeFrame(rawTime: number, wrist: { x: number; y: number }): BiomechanicsFrame {

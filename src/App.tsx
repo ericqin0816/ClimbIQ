@@ -13,6 +13,7 @@ import {
 import { assessCameraStability, assessSceneContinuity } from "./lib/cameraStability";
 import { detectFirstMovement } from "./lib/detectFirstMovement";
 import { detectFinishSignal } from "./lib/detectFinishSignal";
+import { yamlNumber, yamlString } from "./lib/exportFormatting";
 import { calculateHold10PhaseSplits } from "./lib/hold10Splits";
 import { detectAutomaticStartLight, type GreenBlueLaneCandidate } from "./lib/detectAutomaticStartLight";
 import { detectAudioStartSignal, type AudioStartResult } from "./lib/detectAudioStartSignal";
@@ -2732,13 +2733,11 @@ function App() {
 
   function exportCurrentSession() {
     const session = buildSessionSnapshot();
-    const blob = new Blob([JSON.stringify(session, null, 2)], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `${slugify(session.name)}.climbiq-session.json`;
-    link.click();
-    URL.revokeObjectURL(url);
+    downloadTextFile(
+      `${slugify(session.name)}.climbiq-session.json`,
+      JSON.stringify(session, null, 2),
+      "application/json",
+    );
     setSessionStatus(`Exported "${session.name}" as JSON.`);
   }
 
@@ -4802,14 +4801,6 @@ function markdownSplitRow(label: string, splits: Record<string, number | null>) 
   return `| ${label} | ${formatExportTime(splits[label])} |\n`;
 }
 
-function yamlString(value: string) {
-  return `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
-}
-
-function yamlNumber(value: number | null | undefined) {
-  return value === null || value === undefined ? "" : String(value);
-}
-
 function formatRgb(rgb?: RGB) {
   return rgb ? `${rgb.r}, ${rgb.g}, ${rgb.b}` : "not set";
 }
@@ -4820,8 +4811,13 @@ function downloadTextFile(fileName: string, content: string, type: string) {
   const link = document.createElement("a");
   link.href = url;
   link.download = fileName;
+  link.style.display = "none";
+  document.body.appendChild(link);
   link.click();
-  URL.revokeObjectURL(url);
+  link.remove();
+  // Keep the object URL alive through the browser's download dispatch. Some
+  // browsers can cancel a download when it is revoked in the same task.
+  window.setTimeout(() => URL.revokeObjectURL(url), 0);
 }
 
 async function writeFileToDirectory(directoryHandle: any, fileName: string, content: string) {

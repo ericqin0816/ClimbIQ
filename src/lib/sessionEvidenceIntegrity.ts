@@ -7,6 +7,11 @@ const ZONE_LABELS: Record<ZoneId, string> = {
   finishLight: "Finish Light Zone",
 };
 const ZONE_IDS = Object.keys(ZONE_LABELS) as ZoneId[];
+const KNOWN_AUTOMATIC_LABELS: Partial<Record<ZoneId, Set<string>>> = {
+  startLight: new Set(["Auto-detected green-to-blue start light"]),
+  startBody: new Set(["Automatic lane start-body region"]),
+  finishLight: new Set(["Auto-detected upper finish indicator", "Auto-detected physical finish band"]),
+};
 
 export function sanitizeZoneMap(value: unknown): Partial<Record<ZoneId, NormalizedZone>> {
   if (!value || typeof value !== "object") return {};
@@ -69,7 +74,9 @@ function sanitizeZone(value: unknown, id: ZoneId): NormalizedZone | undefined {
   const y1 = clamp(Math.min(candidate.y1!, candidate.y2!), 0, 1);
   const y2 = clamp(Math.max(candidate.y1!, candidate.y2!), 0, 1);
   if (x2 - x1 <= 0.005 || y2 - y1 <= 0.005) return undefined;
-  return { id, label: ZONE_LABELS[id], x1, y1, x2, y2 };
+  const importedLabel = typeof candidate.label === "string" ? candidate.label : "";
+  const label = KNOWN_AUTOMATIC_LABELS[id]?.has(importedLabel) ? importedLabel : ZONE_LABELS[id];
+  return { id, label, x1, y1, x2, y2 };
 }
 
 function sanitizeRgb(value: unknown): RGB | undefined {

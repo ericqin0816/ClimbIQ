@@ -75,9 +75,15 @@ export function sanitizeBiomechanicsSession(value: unknown): BiomechanicsSession
 
   const frames = Array.isArray(resultCandidate.frames)
     ? (resultCandidate.frames as unknown[])
-        .slice(0, 450)
+        .slice(0, 5000)
         .map((frame) => sanitizeBiomechanicsFrame(frame, settings.minMassCoverage))
         .filter((frame): frame is BiomechanicsFrame => Boolean(frame))
+        .filter((frame) => frame.rawTime >= startRawTime - 0.001 && frame.rawTime <= endRawTime + 0.001)
+        .map((frame) => ({
+          ...frame,
+          climbTime: Math.round((frame.rawTime - startRawTime) * 1000) / 1000,
+        }))
+        .slice(0, 450)
     : [];
   if (!frames.length) {
     return { version: 1, settings, calibration };

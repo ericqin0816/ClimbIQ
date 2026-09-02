@@ -23,6 +23,16 @@ describe("saved session evidence integrity", () => {
     })).toEqual({});
   });
 
+  it("preserves only recognized automatic-zone provenance", () => {
+    expect(sanitizeZoneMap({
+      startBody: { id: "startBody", label: "Automatic lane start-body region", x1: 0.1, y1: 0.4, x2: 0.4, y2: 0.9 },
+      finishLight: { id: "finishLight", label: "Auto-detected upper finish indicator", x1: 0.5, y1: 0.02, x2: 0.55, y2: 0.08 },
+    })).toMatchObject({
+      startBody: { label: "Automatic lane start-body region" },
+      finishLight: { label: "Auto-detected upper finish indicator" },
+    });
+  });
+
   it("recomputes color distance instead of trusting imported calibration metadata", () => {
     expect(sanitizeStartLightCalibration({
       beforeStartRGB: { r: 10, g: 80, b: 10 },

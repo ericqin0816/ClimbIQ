@@ -11,6 +11,7 @@
     "benchmark:summary": "node scripts/summarize-real-video-benchmark.mjs",
     "benchmark:timing": "node e2e/real-video-timing.mjs",
     "build": "tsc -b && vite build",
+    "check": "npm run typecheck && npm test && npm run build",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },
