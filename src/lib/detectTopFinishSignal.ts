@@ -13,6 +13,7 @@ import {
   sampleZoneAverageColor,
   seekTo,
 } from "./videoFrameSampler";
+import { resolveFinishSearchWindow } from "./finishSearchWindow";
 
 export interface TopFinishFrame {
   time: number;
@@ -49,6 +50,7 @@ interface DetectTopFinishSignalOptions {
   laneHintZone?: NormalizedZone;
   expectedFinishTime?: number;
   minimumClimbSeconds?: number;
+  maximumClimbSeconds?: number;
   signal?: AbortSignal;
   onProgress?: (phase: "coarse" | "refine", processed: number, total: number) => void;
 }
@@ -74,11 +76,16 @@ export async function detectTopFinishSignal({
   laneHintZone,
   expectedFinishTime,
   minimumClimbSeconds = 3,
+  maximumClimbSeconds = 30,
   signal,
   onProgress,
 }: DetectTopFinishSignalOptions): Promise<TopFinishSignalOutcome> {
-  const searchStart = Math.max(0, startSignalRawTime + minimumClimbSeconds);
-  const searchEnd = Math.max(searchStart, video.duration - 0.04);
+  const { start: searchStart, end: searchEnd } = resolveFinishSearchWindow(
+    startSignalRawTime,
+    video.duration,
+    minimumClimbSeconds,
+    maximumClimbSeconds,
+  );
   if (searchEnd - searchStart < 0.8) {
     return { result: emptyResult("The upper finish-indicator search window is too short.") };
   }

@@ -13,6 +13,7 @@ import {
   sampleFramesInRange,
   sampleZoneOpponentColors,
 } from "./videoFrameSampler";
+import { resolveFinishSearchWindow } from "./finishSearchWindow";
 
 export interface FinishColorSample {
   time: number;
@@ -28,6 +29,7 @@ interface DetectFinishSignalOptions {
   calibration: StartLightCalibration;
   expectedFinishTime?: number;
   minimumClimbSeconds?: number;
+  maximumClimbSeconds?: number;
   signal?: AbortSignal;
   onProgress?: (phase: "coarse" | "refine", processed: number, total: number) => void;
 }
@@ -64,6 +66,7 @@ export async function detectFinishSignal({
   calibration,
   expectedFinishTime,
   minimumClimbSeconds = 3,
+  maximumClimbSeconds = 30,
   signal,
   onProgress,
 }: DetectFinishSignalOptions): Promise<StartSignalDetectionResult> {
@@ -77,8 +80,12 @@ export async function detectFinishSignal({
     return emptyResult("Finish was not detected because the lane light has no learned before/after colors.", zone);
   }
 
-  const searchStart = Math.max(0, startSignalRawTime + minimumClimbSeconds);
-  const searchEnd = Math.max(searchStart, video.duration - 0.04);
+  const { start: searchStart, end: searchEnd } = resolveFinishSearchWindow(
+    startSignalRawTime,
+    video.duration,
+    minimumClimbSeconds,
+    maximumClimbSeconds,
+  );
   if (searchEnd - searchStart < 0.5) {
     return emptyResult("Finish search window is too short.", zone);
   }
