@@ -1,5 +1,4 @@
-import { ChangeEvent, CSSProperties, PointerEvent, useEffect, useMemo, useRef, useState } from "react";
-import { BiomechanicsPanel, PoseVideoOverlay } from "./components/BiomechanicsPanel";
+import { ChangeEvent, CSSProperties, lazy, PointerEvent, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import {
   resolveAutomaticPoseFinishBoundary,
   trimBiomechanicsResultAtFinish,
@@ -75,8 +74,17 @@ const INITIAL_TIMESTAMPS: TimestampMarker[] = [
   marker("finishPad", "Finish Pad"),
 ];
 
-const APP_VERSION = "0.19.0";
+const APP_VERSION = "0.20.0";
 const SESSION_STORAGE_KEY = "climbiq.analysisSessions.v1";
+const AttemptComparisonPanel = lazy(() => import("./components/AttemptComparisonPanel"));
+const BiomechanicsPanel = lazy(async () => {
+  const module = await import("./components/BiomechanicsPanel");
+  return { default: module.BiomechanicsPanel };
+});
+const PoseVideoOverlay = lazy(async () => {
+  const module = await import("./components/BiomechanicsPanel");
+  return { default: module.PoseVideoOverlay };
+});
 const DETECTOR_DERIVED_START_SOURCES = new Set<TimestampSource>([
   "Start light detection",
   "Fused start detection",
@@ -3006,6 +3014,12 @@ function App() {
           </div>
         </Card>
 
+        <Card title="Attempt comparison" className="full secondary-card comparison-card">
+          <Suspense fallback={<p className="muted">Preparing saved attempt comparison…</p>}>
+            <AttemptComparisonPanel sessions={savedSessions} />
+          </Suspense>
+        </Card>
+
         {hasSelectedVideo && (
           <>
         <section className="run-summary full" aria-live="polite">
@@ -3110,17 +3124,19 @@ function App() {
               onTimeUpdate={(event) => setCurrentTime(event.currentTarget.currentTime)}
               onSeeked={(event) => setCurrentTime(event.currentTarget.currentTime)}
             />
-            <PoseVideoOverlay
-              result={videoUrl && metadata?.metadataLoaded ? effectiveBiomechanicsResult : undefined}
-              calibration={biomechanics.calibration}
-              hold10ImageOverride={hold10ImageOverride}
-              alignedRouteHolds={routeAlignment?.holds.length
-                ? routeAlignment.holds.filter((hold) => Boolean(hold.observedImage))
-                : undefined}
-              currentTime={currentTime}
-              videoWidth={metadata?.videoWidth ?? 0}
-              videoHeight={metadata?.videoHeight ?? 0}
-            />
+            <Suspense fallback={null}>
+              <PoseVideoOverlay
+                result={videoUrl && metadata?.metadataLoaded ? effectiveBiomechanicsResult : undefined}
+                calibration={biomechanics.calibration}
+                hold10ImageOverride={hold10ImageOverride}
+                alignedRouteHolds={routeAlignment?.holds.length
+                  ? routeAlignment.holds.filter((hold) => Boolean(hold.observedImage))
+                  : undefined}
+                currentTime={currentTime}
+                videoWidth={metadata?.videoWidth ?? 0}
+                videoHeight={metadata?.videoHeight ?? 0}
+              />
+            </Suspense>
             {autoAnalysisRunning && (
               <div className="video-analysis-overlay" aria-hidden="true">
                 <span className="analysis-spinner" />
@@ -3875,30 +3891,32 @@ function App() {
         </Card>
 
         <Card id="center-of-mass" title="Performance insights" className="full insights-card">
-          <BiomechanicsPanel
-            key={`${videoUrl ?? "no-video"}:${activeSessionId ?? "unsaved-session"}`}
-            videoRef={videoRef}
-            metadata={metadata}
-            currentTime={currentTime}
-            startRawTime={startSignalRaw}
-            finishRawTime={getTimestamp(timestamps, "finishPad").rawTime}
-            fallbackFinishRawTime={analysisFinishFallbackRawTime}
-            identityZone={zones.startBody}
-            session={biomechanics}
-            displayResult={effectiveBiomechanicsResult}
-            finishCutoff={finishTrimmedBiomechanics?.cutoff}
-            analysisBlocked={startRunning || movementRunning || movementPreviewRunning || frameTestRunning || autoAnalysisRunning}
-            onSessionChange={(nextSession) => {
-              if (nextSession.calibration !== biomechanics.calibration) {
-                setRouteAlignment(null);
-              }
-              setBiomechanics(nextSession);
-            }}
-            onRunningChange={setBiomechanicsRunning}
-            onJump={jumpTo}
-            runVideoTask={runNamedVideoTask}
-            onLocateRoute={locateVisibleRouteHolds}
-          />
+          <Suspense fallback={<p className="muted">Preparing on-device performance tools…</p>}>
+            <BiomechanicsPanel
+              key={`${videoUrl ?? "no-video"}:${activeSessionId ?? "unsaved-session"}`}
+              videoRef={videoRef}
+              metadata={metadata}
+              currentTime={currentTime}
+              startRawTime={startSignalRaw}
+              finishRawTime={getTimestamp(timestamps, "finishPad").rawTime}
+              fallbackFinishRawTime={analysisFinishFallbackRawTime}
+              identityZone={zones.startBody}
+              session={biomechanics}
+              displayResult={effectiveBiomechanicsResult}
+              finishCutoff={finishTrimmedBiomechanics?.cutoff}
+              analysisBlocked={startRunning || movementRunning || movementPreviewRunning || frameTestRunning || autoAnalysisRunning}
+              onSessionChange={(nextSession) => {
+                if (nextSession.calibration !== biomechanics.calibration) {
+                  setRouteAlignment(null);
+                }
+                setBiomechanics(nextSession);
+              }}
+              onRunningChange={setBiomechanicsRunning}
+              onJump={jumpTo}
+              runVideoTask={runNamedVideoTask}
+              onLocateRoute={locateVisibleRouteHolds}
+            />
+          </Suspense>
         </Card>
 
         <Card id="export" title="Save & export" className="full secondary-card export-card">

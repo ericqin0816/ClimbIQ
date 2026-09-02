@@ -16,6 +16,7 @@
 - Finds first movement and finish timing while keeping every suggested timestamp reviewable frame by frame.
 - Tracks the selected athlete through a standardized 15 m speed wall with MediaPipe Pose Landmarker.
 - Estimates a 2D wall-projected center-of-mass path, speed, efficiency, route sections, and Hold 10 contact.
+- Compares two saved attempts across total time, reaction, reviewed Hold 10 phases, and trustworthy wall thirds.
 - Processes videos entirely in the browser; videos are never uploaded or stored by ClimbIQ.
 - Exports portable JSON datasets and Obsidian-ready training notes.
 
@@ -23,7 +24,13 @@
 
 ClimbIQ Detection Lab is a working proof of the core video-detection and biomechanics engine for a larger ClimbIQ product. Its purpose is to show that a local speed-climbing video can be sampled frame by frame and converted into useful, inspectable performance data.
 
-This repository focuses on the analysis engine. Athlete profiles, comparison pages, native mobile apps, backend services, cloud storage, and an AI coach are intentionally outside the current scope.
+This repository focuses on the analysis engine and local attempt comparison. Athlete profiles, native mobile apps, backend services, cloud storage, and an AI coach are intentionally outside the current scope.
+
+## Compare Saved Attempts
+
+Save at least two timed sessions, then open **Attempt comparison**. Choose the older run as the baseline and the newer run as the candidate. ClimbIQ compares only measurements available in both sessions: total time, first movement, reviewed Start → Hold 10 and Hold 10 → Finish phases, and medium/high-confidence COM wall thirds. A negative time means the newer attempt was faster.
+
+Low-confidence values remain visible for review but never receive a gained/lost claim. The panel also reports each attempt's tracking quality, keeps unavailable rows out of the interface, works without reloading either source video, and automatically summarizes the largest trustworthy detailed change.
 
 ## Built With
 
