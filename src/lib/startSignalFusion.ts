@@ -87,10 +87,10 @@ export function fuseStartEvidence(evidence: StartEvidence[]): FusedStartDecision
   } else if (strongAudio) {
     const audioConfidence = best.find((item) => item.kind === "audio")!.confidence;
     confidence = audioConfidence === "High" ? "High" : strongMotion ? "Medium" : audioConfidence;
-    // Two independent cue types agreeing (beep + launch motion) is trustworthy
-    // enough to write a timestamp automatically, but weak motion cannot corroborate
-    // a non-protocol audio cue.
-    autoAccept = !conflict && (audioConfidence === "High" || strongMotion);
+    // Only the exact pitch-coded protocol is authoritative without a lane-light
+    // transition. A generic gym beep can coincide with body motion by chance,
+    // so Medium audio + motion remains a review suggestion.
+    autoAccept = !conflict && audioConfidence === "High";
   } else {
     confidence = "Low";
   }

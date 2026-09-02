@@ -24,13 +24,13 @@ describe("start signal fusion", () => {
     expect(result.rejectedEvidence.some((item) => item.kind === "motion")).toBe(true);
   });
 
-  it("auto-accepts when the final beep and body motion agree", () => {
+  it("keeps a generic beep plus body motion for review", () => {
     const result = fuseStartEvidence([
       { kind: "audio", rawTime: 2.4, confidence: "Medium", reason: "single loud beep" },
       { kind: "motion", rawTime: 2.55, confidence: "Medium", reason: "launch" },
     ]);
     expect(result.confidence).toBe("Medium");
-    expect(result.autoAccept).toBe(true);
+    expect(result.autoAccept).toBe(false);
     expect(result.rawTime).toBeCloseTo(2.4, 2);
   });
 

@@ -161,26 +161,39 @@ export async function detectTopFinishSignal({
   // after the athlete has already descended. It becomes authoritative only
   // when physical top contact occurs in the same window or an entered official
   // total independently agrees. Otherwise preserve it as a review suggestion.
+  result = requireUpperFinishCorroboration(result, contactDiscovery, expectedFinishTime);
+  return { result, zone: discovery.zone, calibration: discovery.calibration };
+}
+
+/** Keeps an isolated upper-light transition review-only because timing units
+ * can reset after the athlete has descended. Exported for deterministic policy
+ * tests independent of browser video decoding. */
+export function requireUpperFinishCorroboration(
+  result: StartSignalDetectionResult,
+  contactDiscovery: Pick<TopFinishDiscovery, "found" | "rawTime">,
+  expectedFinishTime?: number,
+): StartSignalDetectionResult {
   const physicallyCorroborated = contactDiscovery.found && contactDiscovery.rawTime !== undefined &&
     result.rawTime !== undefined && Math.abs(contactDiscovery.rawTime - result.rawTime) <= 1.2;
   const officiallyCorroborated = expectedFinishTime !== undefined && result.rawTime !== undefined &&
     Math.abs(expectedFinishTime - result.rawTime) <= 0.45;
-  if (result.confidence === "High" && !physicallyCorroborated && !officiallyCorroborated) {
-    const reviewReason = `${result.reason} The upper electronic change was not independently corroborated by physical top contact or an official total, so it requires frame review.`;
-    result = {
-      ...result,
-      confidence: "Medium",
-      reason: reviewReason,
-      candidates: result.candidates?.map((candidate, index) => index === 0
-        ? { ...candidate, confidence: "Medium", reason: reviewReason }
-        : candidate),
-      debug: {
-        ...result.debug,
-        selectedCandidateReason: reviewReason,
-      },
-    };
+  if (result.confidence !== "High" || physicallyCorroborated || officiallyCorroborated) {
+    return result;
   }
-  return { result, zone: discovery.zone, calibration: discovery.calibration };
+
+  const reviewReason = `${result.reason} The upper electronic change was not independently corroborated by physical top contact or an official total, so it requires frame review.`;
+  return {
+    ...result,
+    confidence: "Medium",
+    reason: reviewReason,
+    candidates: result.candidates?.map((candidate, index) => index === 0
+      ? { ...candidate, confidence: "Medium", reason: reviewReason }
+      : candidate),
+    debug: {
+      ...result.debug,
+      selectedCandidateReason: reviewReason,
+    },
+  };
 }
 
 export function analyzeTopFinishFrames(

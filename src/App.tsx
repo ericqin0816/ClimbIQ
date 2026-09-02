@@ -10,14 +10,17 @@ import {
   createDefaultBiomechanicsSession,
   sanitizeBiomechanicsSession,
 } from "./lib/biomechanicsSession";
+import { assessCameraStability } from "./lib/cameraStability";
 import { detectFirstMovement } from "./lib/detectFirstMovement";
 import { detectFinishSignal } from "./lib/detectFinishSignal";
 import { detectTopFinishSignal } from "./lib/detectTopFinishSignal";
+import { calculateHold10PhaseSplits } from "./lib/hold10Splits";
 import { detectAutomaticStartLight, type GreenBlueLaneCandidate } from "./lib/detectAutomaticStartLight";
 import { detectAudioStartSignal, type AudioStartResult } from "./lib/detectAudioStartSignal";
 import { detectMotionBasedStartEstimate } from "./lib/detectMotionBasedStartEstimate";
 import { detectStartSignal } from "./lib/detectStartSignal";
 import { detectHoldContact, getHold10ContactMarker } from "./lib/holdContact";
+import { estimateHold10HeightPassage } from "./lib/hold10HeightEstimate";
 import { resolveHold10Target } from "./lib/holdTarget";
 import { analyzePoseVideo, PoseAnalysisCancelledError } from "./lib/poseAnalysis";
 import { analyzeRouteSplits } from "./lib/routeSplits";
@@ -327,6 +330,7 @@ function App() {
       { label: "Preload Gap", value: diff(committedLaunch, firstMovement) },
       { label: "Start to First Hold", value: diff(firstHold, start) },
       { label: "Movement to First Hold", value: diff(firstHold, firstMovement) },
+      { label: "Start to Hold 10", value: diff(hold10, start) },
       { label: "First Hold to Hold 10", value: diff(hold10, firstHold) },
       { label: "Hold 10 to Finish", value: diff(finish, hold10) },
       { label: "Movement Time", value: diff(finish, firstMovement) },
@@ -362,6 +366,12 @@ function App() {
       ? detectHoldContact(effectiveBiomechanicsResult, biomechanics.calibration, hold10WallTarget, { holdLabel: "Hold 10" })
       : null,
     [biomechanics.calibration, effectiveBiomechanicsResult, hold10WallTarget],
+  );
+  const hold10HeightEstimate = useMemo(
+    () => effectiveBiomechanicsResult && !hold10Contact?.detected
+      ? estimateHold10HeightPassage(effectiveBiomechanicsResult, biomechanics.calibration)
+      : null,
+    [biomechanics.calibration, effectiveBiomechanicsResult, hold10Contact?.detected],
   );
 
   useEffect(() => {
@@ -894,7 +904,7 @@ function App() {
           if (!decision.found || decision.rawTime === undefined || !automaticStart) {
             pendingAutomaticContextRef.current = null;
             setStartResult(null);
-            setAutoAnalysisStatus("Start could not be confirmed. Use the current-frame button or open Manual timing settings.");
+            setAutoAnalysisStatus("Start could not be confirmed. Review the video, then open the marker editor to set the exact frame.");
             return;
           }
           setStartResult(automaticStart);
@@ -1376,7 +1386,7 @@ function App() {
           setStartEvidenceStatus(`${decision.reason} Audio: ${audioReason}`);
           if (!decision.found || decision.rawTime === undefined || !automaticStart) {
             pendingAutomaticContextRef.current = null;
-            setAutoAnalysisStatus("Start could not be confirmed. Use the current-frame button or open Manual timing settings.");
+            setAutoAnalysisStatus("Start could not be confirmed. Review the video, then open the marker editor to set the exact frame.");
             return;
           }
           setStartResult(automaticStart);
@@ -1572,14 +1582,32 @@ function App() {
     let analysisWallCalibration = biomechanics.calibration;
     const savedCalibrationValidation = validateWallCalibration(analysisWallCalibration);
     if (!savedCalibrationValidation.valid || analysisWallCalibration?.source === "automatic-approximate") {
-      setAutoAnalysisStatus("Timing finished. Estimating the selected 3 m wall lane for center of mass…");
+      setAutoAnalysisStatus("Timing finished. Checking that the camera stayed fixed…");
       await seekTo(video, Math.min(video.duration - 0.001, Math.max(0, acceptedStart + 0.05)));
       if (signal?.aborted) {
         throw new PoseAnalysisCancelledError();
       }
+      const calibrationFrameTime = video.currentTime;
+      const calibrationFrame = captureFrame(video).imageData;
+      await seekTo(video, Math.min(video.duration - 0.001, Math.max(0, poseFinishBoundary.endRawTime - 0.08)));
+      if (signal?.aborted) {
+        throw new PoseAnalysisCancelledError();
+      }
+      const cameraStability = assessCameraStability(calibrationFrame, captureFrame(video).imageData);
+      if (cameraStability.assessable && !cameraStability.stable) {
+        setBiomechanics((current) => current.calibration?.source === "automatic-approximate"
+          ? { ...current, calibration: undefined, result: undefined }
+          : current);
+        setRouteAlignment(null);
+        setAutoAnalysisStatus(
+          `Timing finished${automaticMovementAccepted ? ", first movement was accepted" : "; first movement needs review"}, but center-of-mass and route splits were paused because the camera moved. ${cameraStability.reason} Use a fixed-camera recording for trustworthy wall positions and Hold 10 timing.`,
+        );
+        return;
+      }
+      setAutoAnalysisStatus("Camera looks stable. Estimating the selected 3 m wall lane for center of mass…");
       const automaticCalibration = inferAutomaticWallCalibration({
-        imageData: captureFrame(video).imageData,
-        frameRawTime: video.currentTime,
+        imageData: calibrationFrame,
+        frameRawTime: calibrationFrameTime,
         identityZone: analysisBodyZone,
         laneLightZone: automaticFinish?.zone ?? context.analysisLightZone,
       });
@@ -2543,6 +2571,12 @@ function App() {
     startSignalRaw !== null && acceptedFinish.rawTime !== null
       ? Math.max(0, acceptedFinish.rawTime - startSignalRaw)
       : null;
+  const hold10PhaseSplits = calculateHold10PhaseSplits(
+    acceptedStart.rawTime,
+    acceptedHold10.rawTime,
+    acceptedFinish.rawTime,
+    acceptedHold10.confidence,
+  );
   const acceptedReactionTime =
     startSignalRaw !== null && acceptedMovementRawTime !== null
       ? Math.max(0, acceptedMovementRawTime - startSignalRaw)
@@ -2661,15 +2695,6 @@ function App() {
                   Review suggested start ({suggestedStartRawTime.toFixed(3)}s)
                 </button>
               )}
-              {!autoAnalysisRunning && metadata?.metadataLoaded && (
-                <button onClick={() => {
-                  acceptTimestamp("startSignal", currentTime, "Manual", "Medium", { note: "Set from the current video frame." });
-                  setSuggestedStartRawTime(null);
-                  setAutoAnalysisStatus(`Start manually set to ${currentTime.toFixed(3)}s.`);
-                }}>
-                  Use current frame as start
-                </button>
-              )}
             </div>
             {autoAnalysisStatus && <p className="status-message" aria-live="polite">{autoAnalysisStatus}</p>}
             {startEvidenceStatus && <p className="evidence-message">{startEvidenceStatus}</p>}
@@ -2702,10 +2727,6 @@ function App() {
           </div>
           <div className="summary-footer">
             <p><strong>Review the analysis</strong><span>Check the video against the detected timestamps, then open insights for pace and center-of-mass details.</span></p>
-            <div className="button-row">
-              <a className="button-link" href="#video-review">Review video</a>
-              <a className="button-link primary" href="#center-of-mass">View insights</a>
-            </div>
           </div>
         </section>
 
@@ -3432,12 +3453,16 @@ function App() {
                   <span>
                     {hold10Contact?.detected && hold10Contact.climbTime !== undefined
                       ? `${hold10Contact.climbTime.toFixed(3)}s after start · ${hold10Contact.hand} hand · ${hold10Contact.distanceMeters?.toFixed(2)} m from the projected hold center${hold10Contact.evidence?.contactScore === undefined ? "" : ` · ${hold10Contact.evidence.contactScore.toFixed(0)}/100 evidence`}`
-                      : hold10Contact?.reason ?? (hold10Target.source === "standard-template"
-                        ? "Hold 10 timing is paused until the visible route aligns or you mark a manual Hold 10 zone."
-                        : "Run center-of-mass analysis to check hand contact with Hold 10.")}
+                      : hold10HeightEstimate?.detected && hold10HeightEstimate.climbTime !== undefined
+                        ? `Review estimate at ${hold10HeightEstimate.climbTime.toFixed(3)}s after start · ${hold10HeightEstimate.hand} hand crossed Hold 10 height`
+                        : hold10Contact?.reason ?? (hold10Target.source === "standard-template"
+                          ? "Hold 10 timing is paused until the visible route aligns or you mark a manual Hold 10 zone."
+                          : "Run center-of-mass analysis to check hand contact with Hold 10.")}
                   </span>
                   <small>{hold10Target.source === "standard-template"
-                    ? "The generic diagram is used only as a search prior; ClimbIQ will not time contact from its unregistered position."
+                    ? hold10HeightEstimate?.detected
+                      ? "Height crossing is only a review aid; it is not treated as Hold 10 contact until you confirm the exact frame."
+                      : "The generic diagram is used only as a search prior; ClimbIQ will not time contact from its unregistered position."
                     : hold10Target.reason}</small>
                 </div>
                 {hold10Contact?.detected && hold10Contact.rawTime !== undefined && (
@@ -3455,6 +3480,21 @@ function App() {
                     Review Hold 10
                   </button>
                 )}
+                {!hold10Contact?.detected && hold10HeightEstimate?.detected && hold10HeightEstimate.rawTime !== undefined && (
+                  <button onClick={() => reviewTimestamp({
+                    label: "Possible Hold 10 height passage",
+                    suggestedRawTime: hold10HeightEstimate.rawTime!,
+                    confidence: "Low",
+                    acceptLabel: "Set Hold 10",
+                    onAccept: (rawTime) => acceptTimestamp("hold10", rawTime, "Manual", "Medium", {
+                      detectedRawTime: hold10HeightEstimate.rawTime,
+                      offsetApplied: roundTime(rawTime - hold10HeightEstimate.rawTime!),
+                      note: `${hold10HeightEstimate.reason} Confirmed manually against the exact contact frame.`,
+                    }),
+                  })}>
+                    Review possible Hold 10
+                  </button>
+                )}
               </div>
               {finishTrimmedBiomechanics?.cutoff.source === "top-completion" && (
                 <p className="status-message">
@@ -3463,27 +3503,51 @@ function App() {
               )}
             </>
           )}
+          {hold10PhaseSplits.available ? (
+            <>
+              <div className="split-grid hold10-phase-grid" aria-label="Hold 10 race phases">
+                <Metric
+                  label="Start → Hold 10"
+                  value={`${hold10PhaseSplits.startToHold10Seconds!.toFixed(3)}s`}
+                />
+                <Metric
+                  label="Hold 10 → Finish"
+                  value={`${hold10PhaseSplits.hold10ToFinishSeconds!.toFixed(3)}s`}
+                />
+              </div>
+              <p className="muted">
+                Contact-defined race phases · {hold10PhaseSplits.confidence} Hold 10 confidence. These are separate from the wall-height halves below.
+              </p>
+            </>
+          ) : (
+            <p className="guidance">Start → Hold 10 and Hold 10 → Finish appear after Hold 10 hand contact is verified.</p>
+          )}
           {routeSplitAnalysis?.available ? (
             <>
               <div className="split-grid automatic-split-grid">
-                <Metric
-                  label="Bottom wall half"
-                  value={routeSplitAnalysis.halfway.climbTime === undefined ? "Needs more tracking" : `${routeSplitAnalysis.halfway.climbTime.toFixed(3)}s`}
-                />
-                <Metric
-                  label="Top half"
-                  value={routeSplitAnalysis.halfway.climbTime === undefined || !effectiveBiomechanicsResult
-                    ? "Needs more tracking"
-                    : `${Math.max(0, effectiveBiomechanicsResult.endRawTime - effectiveBiomechanicsResult.startRawTime - routeSplitAnalysis.halfway.climbTime).toFixed(3)}s`}
-                />
-                {routeSplitAnalysis.sections.map((section) => (
+                {routeSplitAnalysis.halfway.climbTime !== undefined && effectiveBiomechanicsResult && (
+                  <>
+                    <Metric
+                      label="Wall-height lower half"
+                      value={`${routeSplitAnalysis.halfway.climbTime.toFixed(3)}s`}
+                    />
+                    <Metric
+                      label="Wall-height upper half"
+                      value={`${Math.max(0, effectiveBiomechanicsResult.endRawTime - effectiveBiomechanicsResult.startRawTime - routeSplitAnalysis.halfway.climbTime).toFixed(3)}s`}
+                    />
+                  </>
+                )}
+                {routeSplitAnalysis.sections.filter((section) => section.available).map((section) => (
                   <Metric
                     key={section.id}
                     label={section.label}
-                    value={section.sectionTimeSeconds === undefined ? "Needs more tracking" : `${section.sectionTimeSeconds.toFixed(3)}s`}
+                    value={`${section.sectionTimeSeconds!.toFixed(3)}s`}
                   />
                 ))}
               </div>
+              {!routeSplitAnalysis.halfway.available && (
+                <p className="muted">Wall-height halves unavailable: {routeSplitAnalysis.halfway.reason}</p>
+              )}
               {routeSplitAnalysis.slowestSectionId && (
                 <p className="status-message">
                   Slowest wall section: {routeSplitAnalysis.sections.find((section) => section.id === routeSplitAnalysis.slowestSectionId)?.label}. Open Center of Mass below to review that section in the video.
@@ -3535,26 +3599,26 @@ function App() {
             Export a human-readable Obsidian note or machine-readable JSON dataset. Videos are not stored or uploaded.
           </p>
           <div className="button-row">
-            <button className="primary" onClick={copyObsidianNote}>Copy Obsidian Note</button>
-            <button onClick={downloadMarkdown}>Download Markdown</button>
-            <button onClick={copyDatasetJson}>Copy JSON</button>
-            <button onClick={downloadDatasetJson}>Download JSON</button>
+            <button className="primary" onClick={downloadMarkdown}>Download report</button>
+            <button onClick={downloadDatasetJson}>Download data</button>
             <label className="file-button">
               Import Session JSON
               <input type="file" accept="application/json,.json" onChange={importSession} disabled={videoAnalysisRunning} />
             </label>
           </div>
-          <div className="button-row compact-row">
-            <button onClick={chooseObsidianFolder}>Choose Obsidian Folder</button>
-            <button onClick={saveExportsToObsidianFolder}>Save Markdown + JSON to Folder</button>
-            {obsidianFolderName && <span className="time-pill">Folder: {obsidianFolderName}</span>}
-          </div>
-          <p className="muted">
-            Direct folder saving works only in supported desktop browsers. Downloads and copy buttons work everywhere.
-          </p>
           {exportStatus && <p className="status-message">{exportStatus}</p>}
           <details className="help-details">
-            <summary>Using ClimbIQ with Obsidian</summary>
+            <summary>Copy and Obsidian options</summary>
+            <div className="button-row compact-row">
+              <button onClick={copyObsidianNote}>Copy Obsidian note</button>
+              <button onClick={copyDatasetJson}>Copy JSON</button>
+              <button onClick={chooseObsidianFolder}>Choose Obsidian folder</button>
+              <button onClick={saveExportsToObsidianFolder}>Save report + data to folder</button>
+              {obsidianFolderName && <span className="time-pill">Folder: {obsidianFolderName}</span>}
+            </div>
+            <p className="muted">
+              Direct folder saving works only in supported desktop browsers. Downloads and copy buttons work everywhere.
+            </p>
             <p>
               ClimbIQ uses an on-device pretrained pose model but does not train a custom model. Exports create a labeled history for comparing attempts and improving future timing and coaching workflows.
             </p>
@@ -3568,7 +3632,7 @@ function App() {
             <ol className="help-list">
               <li>Create an Obsidian vault called ClimbIQ Training Log.</li>
               <li>Create folders: Attempts, Exports, Debug Reports, Templates.</li>
-              <li>After analyzing a climb, click Download Markdown or Copy Obsidian Note.</li>
+              <li>After analyzing a climb, download the report or copy the Obsidian note.</li>
               <li>Save the Markdown note into Attempts.</li>
               <li>Save the JSON export into Exports.</li>
               <li>Keep videos local. ClimbIQ only stores the video file name, not the actual video.</li>

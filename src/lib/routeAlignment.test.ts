@@ -93,6 +93,21 @@ describe("persistent visual route alignment", () => {
     expect(result.reason).toMatch(/at least 10|consistent 20-hold route/);
   });
 
+  it("retains the best-hypothesis diagnostics when consensus is just below policy", () => {
+    const image = makeFrame(360, 720);
+    drawRoute(image, IDENTITY, new Set([12, 13, 14, 15, 16, 17, 18, 19, 20]), pink, 4);
+    drawDisc(image, { x: projected[5].x + 0.055, y: projected[5].y }, 4, red);
+
+    const result = alignStandardSpeedRouteVisually([image, cloneFrame(image)], calibration, {
+      minimumMatchedHolds: 12,
+    });
+
+    expect(result.aligned).toBe(false);
+    expect(result.diagnostics.matchedHoldIds).toHaveLength(11);
+    expect(result.diagnostics.matches).toHaveLength(11);
+    expect(result.diagnostics.medianResidualNormalized).toBeDefined();
+  });
+
   it("refuses two equally supported route copies as ambiguous", () => {
     const left: Matrix = [1, 0, -0.027, 0, 1, 0.004, 0, 0, 1];
     const right: Matrix = [1, 0, 0.027, 0, 1, 0.004, 0, 0, 1];

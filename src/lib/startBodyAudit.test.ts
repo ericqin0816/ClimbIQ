@@ -30,6 +30,12 @@ describe("automatic start body audit", () => {
     expect(result.safeToAutoAccept).toBe(false);
     expect(result.reason).toContain("before the proposed start");
   });
+
+  it("rejects a delayed movement that is unlikely to belong to the proposed cue", () => {
+    const result = assessAutomaticStartBodyAudit(movement({ rawTime: 5.1, confidence: "High" }), 4.29);
+    expect(result.safeToAutoAccept).toBe(false);
+    expect(result.reason).toContain("too long after");
+  });
 });
 
 function movement({

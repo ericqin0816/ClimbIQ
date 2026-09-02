@@ -31,7 +31,10 @@ export function assessAutomaticStartBodyAudit(
   }
 
   const delay = movement.rawTime - proposedStartRawTime;
-  if (delay < -0.02 || delay > 1.25) {
+  // A speed-climbing launch should follow the start cue promptly. A generous
+  // 0.75 s ceiling still covers unusually slow reactions while refusing to
+  // connect an unrelated later movement to an earlier gym beep/light change.
+  if (delay < -0.02 || delay > 0.75) {
     return {
       safeToAutoAccept: false,
       reason: delay < 0

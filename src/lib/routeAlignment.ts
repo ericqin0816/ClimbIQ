@@ -216,6 +216,14 @@ export function alignStandardSpeedRouteVisually(
       diagnostics: {
         ...baseDiagnostics,
         hypothesesEvaluated: initialTransforms.length,
+        matchedHoldIds: best
+          ? best.matches.map((match) => STANDARD_SPEED_HOLDS[match.holdIndex].id)
+          : [],
+        medianResidualNormalized: best?.medianResidual,
+        rmsResidualNormalized: best?.rmsResidual,
+        maximumCorrectionNormalized: best?.maximumCorrection,
+        startAnchorDistanceNormalized: best?.startAnchorDistance,
+        matches: best ? toPublicMatches(best, projected, candidates) : [],
         refusalReason: reason,
       },
     };

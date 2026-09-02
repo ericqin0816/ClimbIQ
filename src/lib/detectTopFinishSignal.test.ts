@@ -4,6 +4,7 @@ import {
   analyzeTopFinishColorSamples,
   analyzeTopFinishFrames,
   analyzeTopContactFrames,
+  requireUpperFinishCorroboration,
   type TopFinishColorSample,
   type TopFinishFrame,
 } from "./detectTopFinishSignal";
@@ -97,7 +98,54 @@ describe("perspective-aware upper finish indicator", () => {
     const result = analyzeTopContactFrames(makeContactFrames([8, 7, 5, 3, 2, 2, 2, 2]), 0.8);
     expect(result.found).toBe(false);
   });
+
+  it("downgrades an isolated high-confidence upper light to frame review", () => {
+    const result = requireUpperFinishCorroboration(finishResult(14.29), { found: false });
+    expect(result.confidence).toBe("Medium");
+    expect(result.reason).toContain("not independently corroborated");
+    expect(result.candidates?.[0].confidence).toBe("Medium");
+  });
+
+  it("keeps a high upper light when physical top contact agrees", () => {
+    const result = requireUpperFinishCorroboration(finishResult(14.29), { found: true, rawTime: 13.7 });
+    expect(result.confidence).toBe("High");
+  });
+
+  it("keeps a high upper light when an official total agrees", () => {
+    const result = requireUpperFinishCorroboration(finishResult(14.29), { found: false }, 14.31);
+    expect(result.confidence).toBe("High");
+  });
+
+  it("does not let a much earlier physical event corroborate a late timer reset", () => {
+    const result = requireUpperFinishCorroboration(finishResult(20), { found: true, rawTime: 14.2 });
+    expect(result.confidence).toBe("Medium");
+  });
 });
+
+function finishResult(rawTime: number) {
+  return {
+    detected: true,
+    rawTime,
+    confidence: "High" as const,
+    reason: "Upper light changed.",
+    threshold: 1,
+    candidates: [{
+      rawTime,
+      confidence: "High" as const,
+      reason: "Upper light changed.",
+      score: 10,
+      kind: "Upper light",
+    }],
+    debug: {
+      zoneExists: true,
+      framesSampled: 20,
+      maxColorDistance: 50,
+      threshold: 1,
+      detectedCrossings: [{ time: rawTime, colorDistance: 50 }],
+      samples: [],
+    },
+  };
+}
 
 function makeFrames(
   indicatorColors: RGB[],

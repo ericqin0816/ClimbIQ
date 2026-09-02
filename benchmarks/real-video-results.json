@@ -1,0 +1,47 @@
+{
+  "version": 1,
+  "capturedAt": "2026-09-02",
+  "description": "Private-video regression observations. Videos are not stored in Git.",
+  "trials": [
+    {
+      "id": "IMG_8903.MOV",
+      "durationSeconds": 26.75,
+      "start": { "rawTime": 4.29, "status": "accepted", "confidence": "High", "reviewedCorrect": true },
+      "finish": { "rawTime": 14.29, "status": "review", "confidence": "Medium", "reviewedCorrect": true },
+      "hold10": { "status": "unavailable" },
+      "com": { "status": "manual-calibration-required" }
+    },
+    {
+      "id": "IMG_9075.MOV",
+      "durationSeconds": 30.44,
+      "start": { "rawTime": 14.9, "status": "review", "confidence": "High", "reviewedCorrect": false, "manualRawTime": 8.9 },
+      "finish": { "rawTime": 17.333, "status": "review", "confidence": "Medium" },
+      "hold10": { "status": "unavailable" },
+      "com": { "status": "insufficient-tracking", "usableFrames": 1, "requestedFrames": 85 }
+    },
+    {
+      "id": "IMG_9076.MOV",
+      "durationSeconds": 33.74,
+      "start": { "rawTime": 24.82, "status": "review", "confidence": "Medium", "reviewedCorrect": false },
+      "finish": { "status": "not-run" },
+      "hold10": { "status": "unavailable" },
+      "com": { "status": "not-run" }
+    },
+    {
+      "id": "IMG_9077.MOV",
+      "durationSeconds": 26.15,
+      "start": { "rawTime": 5.25, "status": "review", "confidence": "High", "reviewedCorrect": false },
+      "finish": { "status": "not-run" },
+      "hold10": { "status": "unavailable" },
+      "com": { "status": "not-run" }
+    },
+    {
+      "id": "IMG_9199.MOV",
+      "durationSeconds": 32.17,
+      "start": { "rawTime": 7.13, "status": "accepted", "confidence": "High", "reviewedCorrect": true },
+      "finish": { "rawTime": 17.48, "status": "accepted", "confidence": "High", "reviewedCorrect": true },
+      "hold10": { "status": "unavailable", "routeMatches": 8, "requiredRouteMatches": 10 },
+      "com": { "status": "needs-review", "usableFrames": 45, "requestedFrames": 104 }
+    }
+  ]
+}
