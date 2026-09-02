@@ -82,12 +82,16 @@ export function resolveAutomaticPoseFinishBoundary({
     return { ready: false, reason: "The video or accepted start is invalid." };
   }
   const lightFinish = finiteNumber(lightFinishRawTime);
-  const validLightFinish = lightFinish !== undefined && lightFinish > startRawTime + 0.2
+  const validLightFinish = lightFinish !== undefined && lightFinish > startRawTime + 0.2 &&
+      lightFinish <= videoDuration + 0.001
     ? Math.min(videoDuration, lightFinish)
     : undefined;
   const officialDuration = finiteNumber(officialTotalSeconds);
-  const officialFinish = officialDuration !== undefined && officialDuration > 0
-    ? Math.min(videoDuration, startRawTime + officialDuration)
+  const proposedOfficialFinish = officialDuration !== undefined && officialDuration > 0
+    ? startRawTime + officialDuration
+    : undefined;
+  const officialFinish = proposedOfficialFinish !== undefined && proposedOfficialFinish <= videoDuration + 0.001
+    ? Math.min(videoDuration, proposedOfficialFinish)
     : undefined;
 
   if (lightFinishAccepted && validLightFinish !== undefined) {

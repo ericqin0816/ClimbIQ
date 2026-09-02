@@ -18,7 +18,8 @@ import { detectAutomaticStartLight, type GreenBlueLaneCandidate } from "./lib/de
 import { detectAudioStartSignal, type AudioStartResult } from "./lib/detectAudioStartSignal";
 import { detectMotionBasedStartEstimate } from "./lib/detectMotionBasedStartEstimate";
 import { detectStartSignal } from "./lib/detectStartSignal";
-import { detectHoldContact, getHold10ContactMarker } from "./lib/holdContact";
+import { detectHoldContact } from "./lib/holdContact";
+import { reconcileHold10Marker } from "./lib/hold10MarkerPolicy";
 import { estimateHold10HeightPassage } from "./lib/hold10HeightEstimate";
 import { resolveHold10Target } from "./lib/holdTarget";
 import { analyzePoseVideo, PoseAnalysisCancelledError } from "./lib/poseAnalysis";
@@ -167,7 +168,7 @@ function App() {
   const [videoRestoreStatus, setVideoRestoreStatus] = useState("");
 
   const [startSearchStart, setStartSearchStart] = useState(0);
-  const [startSearchEnd, setStartSearchEnd] = useState(15);
+  const [startSearchEnd, setStartSearchEnd] = useState(12);
   const [startSensitivity, setStartSensitivity] = useState<Sensitivity>("medium");
   const [startLightVisibility, setStartLightVisibility] = useState<"clear" | "blocked">("clear");
   const [startDetectionProfile, setStartDetectionProfile] = useState<StartDetectionProfile>("auto");
@@ -281,11 +282,26 @@ function App() {
     if (startSignalRaw === null || !Number.isFinite(official) || official <= 0) {
       return null;
     }
+    const rawTime = roundTime(startSignalRaw + official);
+    if (metadata?.duration && rawTime > metadata.duration + 0.001) {
+      return null;
+    }
     return {
-      rawTime: roundTime(startSignalRaw + official),
+      rawTime,
       climbTime: roundTime(official),
     };
-  }, [officialTotalTime, startSignalRaw]);
+  }, [metadata?.duration, officialTotalTime, startSignalRaw]);
+  const officialTimeError = useMemo(() => {
+    if (!officialTotalTime.trim()) return "";
+    const official = Number(officialTotalTime);
+    if (!Number.isFinite(official) || official <= 0) {
+      return "Official total time must be a positive number.";
+    }
+    if (startSignalRaw !== null && metadata?.duration && startSignalRaw + official > metadata.duration + 0.001) {
+      return `Official total extends past the ${metadata.duration.toFixed(3)}s video. Check the value or load the complete attempt.`;
+    }
+    return "";
+  }, [metadata?.duration, officialTotalTime, startSignalRaw]);
 
   const acceptedFinishRawTime = useMemo(
     () => getTimestamp(timestamps, "finishPad").rawTime,
@@ -378,40 +394,11 @@ function App() {
   );
 
   useEffect(() => {
-    const suggestion = effectiveBiomechanicsResult && hold10WallTarget
-      ? getHold10ContactMarker(effectiveBiomechanicsResult, biomechanics.calibration, hold10WallTarget)
-      : null;
-    setTimestamps((current) => {
-      const existing = getTimestamp(current, "hold10");
-      const automaticExisting =
-        existing.source === "COM halfway estimate" ||
-        existing.source === "Hold contact detection" ||
-        existing.source === "Future / experimental";
-      if (!suggestion) {
-        if (!automaticExisting) {
-          return current;
-        }
-        return current.map((item) => item.id === "hold10"
-          ? { ...marker("hold10", item.label) }
-          : item);
-      }
-      if (existing.rawTime !== null && !automaticExisting) {
-        return current;
-      }
-      if (existing.rawTime !== null && Math.abs(existing.rawTime - suggestion.rawTime!) <= 0.001 &&
-          existing.source === "Hold contact detection") {
-        return current;
-      }
-      return recalculateTimestampClimbs(current.map((item) => item.id === "hold10"
-        ? {
-            ...item,
-            ...suggestion,
-            label: item.label,
-            source: "Hold contact detection" as const,
-          }
-        : item));
-    });
-  }, [biomechanics.calibration, effectiveBiomechanicsResult, hold10WallTarget]);
+    setTimestamps((current) => reconcileHold10Marker(
+      current,
+      hold10Contact?.detected ? hold10Contact.rawTime : undefined,
+    ));
+  }, [hold10Contact?.detected, hold10Contact?.rawTime]);
 
   const startFinalRaw = startResult?.rawTime !== undefined ? Math.max(0, roundTime(startResult.rawTime + startSignalOffset)) : undefined;
   const movementFinalRaw = movementResult?.rawTime !== undefined ? Math.max(0, roundTime(movementResult.rawTime + firstMovementOffset)) : undefined;
@@ -471,7 +458,7 @@ function App() {
     setMovementPreviewFrames({});
     setMovementPreviewRunning(false);
     setStartSearchStart(0);
-    setStartSearchEnd(15);
+    setStartSearchEnd(12);
     setStartSignalOffset(0);
     setFirstMovementOffset(0);
     setStartLightVisibility("clear");
@@ -571,12 +558,12 @@ function App() {
     setMetadata(actualMetadata);
     if (expected && !videoMetadataMatches(actualMetadata, expected)) {
       resetAnalysisForNewVideo(actualMetadata.fileName);
-      setStartSearchEnd(Math.min(8, video.duration));
+      setStartSearchEnd(Math.min(12, video.duration));
       setSessionStatus("The selected video does not match the loaded session metadata. Saved analysis was detached to prevent incorrect overlays.");
     } else if (expected) {
       setSessionStatus(`Matching video attached to "${sessionName}". Saved zones, timestamps, and biomechanics were preserved.`);
     } else {
-      setStartSearchEnd(Math.min(8, video.duration));
+      setStartSearchEnd(Math.min(12, video.duration));
     }
   }
 
@@ -2117,6 +2104,20 @@ function App() {
       : "Official-time cross-check changed. Rerun automatic finish detection if you want it compared.");
   }
 
+  function handleStartSearchWindowChange(boundary: "start" | "end", value: number) {
+    if (boundary === "start") {
+      setStartSearchStart(value);
+    } else {
+      setStartSearchEnd(value);
+    }
+    pendingAutomaticContextRef.current = null;
+    setStartResult(null);
+    setSuggestedStartRawTime(null);
+    setMovementResult(null);
+    setStartEvidenceStatus("");
+    setAutoAnalysisStatus("Start search window changed. Run the analysis again to generate a matching suggestion.");
+  }
+
   function setTimestampFromInput(id: TimestampMarker["id"], value: string, mode: "raw" | "climb") {
     const parsed = parseOptionalNumber(value);
     if (parsed === null) {
@@ -2767,6 +2768,11 @@ function App() {
               <p className="muted">
                 Finds timing, first movement, the correct lane, athlete tracking, center of mass, and route splits.
               </p>
+              {metadata?.metadataLoaded && (
+                <p className="muted">
+                  Start search: {resolveStartSearchWindow({ startSearchStart, startSearchEnd }, metadata.duration).start.toFixed(1)}–{resolveStartSearchWindow({ startSearchStart, startSearchEnd }, metadata.duration).end.toFixed(1)}s video time. For a full meet, set one race window in Review &amp; advanced tools.
+                </p>
+              )}
             </div>
             <div className="button-row">
               <button
@@ -3088,15 +3094,15 @@ function App() {
           <div className="form-grid">
             <label>
               Ignore video before (seconds)
-              <input type="number" value={startSearchStart} step="0.1" onChange={(event) => setStartSearchStart(Number(event.target.value))} />
+              <input type="number" min="0" value={startSearchStart} step="0.1" disabled={videoAnalysisRunning} onChange={(event) => handleStartSearchWindowChange("start", Number(event.target.value))} />
             </label>
             <label>
               Stop start search at video time (seconds)
-              <input type="number" min="0.5" value={startSearchEnd} step="0.1" onChange={(event) => setStartSearchEnd(Number(event.target.value))} />
+              <input type="number" min="0.5" value={startSearchEnd} step="0.1" disabled={videoAnalysisRunning} onChange={(event) => handleStartSearchWindowChange("end", Number(event.target.value))} />
             </label>
             <label>
               Sensitivity
-              <select value={startSensitivity} onChange={(event) => setStartSensitivity(event.target.value as Sensitivity)}>
+              <select disabled={videoAnalysisRunning} value={startSensitivity} onChange={(event) => setStartSensitivity(event.target.value as Sensitivity)}>
                 <option value="low">Low</option>
                 <option value="medium">Medium</option>
                 <option value="high">High</option>
@@ -3105,6 +3111,7 @@ function App() {
             <label>
               Detection profile
               <select
+                disabled={videoAnalysisRunning}
                 value={startDetectionProfile}
                 onChange={(event) => {
                   const value = event.target.value as StartDetectionProfile;
@@ -3126,6 +3133,7 @@ function App() {
             <label>
               Start Light Visibility
               <select
+                disabled={videoAnalysisRunning}
                 value={startLightVisibility}
                 onChange={(event) => {
                   const value = event.target.value as "clear" | "blocked";
@@ -3142,6 +3150,7 @@ function App() {
               <input
                 type="number"
                 step="0.001"
+                disabled={videoAnalysisRunning}
                 value={startSignalOffset}
                 onChange={(event) => setStartSignalOffset(Number(event.target.value))}
               />
@@ -3151,6 +3160,7 @@ function App() {
               <input
                 type="number"
                 step="0.01"
+                disabled={videoAnalysisRunning}
                 value={reactionTimeOffset}
                 onChange={(event) => setReactionTimeOffset(Number(event.target.value))}
               />
@@ -3200,16 +3210,8 @@ function App() {
             offset={startSignalOffset}
             finalRawTime={startFinalRaw}
             finalClimbTime={0}
-            acceptLabel="Accept Start Signal"
             offsetButtons={[-0.05, -0.1, -0.15]}
             onOffsetChange={setStartSignalOffset}
-            onAcceptCandidate={(candidate) =>
-              acceptTimestamp("startSignal", Math.max(0, roundTime(candidate.rawTime + startSignalOffset)), startSourceForCandidate(candidate), candidate.confidence, {
-                detectedRawTime: candidate.rawTime,
-                offsetApplied: startSignalOffset,
-                note: candidate.method === "Motion-based start estimate" ? `${candidate.reason} Estimated from body motion, not light-detected. Review recommended.` : candidate.reason,
-              })
-            }
             onJumpCandidate={(candidate, delta = 0) => jumpTo(Math.max(0, roundTime(candidate.rawTime + startSignalOffset + delta)))}
             onReviewCandidate={(candidate) => reviewTimestamp({
               label: `Start signal backup (${candidate.kind})`,
@@ -3223,14 +3225,6 @@ function App() {
               }),
             })}
             getCandidateJumpTarget={(candidate) => Math.max(0, roundTime(candidate.rawTime + startSignalOffset))}
-            onAccept={() =>
-              startResult?.rawTime !== undefined &&
-              acceptTimestamp("startSignal", Math.max(0, roundTime(startResult.rawTime + startSignalOffset)), startSourceForResult(startResult), startResult.confidence, {
-                detectedRawTime: startResult.rawTime,
-                offsetApplied: startSignalOffset,
-                note: startResult.debug.detectionMethod === "Motion-based start estimate" ? `${startResult.reason} Estimated from body motion, not light-detected. Review recommended.` : startResult.reason,
-              })
-            }
             onReview={() => startResult?.rawTime !== undefined && reviewTimestamp({
               label: "Suggested start signal",
               suggestedRawTime: Math.max(0, roundTime(startResult.rawTime + startSignalOffset)),
@@ -3258,7 +3252,7 @@ function App() {
             <summary>Manual movement settings</summary>
           <label className="single-field">
             Sensitivity
-            <select value={movementSensitivity} onChange={(event) => setMovementSensitivity(event.target.value as Sensitivity)}>
+            <select disabled={videoAnalysisRunning} value={movementSensitivity} onChange={(event) => setMovementSensitivity(event.target.value as Sensitivity)}>
               <option value="low">Low</option>
               <option value="medium">Medium</option>
               <option value="high">High</option>
@@ -3267,6 +3261,7 @@ function App() {
           <label className="single-field">
             First movement definition
             <select
+              disabled={videoAnalysisRunning}
               value={firstMovementDefinition}
               onChange={(event) => setFirstMovementDefinition(event.target.value as FirstMovementDefinition)}
             >
@@ -3282,6 +3277,7 @@ function App() {
           <label className="single-field">
             Committed launch minimum delay
             <select
+              disabled={videoAnalysisRunning}
               value={committedLaunchMinDelay}
               onChange={(event) => setCommittedLaunchMinDelay(Number(event.target.value))}
             >
@@ -3297,6 +3293,7 @@ function App() {
             <input
               type="number"
               step="0.001"
+              disabled={videoAnalysisRunning}
               value={firstMovementOffset}
               onChange={(event) => setFirstMovementOffset(Number(event.target.value))}
             />
@@ -3314,23 +3311,8 @@ function App() {
             offset={firstMovementOffset}
             finalRawTime={movementFinalRaw}
             finalClimbTime={movementFinalClimb}
-            acceptLabel="Accept First Movement"
             offsetButtons={[-0.03, -0.05, -0.1]}
             onOffsetChange={setFirstMovementOffset}
-            onAcceptCandidate={(candidate) =>
-              acceptTimestamp("firstMovement", Math.max(0, roundTime(candidate.rawTime + firstMovementOffset)), "Body motion detection", candidate.confidence, {
-                detectedRawTime: candidate.rawTime,
-                offsetApplied: firstMovementOffset,
-                note: candidate.reason,
-              })
-            }
-            onAcceptCandidateAs={(candidate, definition) =>
-              acceptTimestamp(definition === "committed" ? "committedLaunch" : "firstMovement", Math.max(0, roundTime(candidate.rawTime + firstMovementOffset)), "Body motion detection", candidate.confidence, {
-                detectedRawTime: candidate.rawTime,
-                offsetApplied: firstMovementOffset,
-                note: `${movementDefinitionLabel(definition)} accepted from ${candidate.kind}. ${candidate.reason}`,
-              })
-            }
             onJumpCandidate={(candidate, delta = 0) => jumpTo(Math.max(0, roundTime(candidate.rawTime + firstMovementOffset + delta)))}
             onReviewCandidate={(candidate) => {
               const definition = movementDefinitionForCandidate(candidate);
@@ -3350,14 +3332,6 @@ function App() {
             candidatePreviewFrames={movementPreviewFrames}
             defaultCandidateSource="Body motion detection"
             showMovementCandidateActions
-            onAccept={() =>
-              movementResult?.rawTime !== undefined &&
-              acceptTimestamp(firstMovementDefinition === "committed" ? "committedLaunch" : "firstMovement", Math.max(0, roundTime(movementResult.rawTime + firstMovementOffset)), "Body motion detection", movementResult.confidence, {
-                detectedRawTime: movementResult.rawTime,
-                offsetApplied: firstMovementOffset,
-                note: movementResult.reason,
-              })
-            }
             onReview={() => movementResult?.rawTime !== undefined && reviewTimestamp({
               label: `Suggested ${movementDefinitionLabel(firstMovementDefinition).toLowerCase()}`,
               suggestedRawTime: Math.max(0, roundTime(movementResult.rawTime + firstMovementOffset)),
@@ -3413,10 +3387,6 @@ function App() {
                 >
                   Review finish at video
                 </button>
-                <button onClick={() => acceptTimestamp("finishPad", finishResult.rawTime!, "Finish light detection", finishResult.confidence, {
-                  detectedRawTime: finishResult.rawTime,
-                  note: finishResult.reason,
-                })}>Accept without review</button>
                 <button onClick={() => setFinishResult(null)}>Dismiss</button>
               </div>
             </div>
@@ -3426,7 +3396,9 @@ function App() {
             Official total time (optional cross-check)
             <input
               type="number"
+              min="0.001"
               step="0.001"
+              disabled={videoAnalysisRunning}
               value={officialTotalTime}
               placeholder="13.125"
               onChange={(event) => handleOfficialTotalTimeChange(event.target.value)}
@@ -3434,6 +3406,8 @@ function App() {
           </label>
           {startSignalRaw === null ? (
             <p className="muted">Set Start Signal first; an official time can still calculate a fallback Finish Pad.</p>
+          ) : officialTimeError ? (
+            <p className="error-message">{officialTimeError}</p>
           ) : finishSuggestion ? (
             <div className="suggestion-card">
               <h3>Suggested Finish Pad</h3>
@@ -3459,7 +3433,6 @@ function App() {
                 >
                   Review finish at video
                 </button>
-                <button onClick={() => acceptTimestamp("finishPad", finishSuggestion.rawTime, "Official total time", "High")}>Accept without review</button>
               </div>
             </div>
           ) : (
@@ -4024,9 +3997,6 @@ function DetectionCard({
   finalClimbTime,
   offsetButtons = [],
   onOffsetChange,
-  acceptLabel = "Accept",
-  onAcceptCandidate,
-  onAcceptCandidateAs,
   onJumpCandidate,
   onReview,
   onReviewCandidate,
@@ -4034,7 +4004,6 @@ function DetectionCard({
   candidatePreviewFrames,
   defaultCandidateSource,
   showMovementCandidateActions = false,
-  onAccept,
   onJump,
   onReject,
   emptyText,
@@ -4048,9 +4017,6 @@ function DetectionCard({
   finalClimbTime?: number;
   offsetButtons?: number[];
   onOffsetChange?: (offset: number) => void;
-  acceptLabel?: string;
-  onAcceptCandidate?: (candidate: DetectionCandidate) => void;
-  onAcceptCandidateAs?: (candidate: DetectionCandidate, definition: FirstMovementDefinition) => void;
   onJumpCandidate?: (candidate: DetectionCandidate, delta?: number) => void;
   onReview?: () => void;
   onReviewCandidate?: (candidate: DetectionCandidate) => void;
@@ -4058,7 +4024,6 @@ function DetectionCard({
   candidatePreviewFrames?: Record<string, CandidatePreviewFrames>;
   defaultCandidateSource?: string;
   showMovementCandidateActions?: boolean;
-  onAccept: () => void;
   onJump: (delta?: number) => void;
   onReject: () => void;
   emptyText: string;
@@ -4083,8 +4048,6 @@ function DetectionCard({
         <CandidateList
           candidates={candidates}
           suggestedRawTime={result.rawTime}
-          onAcceptCandidate={onAcceptCandidate}
-          onAcceptCandidateAs={onAcceptCandidateAs}
           onJumpCandidate={onJumpCandidate}
           onReviewCandidate={onReviewCandidate}
           getCandidateJumpTarget={getCandidateJumpTarget}
@@ -4135,7 +4098,6 @@ function DetectionCard({
       <p className="muted">Jump target: {jumpTarget.toFixed(3)}s raw</p>
       <div className="button-row review-first-actions">
         <button className="primary" onClick={onReview ?? (() => onJump(0))}>Review at video</button>
-        <button onClick={onAccept}>{acceptLabel} without review</button>
         <button onClick={onReject}>Reject</button>
       </div>
       <details className="candidate-advanced">
@@ -4156,8 +4118,6 @@ function DetectionCard({
       <CandidateList
         candidates={candidates}
         suggestedRawTime={result.rawTime}
-        onAcceptCandidate={onAcceptCandidate}
-        onAcceptCandidateAs={onAcceptCandidateAs}
         onJumpCandidate={onJumpCandidate}
         onReviewCandidate={onReviewCandidate}
         getCandidateJumpTarget={getCandidateJumpTarget}
@@ -4172,8 +4132,6 @@ function DetectionCard({
 function CandidateList({
   candidates,
   suggestedRawTime,
-  onAcceptCandidate,
-  onAcceptCandidateAs,
   onJumpCandidate,
   onReviewCandidate,
   getCandidateJumpTarget,
@@ -4183,8 +4141,6 @@ function CandidateList({
 }: {
   candidates: DetectionCandidate[];
   suggestedRawTime?: number;
-  onAcceptCandidate?: (candidate: DetectionCandidate) => void;
-  onAcceptCandidateAs?: (candidate: DetectionCandidate, definition: FirstMovementDefinition) => void;
   onJumpCandidate?: (candidate: DetectionCandidate, delta?: number) => void;
   onReviewCandidate?: (candidate: DetectionCandidate) => void;
   getCandidateJumpTarget?: (candidate: DetectionCandidate) => number;
@@ -4222,14 +4178,11 @@ function CandidateList({
               candidate={candidate}
               compact
               label={primaryCandidate === candidate ? "Best available" : "Different timing"}
-              onAcceptCandidate={onAcceptCandidate}
-              onAcceptCandidateAs={onAcceptCandidateAs}
               onJumpCandidate={onJumpCandidate}
               onReviewCandidate={onReviewCandidate}
               getCandidateJumpTarget={getCandidateJumpTarget}
               candidatePreviewFrames={candidatePreviewFrames}
               defaultCandidateSource={defaultCandidateSource}
-              showMovementCandidateActions={showMovementCandidateActions}
             />
           ))}
         </>
@@ -4242,14 +4195,11 @@ function CandidateList({
             <CandidateRow
               key={`${candidate.rawTime}-${candidate.kind}-${index}`}
               candidate={candidate}
-              onAcceptCandidate={onAcceptCandidate}
-              onAcceptCandidateAs={onAcceptCandidateAs}
               onJumpCandidate={onJumpCandidate}
               onReviewCandidate={onReviewCandidate}
               getCandidateJumpTarget={getCandidateJumpTarget}
               candidatePreviewFrames={candidatePreviewFrames}
               defaultCandidateSource={defaultCandidateSource}
-              showMovementCandidateActions={showMovementCandidateActions}
             />
           ))}
         </details>
@@ -4262,30 +4212,23 @@ function CandidateRow({
   candidate,
   compact = false,
   label,
-  onAcceptCandidate,
-  onAcceptCandidateAs,
   onJumpCandidate,
   onReviewCandidate,
   getCandidateJumpTarget,
   candidatePreviewFrames,
   defaultCandidateSource,
-  showMovementCandidateActions,
 }: {
   candidate: DetectionCandidate;
   compact?: boolean;
   label?: string;
-  onAcceptCandidate?: (candidate: DetectionCandidate) => void;
-  onAcceptCandidateAs?: (candidate: DetectionCandidate, definition: FirstMovementDefinition) => void;
   onJumpCandidate?: (candidate: DetectionCandidate, delta?: number) => void;
   onReviewCandidate?: (candidate: DetectionCandidate) => void;
   getCandidateJumpTarget?: (candidate: DetectionCandidate) => number;
   candidatePreviewFrames?: Record<string, CandidatePreviewFrames>;
   defaultCandidateSource: string;
-  showMovementCandidateActions: boolean;
 }) {
   const jumpTarget = getCandidateJumpTarget?.(candidate) ?? candidate.rawTime;
   const previews = candidatePreviewFrames?.[movementCandidateKey(candidate)];
-  const movementDefinition = movementDefinitionForCandidate(candidate);
 
   return (
     <div className={`candidate-row${compact ? " compact-candidate" : ""}`}>
@@ -4325,20 +4268,6 @@ function CandidateRow({
           {compact ? "Review at video" : "Jump exact"}
         </button>
         {!compact && <button onClick={() => onJumpCandidate?.(candidate, 0.1)}>Jump +0.10s</button>}
-        {showMovementCandidateActions ? (
-          compact ? (
-            <button className="primary" onClick={() => onAcceptCandidateAs?.(candidate, movementDefinition)}>
-              {movementDefinition === "committed" ? "Use as Committed Launch" : "Use as First Movement"}
-            </button>
-          ) : (
-            <>
-              <button className="primary" onClick={() => onAcceptCandidateAs?.(candidate, "earliest")}>Accept as Earliest Motion</button>
-              <button className="primary" onClick={() => onAcceptCandidateAs?.(candidate, "committed")}>Accept as Committed Launch</button>
-            </>
-          )
-        ) : (
-          <button className="primary" onClick={() => onAcceptCandidate?.(candidate)}>{compact ? "Use this time" : "Accept"}</button>
-        )}
       </div>
     </div>
   );

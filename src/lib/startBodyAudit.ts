@@ -16,6 +16,18 @@ export function assessAutomaticStartBodyAudit(
   movement: FirstMovementDetectionResult,
   proposedStartRawTime: number,
 ): StartBodyAudit {
+  const nearCuePreMotion = movement.debug.samples.some((sample) =>
+    sample.time < proposedStartRawTime &&
+    sample.time >= proposedStartRawTime - 0.15 &&
+    sample.smoothedMotionScore >= movement.debug.threshold,
+  );
+  if (nearCuePreMotion) {
+    return {
+      safeToAutoAccept: false,
+      reason: "Reliable lane-local motion was already present within 0.150s before the proposed start, so the cue is late and requires review.",
+    };
+  }
+
   if (movement.debug.movementAlreadyUnderway) {
     return {
       safeToAutoAccept: false,
@@ -31,6 +43,16 @@ export function assessAutomaticStartBodyAudit(
   }
 
   const delay = movement.rawTime - proposedStartRawTime;
+  // World Climbing treats a recorded reaction below 0.100 s as a false start.
+  // Even when the race was valid, a shorter visual delay means our cue or
+  // motion timestamp is wrong, so it must never be accepted automatically.
+  if (delay >= -0.02 && delay < 0.1 - 1e-6) {
+    return {
+      safeToAutoAccept: false,
+      reason: `The measured reaction was only ${Math.max(0, delay).toFixed(3)}s; reactions below 0.100s are not a plausible valid race start, so the timestamp requires review.`,
+    };
+  }
+
   // A speed-climbing launch should follow the start cue promptly. A generous
   // 0.75 s ceiling still covers unusually slow reactions while refusing to
   // connect an unrelated later movement to an earlier gym beep/light change.

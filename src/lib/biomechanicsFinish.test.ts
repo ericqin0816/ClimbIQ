@@ -64,6 +64,18 @@ describe("biomechanics finish trimming", () => {
     });
   });
 
+  it("never clamps an out-of-range official or light finish to the end of the file", () => {
+    expect(resolveAutomaticPoseFinishBoundary({
+      startRawTime: 9.4,
+      videoDuration: 20,
+      officialTotalSeconds: 15,
+      lightFinishRawTime: 25,
+    })).toEqual({
+      ready: false,
+      reason: "No finish boundary was verified, so COM analysis was stopped before scanning the descent.",
+    });
+  });
+
   it("never includes frames after the accepted finish", () => {
     const result = makeResult([
       sample(0, 1), sample(1, 3), sample(2, 5), sample(3, 7), sample(4, 9),

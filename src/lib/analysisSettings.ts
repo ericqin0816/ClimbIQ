@@ -4,7 +4,7 @@ const MAX_ANALYSIS_VIDEO_SECONDS = 6 * 60 * 60;
 
 export const DEFAULT_ANALYSIS_SESSION_SETTINGS: AnalysisSessionSettings = {
   startSearchStart: 0,
-  startSearchEnd: 15,
+  startSearchEnd: 12,
   startSensitivity: "medium",
   startLightVisibility: "clear",
   startDetectionProfile: "auto",
@@ -22,12 +22,12 @@ export function sanitizeAnalysisSessionSettings(value: unknown): AnalysisSession
   // Leave room for a valid search window while supporting full event replays,
   // which commonly run longer than one hour.
   const startSearchStart = bounded(candidate.startSearchStart, 0, MAX_ANALYSIS_VIDEO_SECONDS - 0.5, 0);
-  const requestedEnd = bounded(candidate.startSearchEnd, 0, MAX_ANALYSIS_VIDEO_SECONDS, 15);
+  const requestedEnd = bounded(candidate.startSearchEnd, 0, MAX_ANALYSIS_VIDEO_SECONDS, 12);
   return {
     startSearchStart,
     startSearchEnd: requestedEnd > startSearchStart
       ? requestedEnd
-      : Math.min(MAX_ANALYSIS_VIDEO_SECONDS, startSearchStart + 15),
+      : Math.min(MAX_ANALYSIS_VIDEO_SECONDS, startSearchStart + 12),
     startSensitivity: oneOf(candidate.startSensitivity, ["low", "medium", "high"] as const, "medium"),
     startLightVisibility: oneOf(candidate.startLightVisibility, ["clear", "blocked"] as const, "clear"),
     startDetectionProfile: oneOf(candidate.startDetectionProfile, ["auto", "calibrated", "generic", "blocked", "motion", "manual"] as const, "auto"),

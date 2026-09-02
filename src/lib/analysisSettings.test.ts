@@ -29,7 +29,7 @@ describe("analysis session settings", () => {
     });
     expect(result).toMatchObject({
       startSearchStart: 0,
-      startSearchEnd: 15,
+      startSearchEnd: 12,
       startSensitivity: "medium",
       startDetectionProfile: "auto",
       firstMovementDefinition: "earliest",
@@ -40,7 +40,7 @@ describe("analysis session settings", () => {
   it("repairs an end bound that is not after the start bound", () => {
     const result = sanitizeAnalysisSessionSettings({ startSearchStart: 12, startSearchEnd: 8 });
     expect(result.startSearchStart).toBe(12);
-    expect(result.startSearchEnd).toBe(27);
+    expect(result.startSearchEnd).toBe(24);
   });
 
   it("keeps the search window valid at the supported upper boundary", () => {

@@ -14,7 +14,7 @@ This benchmark records behavior on five private 1080 × 1920 phone recordings. T
 | Clip | Previous behavior | Current behavior |
 | --- | --- | --- |
 | `IMG_8903.MOV` | Plausible start, but no finish | Start launch confirmed; upper-wall fallback recovers a finish candidate around a 10.0 s climb |
-| `IMG_9075.MOV` | Incorrect 14.900 s start was automatically accepted mid-climb | The 15 s start window excludes later resets; an earlier 7.617 s cue remains review-only, while the reviewed exact start is 8.900 s |
+| `IMG_9075.MOV` | Incorrect 14.900 s start was automatically accepted mid-climb | The 12 s start window excludes that later reset; an earlier 8.450 s cue remains review-only, while the reviewed exact start is 8.900 s |
 | `IMG_9076.MOV` | 24.820 s post-climb frame suggested as start | The late event is excluded; an earlier 2.790 s setup cue remains safely review-only |
 | `IMG_9077.MOV` | Incorrect 5.250 s start was automatically accepted while athletes were already underway | Start is blocked for review |
 | `IMG_9199.MOV` | Plausible 7.130 s start and 10.350 s total | Valid result remains stable; existing lane-light finish path still wins |
@@ -44,7 +44,8 @@ This is a precision-first regression sample, not a population accuracy claim. Fi
 Six short 720p race crops from World Climbing's [Chamonix 2026 speed finals](https://www.youtube.com/watch?v=RvZXoTVxGBs) were also tested locally: three women's attempts and three men's attempts. These are kept in `benchmarks/public-broadcast-results.json` and summarized separately because a moving multi-camera broadcast is a different input class from a fixed phone recording.
 
 - All six start cues remained review-only; frame inspection showed that they were broadcast cuts or already-underway motion rather than safe exact start frames.
-- No known-false public start was automatically accepted. The new full-frame audit measured 52.4%–79.1% structural change across five of the six proposed cues and labeled them as camera cuts instead of treating the edit as athlete launch motion.
+- No known-false public start was automatically accepted. The full-frame audit measured 31.0%–79.1% structural change across four proposed cues and labeled them as camera cuts instead of treating the edit as athlete launch motion. One other cue had no reliable lane-local launch.
+- The remaining clip exposed a late audio/light cue: the climber was already launching, but the estimated movement timestamp followed the cue by only 0.033 s. The [World Climbing competition rule](https://images.ifsc-climbing.org/ifsc/image/private/t_q_good/prd/jaq7awz9jmqwpddwnbpr.pdf) defining sub-0.100 s reactions as false starts is now a conservative automatic-acceptance floor, so this candidate is review-only too.
 - Before the camera-reference guard, one mid-wall reframe produced a false 13.983 s physical-finish review boundary, only 3.100 s after Start despite the official winning time being 6.20 s.
 - Anchoring physical top tracking to the post-start camera view removed that false boundary. The detector now reports no verified finish for the moving-camera crop instead of supplying an inaccurate time.
 
@@ -58,7 +59,7 @@ With the improved 5 fps track, the review-only hand-height fallback found a cont
 
 Automatic timestamps are intentionally precision-first:
 
-1. Start light/audio evidence defines the exact clock only after lane-local motion confirms a new launch and the full frame remains continuous across the cue.
+1. Start light/audio evidence defines the exact clock only after lane-local motion confirms a new launch, the full frame remains continuous across the cue, and the measured reaction is at least the 0.100 s valid-race floor.
 2. The original start-verified lower lane remains the athlete-identity anchor.
 3. Lower-sensor finish evidence is preferred when it is strong.
 4. Upper electronic evidence is accepted only with physical-top or official-time corroboration.

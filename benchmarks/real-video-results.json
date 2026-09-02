@@ -14,7 +14,7 @@
     {
       "id": "IMG_9075.MOV",
       "durationSeconds": 30.44,
-      "start": { "rawTime": 7.617, "status": "review", "confidence": "High", "reviewedCorrect": false, "manualRawTime": 8.9 },
+      "start": { "rawTime": 8.45, "status": "review", "confidence": "High", "reviewedCorrect": false, "manualRawTime": 8.9 },
       "finish": { "rawTime": 17.333, "status": "review", "confidence": "Medium" },
       "hold10": { "status": "unavailable" },
       "com": { "status": "insufficient-tracking", "usableFrames": 1, "requestedFrames": 85 }
