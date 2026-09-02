@@ -77,6 +77,12 @@ const INITIAL_TIMESTAMPS: TimestampMarker[] = [
 
 const APP_VERSION = "0.19.0";
 const SESSION_STORAGE_KEY = "climbiq.analysisSessions.v1";
+const DETECTOR_DERIVED_START_SOURCES = new Set<TimestampSource>([
+  "Start light detection",
+  "Fused start detection",
+  "Motion-based estimate",
+]);
+const MOVEMENT_MARKER_IDS: TimestampMarker["id"][] = ["firstMovement", "committedLaunch"];
 
 type ZoneDisplayMode = "fit" | "scroll";
 
@@ -2136,13 +2142,53 @@ function App() {
     setMovementResult(null);
     setMovementPreviewFrames({});
     setStartEvidenceStatus("");
-    setAutoAnalysisStatus(message);
+    const acceptedStart = getTimestamp(timestamps, "startSignal");
+    const detectorDerived = DETECTOR_DERIVED_START_SOURCES.has(acceptedStart.source);
+    if (detectorDerived) {
+      setTimestamps((current) => clearMarkerTimestamp(current, "startSignal"));
+      setFinishResult(null);
+      setFinishStatus("");
+      setRouteAlignment(null);
+      setBiomechanics((current) => current.result ? { ...current, result: undefined } : current);
+    }
+    setAutoAnalysisStatus(`${message}${detectorDerived ? " Previous detector-derived Start and dependent timing were cleared." : ""}`);
   }
 
   function invalidateMovementSuggestion(message: string) {
     setMovementResult(null);
     setMovementPreviewFrames({});
-    setAutoAnalysisStatus(message);
+    const hasDetectorMarker = MOVEMENT_MARKER_IDS.some((id) => getTimestamp(timestamps, id).source === "Body motion detection");
+    if (hasDetectorMarker) {
+      setTimestamps((current) => MOVEMENT_MARKER_IDS.reduce(
+        (next, id) => getTimestamp(next, id).source === "Body motion detection"
+          ? clearMarkerTimestamp(next, id)
+          : next,
+        current,
+      ));
+    }
+    setAutoAnalysisStatus(`${message}${hasDetectorMarker ? " Previous detector-derived movement timing was cleared." : ""}`);
+  }
+
+  function handleStartSignalOffsetChange(value: number) {
+    setStartSignalOffset(value);
+    const acceptedStart = getTimestamp(timestamps, "startSignal");
+    if (DETECTOR_DERIVED_START_SOURCES.has(acceptedStart.source)) {
+      invalidateStartDetectorSuggestion("Start correction changed. Run the analysis again before accepting the corrected time.");
+    }
+  }
+
+  function handleFirstMovementOffsetChange(value: number) {
+    setFirstMovementOffset(value);
+    const hasDetectorMarker = MOVEMENT_MARKER_IDS.some((id) => getTimestamp(timestamps, id).source === "Body motion detection");
+    if (hasDetectorMarker) {
+      setTimestamps((current) => MOVEMENT_MARKER_IDS.reduce(
+        (next, id) => getTimestamp(next, id).source === "Body motion detection"
+          ? clearMarkerTimestamp(next, id)
+          : next,
+        current,
+      ));
+      setAutoAnalysisStatus("Movement correction changed. Previous detector-derived movement timing was cleared; review the corrected suggestion again.");
+    }
   }
 
   function invalidateStartLightDependents(message: string) {
@@ -3263,7 +3309,7 @@ function App() {
                   setStartDetectionProfile(value);
                   if (value === "blocked") {
                     setStartLightVisibility("blocked");
-                    setStartSignalOffset(-0.1);
+                    handleStartSignalOffsetChange(-0.1);
                   }
                   invalidateStartDetectorSuggestion("Start detection profile changed. Run the analysis again to generate a matching suggestion.");
                 }}
@@ -3284,7 +3330,7 @@ function App() {
                 onChange={(event) => {
                   const value = event.target.value as "clear" | "blocked";
                   setStartLightVisibility(value);
-                  setStartSignalOffset(value === "blocked" ? -0.1 : 0);
+                  handleStartSignalOffsetChange(value === "blocked" ? -0.1 : 0);
                   invalidateStartDetectorSuggestion("Start-light visibility changed. Run the analysis again to generate a matching suggestion.");
                 }}
               >
@@ -3299,7 +3345,7 @@ function App() {
                 step="0.001"
                 disabled={videoAnalysisRunning}
                 value={startSignalOffset}
-                onChange={(event) => setStartSignalOffset(Number(event.target.value))}
+                onChange={(event) => handleStartSignalOffsetChange(Number(event.target.value))}
               />
             </label>
             <label>
@@ -3361,7 +3407,7 @@ function App() {
             finalRawTime={startFinalRaw}
             finalClimbTime={0}
             offsetButtons={[-0.05, -0.1, -0.15]}
-            onOffsetChange={setStartSignalOffset}
+            onOffsetChange={handleStartSignalOffsetChange}
             onJumpCandidate={(candidate, delta = 0) => jumpTo(Math.max(0, roundTime(candidate.rawTime + startSignalOffset + delta)))}
             onReviewCandidate={(candidate) => reviewTimestamp({
               label: `Start signal backup (${candidate.kind})`,
@@ -3458,7 +3504,7 @@ function App() {
               step="0.001"
               disabled={videoAnalysisRunning}
               value={firstMovementOffset}
-              onChange={(event) => setFirstMovementOffset(Number(event.target.value))}
+              onChange={(event) => handleFirstMovementOffsetChange(Number(event.target.value))}
             />
           </label>
           </details>
@@ -3475,7 +3521,7 @@ function App() {
             finalRawTime={movementFinalRaw}
             finalClimbTime={movementFinalClimb}
             offsetButtons={[-0.03, -0.05, -0.1]}
-            onOffsetChange={setFirstMovementOffset}
+            onOffsetChange={handleFirstMovementOffsetChange}
             onJumpCandidate={(candidate, delta = 0) => jumpTo(Math.max(0, roundTime(candidate.rawTime + firstMovementOffset + delta)))}
             onReviewCandidate={(candidate) => {
               const definition = movementDefinitionForCandidate(candidate);

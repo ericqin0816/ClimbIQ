@@ -157,6 +157,8 @@ cd ClimbIQ
 npm install
 ```
 
+The repository includes `.nvmrc`; if you use `nvm`, run `nvm use` first so the Mac uses the supported Node 22 runtime.
+
 Before starting new work on either computer, sync the pushed `main` branch:
 
 ```bash
