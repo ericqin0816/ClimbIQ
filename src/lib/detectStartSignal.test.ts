@@ -70,6 +70,30 @@ describe("calibrated green-departure timing", () => {
     expect(result!.onsetIndex).toBeLessThanOrEqual(7);
     expect(result!.confirmationIndex).toBeGreaterThan(result!.onsetIndex);
   });
+
+  it("does not invent a start across seeded green-state sensor noise", () => {
+    for (let seed = 1; seed <= 60; seed += 1) {
+      const random = seededRandom(seed);
+      const colors = Array.from({ length: 36 }, (_, index) =>
+        jitter(GREEN, random, 6, Math.round(Math.sin(index / 6) * 8)),
+      );
+      expect(findVerifiedGreenDeparture(makeSamples(colors), CALIBRATION, 2), `seed ${seed}`).toBeUndefined();
+    }
+  });
+
+  it("keeps finding a sustained blue transition across seeded sensor noise", () => {
+    for (let seed = 1; seed <= 40; seed += 1) {
+      const random = seededRandom(seed * 31);
+      const colors = [
+        ...Array.from({ length: 12 }, () => jitter(GREEN, random, 5)),
+        ...Array.from({ length: 16 }, () => jitter(BLUE, random, 5)),
+      ];
+      const result = findVerifiedGreenDeparture(makeSamples(colors), CALIBRATION, 2);
+      expect(result, `seed ${seed}`).toBeDefined();
+      expect(result!.onsetIndex, `seed ${seed}`).toBeGreaterThanOrEqual(11);
+      expect(result!.onsetIndex, `seed ${seed}`).toBeLessThanOrEqual(12);
+    }
+  });
 });
 
 describe("sampled-zone calibration adaptation", () => {
@@ -117,4 +141,17 @@ function makeSamplesAtTimes(entries: Array<[number, RGB]>): StartSignalDebug["sa
     greenScore: averageRgb.g - Math.max(averageRgb.r, averageRgb.b),
     blueScore: averageRgb.b - Math.max(averageRgb.r, averageRgb.g),
   }));
+}
+
+function jitter(color: RGB, random: () => number, amount: number, exposure = 0): RGB {
+  const channel = (value: number) => Math.max(0, Math.min(255, Math.round(value + exposure + (random() * 2 - 1) * amount)));
+  return { r: channel(color.r), g: channel(color.g), b: channel(color.b) };
+}
+
+function seededRandom(seed: number): () => number {
+  let state = seed >>> 0;
+  return () => {
+    state = (state * 1664525 + 1013904223) >>> 0;
+    return state / 0x100000000;
+  };
 }
