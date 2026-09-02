@@ -20,6 +20,7 @@ import { detectMotionBasedStartEstimate } from "./lib/detectMotionBasedStartEsti
 import { detectStartSignal } from "./lib/detectStartSignal";
 import { detectHoldContact } from "./lib/holdContact";
 import { resolveOfficialFinishRawTime } from "./lib/officialTime";
+import { canAutomaticallyAcceptMovement } from "./lib/movementAcceptance";
 import { sanitizeStartLightCalibration, sanitizeVideoMetadata, sanitizeZoneMap } from "./lib/sessionEvidenceIntegrity";
 import { estimateHold10HeightPassage } from "./lib/hold10HeightEstimate";
 import { resolveHold10Target } from "./lib/holdTarget";
@@ -34,7 +35,7 @@ import { fuseStartEvidence, type FusedStartDecision, type StartEvidence } from "
 import { assessAutomaticStartBodyAudit } from "./lib/startBodyAudit";
 import { deriveAutomaticStartBodyZone, resolveAnalysisBodyZone } from "./lib/startRegion";
 import { applyTimestampAcceptance, clearMarkerTimestamp, recalculateTimestampClimbs, sanitizeTimestampSequence } from "./lib/timestampIntegrity";
-import { captureFrame, clamp, roundTime, sampleFrameAt, sampleZoneOpponentColor, seekTo } from "./lib/videoFrameSampler";
+import { captureFrame, clamp, hasUsableVideoMetadata, roundTime, sampleFrameAt, sampleZoneOpponentColor, seekTo } from "./lib/videoFrameSampler";
 import { getVideoUiState } from "./lib/videoUiState";
 import { inferAutomaticWallCalibration, validateWallCalibration } from "./lib/wallCalibration";
 import type {
@@ -550,6 +551,13 @@ function App() {
   function handleMetadataLoaded() {
     const video = videoRef.current;
     if (!video) {
+      return;
+    }
+    if (!hasUsableVideoMetadata(video)) {
+      const reason = "This file does not contain usable finite video metadata. Try converting it to an H.264 MP4.";
+      setVideoLoadError(reason);
+      setMetadata((current) => current ? { ...current, metadataLoaded: false } : null);
+      setSessionStatus(reason);
       return;
     }
 
@@ -1558,6 +1566,7 @@ function App() {
     signal?: AbortSignal,
     zoneOverride?: NormalizedZone,
     precomputed?: FirstMovementDetectionResult,
+    finishRawTime?: number,
   ): Promise<boolean> {
     const automaticMovement = precomputed ?? await detectFirstMovement({
       video,
@@ -1570,19 +1579,30 @@ function App() {
     if (signal?.aborted) {
       throw new PoseAnalysisCancelledError();
     }
-    setMovementResult(automaticMovement);
-    const accepted = Boolean(
-      automaticMovement.detected &&
-      automaticMovement.rawTime !== undefined &&
-      automaticMovement.confidence !== "Low" &&
-      !automaticMovement.debug.suspiciousFirstFrameDetection &&
-      !automaticMovement.debug.movementAlreadyUnderway,
+    const finalRawTime = automaticMovement.rawTime === undefined
+      ? Number.NaN
+      : roundTime(automaticMovement.rawTime + firstMovementOffset);
+    const correctedTimeOutOfRange = automaticMovement.rawTime !== undefined && (
+      finalRawTime < acceptedStart + 0.1 - 1e-6 ||
+      finalRawTime > video.duration + 0.001 ||
+      (Number.isFinite(finishRawTime) && finalRawTime >= finishRawTime! - 0.001)
+    );
+    setMovementResult(correctedTimeOutOfRange ? {
+      ...automaticMovement,
+      reason: `${automaticMovement.reason} The configured offset moves the final marker outside the valid post-Start reaction/video range, so it requires review.`,
+    } : automaticMovement);
+    const accepted = canAutomaticallyAcceptMovement(
+      automaticMovement,
+      finalRawTime,
+      acceptedStart,
+      video.duration,
+      finishRawTime,
     );
     if (accepted && automaticMovement.rawTime !== undefined) {
       const markerId = firstMovementDefinition === "committed" ? "committedLaunch" : "firstMovement";
       acceptTimestamp(
         markerId,
-        Math.max(0, roundTime(automaticMovement.rawTime + firstMovementOffset)),
+        finalRawTime,
         "Body motion detection",
         automaticMovement.confidence,
         {
@@ -1637,6 +1657,7 @@ function App() {
       signal,
       analysisBodyZone,
       preflightMovement,
+      automaticFinish?.rawTime,
     );
 
     const officialDuration = Number(officialTotalTime);
@@ -2309,6 +2330,17 @@ function App() {
         finishPad: exportCandidates(finishResult?.candidates ?? [], getTimestamp(timestamps, "finishPad")),
       },
       splitCalculations: splits,
+      hold10PhaseAnalysis: {
+        available: hold10PhaseSplits.available,
+        startToHold10Seconds: hold10PhaseSplits.startToHold10Seconds ?? null,
+        hold10ToFinishSeconds: hold10PhaseSplits.hold10ToFinishSeconds ?? null,
+        bottomPhaseShare: hold10PhaseSplits.hold10Share ?? null,
+        topPhaseShare: hold10PhaseSplits.hold10Share === undefined ? null : roundTime(1 - hold10PhaseSplits.hold10Share),
+        slowerPhase: hold10PhaseSplits.slowerPhase ?? null,
+        phaseDifferenceSeconds: hold10PhaseSplits.phaseDifferenceSeconds ?? null,
+        confidence: hold10PhaseSplits.confidence,
+        reason: hold10PhaseSplits.reason,
+      },
       detectionWarnings: buildDetectionWarnings(),
       automationAudit: {
         startEvidence: startEvidenceStatus || null,
@@ -2348,6 +2380,10 @@ function App() {
       `launch_delay: ${yamlNumber(launchDelay)}\n` +
       `start_to_hold_10: ${yamlNumber(startToHold10)}\n` +
       `hold_10_to_finish: ${yamlNumber(hold10ToFinish)}\n` +
+      `bottom_phase_share: ${yamlNumber(hold10PhaseSplits.hold10Share)}\n` +
+      `top_phase_share: ${yamlNumber(hold10PhaseSplits.hold10Share === undefined ? null : roundTime(1 - hold10PhaseSplits.hold10Share))}\n` +
+      `slower_phase: ${yamlString(hold10PhaseSplits.slowerPhase ?? "Not set")}\n` +
+      `phase_difference: ${yamlNumber(hold10PhaseSplits.phaseDifferenceSeconds)}\n` +
       `calculated_total_time: ${yamlNumber(calculatedTotal)}\n` +
       `tags:\n` +
       `  - climbiq\n` +
@@ -2363,6 +2399,9 @@ function App() {
       `- Calculated total: ${formatExportTime(calculatedTotal)}\n` +
       `- Start → Hold 10: ${formatExportTime(startToHold10)}\n` +
       `- Hold 10 → Finish: ${formatExportTime(hold10ToFinish)}\n` +
+      `- Phase balance: ${hold10PhaseSplits.available
+        ? `${(hold10PhaseSplits.hold10Share! * 100).toFixed(1)}% before / ${((1 - hold10PhaseSplits.hold10Share!) * 100).toFixed(1)}% after Hold 10; ${hold10PhaseSplits.slowerPhase === "balanced" ? "balanced" : `${hold10PhaseSplits.slowerPhase === "start-to-hold10" ? "bottom" : "top"} phase ${hold10PhaseSplits.phaseDifferenceSeconds!.toFixed(3)}s longer`}`
+        : "Not set"}\n` +
       `- Attempt type: ${attemptType || "Not set"}\n` +
       `- Location / gym: ${attemptLocation || "Not set"}\n` +
       `- Notes: ${sessionNotes || "Not set"}\n\n` +

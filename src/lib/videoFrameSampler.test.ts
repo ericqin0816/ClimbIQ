@@ -3,6 +3,7 @@ import {
   computeAverageRgb,
   computeDirectionalOpponentWeightedRgb,
   computeOpponentWeightedRgb,
+  hasUsableVideoMetadata,
 } from "./videoFrameSampler";
 
 describe("opponent-color zone sampling", () => {
@@ -27,6 +28,15 @@ describe("opponent-color zone sampling", () => {
 
     expect(absolute.b).toBeGreaterThan(absolute.g);
     expect(towardGreen.g).toBeGreaterThan(towardGreen.b);
+  });
+});
+
+describe("video metadata readiness", () => {
+  it("requires finite positive duration and both video dimensions", () => {
+    expect(hasUsableVideoMetadata({ readyState: 1, duration: 20, videoWidth: 1080, videoHeight: 1920 })).toBe(true);
+    expect(hasUsableVideoMetadata({ readyState: 1, duration: Number.POSITIVE_INFINITY, videoWidth: 1080, videoHeight: 1920 })).toBe(false);
+    expect(hasUsableVideoMetadata({ readyState: 1, duration: 20, videoWidth: 1080, videoHeight: 0 })).toBe(false);
+    expect(hasUsableVideoMetadata({ readyState: 0, duration: 20, videoWidth: 1080, videoHeight: 1920 })).toBe(false);
   });
 });
 

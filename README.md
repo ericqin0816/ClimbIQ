@@ -82,7 +82,7 @@ COM has a second climb-completion guard for late or previously saved finish rang
 
 Center-of-mass results also calculate wall-height halves and lower/middle/top wall thirds. Split crossings use upward-only COM progress and are never interpolated across tracking gaps longer than 0.25 seconds. ClimbIQ identifies the slowest complete wall section and provides a direct video-review jump. Low-confidence wall sections remain in diagnostics instead of being published as exact main-result splits.
 
-The contact-defined race phases are calculated separately: **Start → Hold 10** and **Hold 10 → Finish** appear only after an accepted Hold 10 contact lies strictly between the accepted Start and Finish. This prevents the 7.5 m COM crossing from being mislabeled as Hold 10. Exports include both phase times explicitly.
+The contact-defined race phases are calculated separately: **Start → Hold 10** and **Hold 10 → Finish** appear only after an accepted Hold 10 contact lies strictly between the accepted Start and Finish. The result also reports the percentage of the race spent before and after Hold 10 and the slower phase's time difference. This prevents the 7.5 m COM crossing from being mislabeled as Hold 10. Exports include both phase times explicitly.
 
 ## Visually Registered Holds And Hold 10 Contact
 
@@ -108,7 +108,7 @@ Quick Analyze scans the complete clip at several pixel scales and keeps spatiall
 
 The original local video's audio track is decoded on-device for the known start protocol: a spoken “ready,” two matching preparation beeps near 554 Hz, then an octave-up final beep near 1.1 kHz. ClimbIQ does not transcribe the spoken word. Browser audio is low-pass filtered while it is resampled, preventing high-frequency gym noise from folding into fake beep pitches. It extracts stable pitch sub-runs from noisy speech and can recover the quiet octave harmonic even when a louder voice masks it. High confidence is reserved for the correctly spaced, genuinely matching pair plus octave-up final cue; the earliest valid protocol becomes the authoritative start clock. Generic tones remain review-only.
 
-Before accepting that clock, Quick Analyze now performs a lane-local body audit. The selected athlete must produce a new, reliable launch immediately after the proposed cue. A cue is sent to frame review when motion was already underway, the first sample is suspiciously strong, no launch is found, or the launch is implausibly delayed. Light/audio still provide the precise clock; body motion acts as a false-acceptance guard.
+Before accepting that clock, Quick Analyze performs both a lane-local body audit and a full-frame continuity audit. The selected athlete must produce a new, reliable launch immediately after the proposed cue, the image cannot contain a broadcast cut/reframe, and a valid-race reaction cannot fall below World Climbing's 0.100 s false-start boundary. A cue is sent to frame review when motion was already underway, the first sample is suspiciously strong, no launch is found, the reaction is physically invalid, or the launch is implausibly delayed. Light/audio still provide the precise clock; body motion and scene continuity act as false-acceptance guards.
 
 ## First Movement Detection
 
@@ -146,6 +146,24 @@ npm run test
 
 Open the dev server URL, upload a local climbing video, and press **Run full analysis**. Zones are optional unless another person appears in frame or automatic light discovery needs manual help.
 
+### Work from another computer
+
+On a Mac with Codex, clone the same repository once, then open that folder as the Codex project:
+
+```bash
+git clone https://github.com/ericqin0816/ClimbIQ.git
+cd ClimbIQ
+npm install
+```
+
+Before starting new work on either computer, sync the pushed `main` branch:
+
+```bash
+git pull --ff-only origin main
+```
+
+Private videos are intentionally excluded from Git. You can upload a downloaded Drive video directly in the app. To run the repeatable timing benchmark on the Mac, put clips in `node_modules/.climbiq-private-videos/` or set `CLIMBIQ_VIDEO_DIR` to their local folder. The benchmark runner supports the standard macOS Google Chrome location and uses the macOS temporary directory for its isolated profile.
+
 For a full meet replay, open **Review & advanced tools** and enter the absolute source-time window for one race (for example, ignore before `590` and stop the start search at `610`). ClimbIQ analyzes one attempt at a time and limits automatic finish search to 30 seconds after the accepted start so later races and timer resets cannot leak into the result. Edited multi-camera footage is intentionally sent to review when the frame composition changes at the cue.
 
 ### Real-video timing regression
@@ -157,9 +175,9 @@ npm run benchmark:timing
 npm run benchmark:summary
 ```
 
-The timing runner uses the real browser workflow, stops after timing when possible, compares accepted/review outcomes with `benchmarks/real-video-results.json`, and exits nonzero if an expected Start or Finish policy regresses. Set `CLIMBIQ_VIDEO_DIR` for a different private directory, or use `npm run benchmark:timing -- clip1.mov clip2.mov` for a subset or a new exploratory clip. New clips are reported as `unbaselined`; they do not become required regression inputs until they are deliberately added to the benchmark JSON. Videos and frames are never written into the repository.
+The timing runner uses the real browser workflow, stops after timing when possible, compares accepted/review outcomes, raw times, evidence sources, and confidence labels with `benchmarks/real-video-results.json`, and exits nonzero if an expected Start or Finish policy regresses. Set `CLIMBIQ_VIDEO_DIR` for a different private directory, or use `npm run benchmark:timing -- clip1.mov clip2.mov` for a subset or a new exploratory clip. New clips are reported as `unbaselined`; they do not become required regression inputs until they are deliberately added to the benchmark JSON. Videos and frames are never written into the repository.
 
-`npm run benchmark:summary` also reports the separately labeled public broadcast stress test from `benchmarks/public-broadcast-results.json`, including the official reaction-time cross-check and moving-camera rejection results.
+`npm run benchmark:summary` also reports the separately labeled public broadcast stress test from `benchmarks/public-broadcast-results.json`, including moving-camera rejection reasons and whether review-only candidates have actually received manual ground-truth labels.
 
 ## Deploy On Vercel
 
@@ -189,6 +207,7 @@ Dataset exports retain diagnostic data for troubleshooting without putting devel
 - start signal detection debug data
 - first movement detection debug data
 - accepted timestamps
+- Hold 10 phase times, bottom/top shares, slower phase, and phase difference
 
 ## Obsidian Export
 

@@ -6,7 +6,7 @@
     {
       "id": "IMG_8903.MOV",
       "durationSeconds": 26.75,
-      "start": { "rawTime": 4.29, "status": "accepted", "confidence": "High", "reviewedCorrect": true },
+      "start": { "rawTime": 4.29, "status": "accepted", "source": "Fused start detection", "confidence": "High", "reviewedCorrect": true, "firstMovementRawTime": 4.39, "firstMovementConfidence": "High", "reactionSeconds": 0.1 },
       "finish": { "rawTime": 14.29, "status": "review", "confidence": "Medium", "reviewedCorrect": true },
       "hold10": { "status": "unavailable" },
       "com": { "status": "manual-calibration-required" }
@@ -38,8 +38,8 @@
     {
       "id": "IMG_9199.MOV",
       "durationSeconds": 32.17,
-      "start": { "rawTime": 7.13, "status": "accepted", "confidence": "High", "reviewedCorrect": true },
-      "finish": { "rawTime": 17.48, "status": "accepted", "confidence": "High", "reviewedCorrect": true },
+      "start": { "rawTime": 7.13, "status": "accepted", "source": "Fused start detection", "confidence": "High", "reviewedCorrect": true, "firstMovementRawTime": 7.23, "firstMovementConfidence": "Medium", "reactionSeconds": 0.1 },
+      "finish": { "rawTime": 17.48, "status": "accepted", "source": "Finish light detection", "confidence": "High", "reviewedCorrect": true },
       "hold10": {
         "status": "review-candidate",
         "rawTime": 11.515,

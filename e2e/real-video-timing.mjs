@@ -1,6 +1,7 @@
 import { readFile, readdir } from "node:fs/promises";
 import path from "node:path";
 import { spawn } from "node:child_process";
+import { tmpdir } from "node:os";
 
 const defaultChromePath = process.platform === "darwin"
   ? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
@@ -14,7 +15,7 @@ const commandLineFiles = process.argv.slice(2).map((value) => value.trim()).filt
 const environmentFiles = process.env.CLIMBIQ_BENCHMARK_FILES?.split(",").map((value) => value.trim()).filter(Boolean);
 const requestedFiles = commandLineFiles.length ? commandLineFiles : environmentFiles;
 const port = 9334;
-const profile = `${process.env.TEMP ?? "C:/Windows/Temp"}/climbiq-timing-${Date.now()}`;
+const profile = path.join(process.env.TMPDIR ?? process.env.TEMP ?? tmpdir(), `climbiq-timing-${Date.now()}`);
 const delay = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 
 const chrome = spawn(chromePath, [
@@ -223,8 +224,11 @@ function validateOutcome(outcome, expected, baselineStatus = "unbaselined") {
   const reviewStart = parseFirstTime(outcome.reviewStart);
   if (expected.start?.status === "accepted") {
     compareTime(errors, "accepted Start", acceptedStart, expected.start.rawTime);
+    compareText(errors, "accepted Start source", outcome.start?.source, expected.start.source);
+    compareText(errors, "accepted Start confidence", outcome.start?.confidence, expected.start.confidence);
     if (Number.isFinite(expected.start.firstMovementRawTime)) {
       compareTime(errors, "accepted First Movement", parseTime(outcome.firstMovement?.rawTime), expected.start.firstMovementRawTime);
+      compareText(errors, "accepted First Movement confidence", outcome.firstMovement?.confidence, expected.start.firstMovementConfidence);
     }
   } else if (expected.start?.status === "review") {
     if (acceptedStart !== null) errors.push(`Start was automatically accepted at ${acceptedStart.toFixed(3)}s but review was expected.`);
@@ -237,6 +241,8 @@ function validateOutcome(outcome, expected, baselineStatus = "unbaselined") {
     const acceptedFinish = parseTime(outcome.finish?.rawTime);
     if (expected.finish?.status === "accepted") {
       compareTime(errors, "accepted Finish", acceptedFinish, expected.finish.rawTime);
+      compareText(errors, "accepted Finish source", outcome.finish?.source, expected.finish.source);
+      compareText(errors, "accepted Finish confidence", outcome.finish?.confidence, expected.finish.confidence);
     } else if (expected.finish?.status === "review") {
       if (acceptedFinish !== null) errors.push(`Finish was automatically accepted at ${acceptedFinish.toFixed(3)}s but review was expected.`);
       compareTime(errors, "review Finish boundary", parseFirstTime(outcome.status.match(/finish[^.]*?(\d+\.\d+)s/i)?.[0]), expected.finish.rawTime);
@@ -268,6 +274,11 @@ function compareTime(errors, label, actual, expected, tolerance = 0.04) {
   } else if (Math.abs(actual - expected) > tolerance) {
     errors.push(`${label} was ${actual.toFixed(3)}s; expected ${expected.toFixed(3)}s ± ${tolerance.toFixed(3)}s.`);
   }
+}
+
+function compareText(errors, label, actual, expected) {
+  if (expected === undefined) return;
+  if (actual !== expected) errors.push(`${label} was ${JSON.stringify(actual)}; expected ${JSON.stringify(expected)}.`);
 }
 
 try {

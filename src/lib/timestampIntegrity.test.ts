@@ -114,6 +114,14 @@ describe("timestamp integrity", () => {
     expect(sanitized.find((marker) => marker.id === "hold10")?.rawTime).toBe(10);
   });
 
+  it("enforces canonical marker order even when an imported array is shuffled", () => {
+    const markers = populated();
+    markers.find((marker) => marker.id === "committedLaunch")!.rawTime = 5.05;
+    const sanitized = sanitizeTimestampSequence(markers.reverse(), 20);
+    expect(sanitized.find((marker) => marker.id === "committedLaunch")?.rawTime).toBeNull();
+    expect(sanitized.find((marker) => marker.id === "firstHold")?.rawTime).toBe(6);
+  });
+
   it("clears an imported sequence when Start is missing", () => {
     const markers = populated();
     markers.find((marker) => marker.id === "startSignal")!.rawTime = Number.NaN;

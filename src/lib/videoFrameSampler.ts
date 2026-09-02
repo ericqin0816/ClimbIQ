@@ -3,19 +3,25 @@ import type { FrameSample, NormalizedZone, RGB, ZonePixelRect } from "../types";
 const SEEK_EPSILON_SECONDS = 0.004;
 
 export function waitForMetadata(video: HTMLVideoElement): Promise<void> {
-  if (video.readyState >= 1 && Number.isFinite(video.duration) && video.videoWidth > 0) {
+  if (hasUsableVideoMetadata(video)) {
     return Promise.resolve();
   }
 
   return new Promise((resolve, reject) => {
+    const timeoutId = window.setTimeout(() => {
+      cleanup();
+      reject(new Error("Video metadata timed out."));
+    }, 10000);
     const cleanup = () => {
+      window.clearTimeout(timeoutId);
       video.removeEventListener("loadedmetadata", onLoaded);
       video.removeEventListener("error", onError);
     };
 
     const onLoaded = () => {
       cleanup();
-      resolve();
+      if (hasUsableVideoMetadata(video)) resolve();
+      else reject(new Error("Video metadata is incomplete or has an invalid duration."));
     };
 
     const onError = () => {
@@ -26,6 +32,13 @@ export function waitForMetadata(video: HTMLVideoElement): Promise<void> {
     video.addEventListener("loadedmetadata", onLoaded, { once: true });
     video.addEventListener("error", onError, { once: true });
   });
+}
+
+export function hasUsableVideoMetadata(
+  video: Pick<HTMLVideoElement, "readyState" | "duration" | "videoWidth" | "videoHeight">,
+): boolean {
+  return video.readyState >= 1 && Number.isFinite(video.duration) && video.duration > 0 &&
+    video.videoWidth > 0 && video.videoHeight > 0;
 }
 
 export async function seekTo(video: HTMLVideoElement, time: number): Promise<void> {
