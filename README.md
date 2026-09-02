@@ -153,7 +153,7 @@ npm run benchmark:timing
 npm run benchmark:summary
 ```
 
-The timing runner uses the real browser workflow, stops after timing when possible, compares accepted/review outcomes with `benchmarks/real-video-results.json`, and exits nonzero if an expected Start or Finish policy regresses. Set `CLIMBIQ_VIDEO_DIR` for a different private directory or `CLIMBIQ_BENCHMARK_FILES=clip1.mov,clip2.mov` for a subset. Videos and frames are never written into the repository.
+The timing runner uses the real browser workflow, stops after timing when possible, compares accepted/review outcomes with `benchmarks/real-video-results.json`, and exits nonzero if an expected Start or Finish policy regresses. Set `CLIMBIQ_VIDEO_DIR` for a different private directory, or use `npm run benchmark:timing -- clip1.mov clip2.mov` for a subset or a new exploratory clip. New clips are reported as `unbaselined`; they do not become required regression inputs until they are deliberately added to the benchmark JSON. Videos and frames are never written into the repository.
 
 ## Deploy On Vercel
 

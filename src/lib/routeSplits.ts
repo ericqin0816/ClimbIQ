@@ -105,6 +105,7 @@ export function buildMonotonicRouteProgress(
 export function analyzeRouteSplits(
   result: BiomechanicsResult,
   wallHeightMeters = STANDARD_SPEED_WALL_HEIGHT_METERS,
+  calibrationConfidence: Confidence = "High",
 ): RouteSplitAnalysis {
   const samples = buildMonotonicRouteProgress(
     result.frames.filter((frame) =>
@@ -112,9 +113,9 @@ export function analyzeRouteSplits(
     ),
     wallHeightMeters,
   );
-  const oneThird = findCrossing(result, samples, 1 / 3, wallHeightMeters);
-  const halfway = findCrossing(result, samples, 1 / 2, wallHeightMeters);
-  const twoThirds = findCrossing(result, samples, 2 / 3, wallHeightMeters);
+  const oneThird = findCrossing(result, samples, 1 / 3, wallHeightMeters, calibrationConfidence);
+  const halfway = findCrossing(result, samples, 1 / 2, wallHeightMeters, calibrationConfidence);
+  const twoThirds = findCrossing(result, samples, 2 / 3, wallHeightMeters, calibrationConfidence);
   const sections = [
     buildSection(result, samples, {
       id: "lower",
@@ -161,7 +162,7 @@ export function analyzeRouteSplits(
     }
   }
 
-  const confidence = overallConfidence(result, samples);
+  const confidence = minimumConfidence(overallConfidence(result, samples), calibrationConfidence);
   return {
     available: sections.some((section) => section.available) || halfway.available,
     confidence,
@@ -183,6 +184,7 @@ function findCrossing(
   samples: RouteProgressSample[],
   fraction: number,
   wallHeightMeters: number,
+  calibrationConfidence: Confidence,
 ): RouteCrossing {
   const heightMeters = wallHeightMeters * fraction;
   const unavailable = (reason: string): RouteCrossing => ({
@@ -199,7 +201,7 @@ function findCrossing(
     return unavailable("Tracking began above this boundary, so its crossing was not observed.");
   }
   if (Math.abs(samples[0].progressMeters - heightMeters) <= 1e-6) {
-    return makeCrossing(result, samples, fraction, heightMeters, samples[0].rawTime);
+    return makeCrossing(result, samples, fraction, heightMeters, samples[0].rawTime, calibrationConfidence);
   }
 
   for (let index = 1; index < samples.length; index += 1) {
@@ -213,7 +215,7 @@ function findCrossing(
       const rise = current.progressMeters - previous.progressMeters;
       const amount = rise > 1e-9 ? (heightMeters - previous.progressMeters) / rise : 1;
       const rawTime = previous.rawTime + (current.rawTime - previous.rawTime) * clamp(amount, 0, 1);
-      return makeCrossing(result, samples, fraction, heightMeters, rawTime);
+      return makeCrossing(result, samples, fraction, heightMeters, rawTime, calibrationConfidence);
     }
   }
 
@@ -226,9 +228,13 @@ function makeCrossing(
   fraction: number,
   heightMeters: number,
   rawTime: number,
+  calibrationConfidence: Confidence,
 ): RouteCrossing {
   const coverage = intervalEvidence(samples, result.startRawTime, rawTime).coverage;
-  const confidence = confidenceForCoverage(Math.min(coverage, result.metrics.validCoverage));
+  const confidence = minimumConfidence(
+    confidenceForCoverage(Math.min(coverage, result.metrics.validCoverage)),
+    calibrationConfidence,
+  );
   return {
     fraction,
     heightMeters,

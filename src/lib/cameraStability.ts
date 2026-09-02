@@ -12,6 +12,7 @@ export interface CameraStabilityResult {
   confidence: Confidence;
   shiftXNormalized: number;
   shiftYNormalized: number;
+  scaleRatio: number;
   improvement: number;
   reason: string;
 }
@@ -41,15 +42,17 @@ export function assessCameraStability(
   }
 
   const zeroError = alignmentError(firstEdges, lastEdges, 0, 0);
-  let best = { dx: 0, dy: 0, error: zeroError };
-  for (let dy = -MAX_SHIFT; dy <= MAX_SHIFT; dy += 1) {
-    for (let dx = -MAX_SHIFT; dx <= MAX_SHIFT; dx += 1) {
-      if (dx === 0 && dy === 0) continue;
-      const error = alignmentError(firstEdges, lastEdges, dx, dy);
-      const magnitude = Math.hypot(dx, dy);
-      const bestMagnitude = Math.hypot(best.dx, best.dy);
-      if (error < best.error - 1e-6 || (Math.abs(error - best.error) <= 1e-6 && magnitude < bestMagnitude)) {
-        best = { dx, dy, error };
+  let best = { dx: 0, dy: 0, scale: 1, error: zeroError };
+  for (const scale of [0.94, 0.97, 1, 1.03, 1.06]) {
+    for (let dy = -MAX_SHIFT; dy <= MAX_SHIFT; dy += 1) {
+      for (let dx = -MAX_SHIFT; dx <= MAX_SHIFT; dx += 1) {
+        if (dx === 0 && dy === 0 && scale === 1) continue;
+        const error = alignmentError(firstEdges, lastEdges, dx, dy, scale);
+        const complexity = Math.hypot(dx, dy) + Math.abs(scale - 1) * 80;
+        const bestComplexity = Math.hypot(best.dx, best.dy) + Math.abs(best.scale - 1) * 80;
+        if (error < best.error - 1e-6 || (Math.abs(error - best.error) <= 1e-6 && complexity < bestComplexity)) {
+          best = { dx, dy, scale, error };
+        }
       }
     }
   }
@@ -58,7 +61,9 @@ export function assessCameraStability(
   const shiftXNormalized = best.dx / GRID_WIDTH;
   const shiftYNormalized = best.dy / GRID_HEIGHT;
   const shiftMagnitude = Math.hypot(shiftXNormalized, shiftYNormalized);
-  const moved = Math.hypot(best.dx, best.dy) >= 1.8 && shiftMagnitude >= 0.018 && improvement >= 0.16;
+  const translated = Math.hypot(best.dx, best.dy) >= 1.8 && shiftMagnitude >= 0.018;
+  const zoomed = Math.abs(best.scale - 1) >= 0.025;
+  const moved = (translated || zoomed) && improvement >= 0.16;
   const confidence: Confidence = improvement >= 0.28 ? "High" : "Medium";
   return {
     assessable: true,
@@ -66,9 +71,12 @@ export function assessCameraStability(
     confidence,
     shiftXNormalized: roundMetric(shiftXNormalized),
     shiftYNormalized: roundMetric(shiftYNormalized),
+    scaleRatio: roundMetric(best.scale),
     improvement: roundMetric(improvement),
     reason: moved
-      ? `Fixed wall edges shifted about ${(shiftMagnitude * 100).toFixed(1)}% of the frame between start and finish.`
+      ? zoomed
+        ? `Fixed wall edges changed scale by about ${(Math.abs(best.scale - 1) * 100).toFixed(1)}% between start and finish.`
+        : `Fixed wall edges shifted about ${(shiftMagnitude * 100).toFixed(1)}% of the frame between start and finish.`
       : "No meaningful global camera translation was found between start and finish.",
   };
 }
@@ -100,13 +108,15 @@ function alignmentError(
   last: Float32Array,
   dx: number,
   dy: number,
+  scale = 1,
 ): number {
   const differences: number[] = [];
   const margin = MAX_SHIFT + 2;
   for (let y = margin; y < GRID_HEIGHT - margin; y += 1) {
     for (let x = margin; x < GRID_WIDTH - margin; x += 1) {
-      const shiftedX = x + dx;
-      const shiftedY = y + dy;
+      const shiftedX = Math.round((x - GRID_WIDTH / 2) * scale + GRID_WIDTH / 2 + dx);
+      const shiftedY = Math.round((y - GRID_HEIGHT / 2) * scale + GRID_HEIGHT / 2 + dy);
+      if (shiftedX < 1 || shiftedX >= GRID_WIDTH - 1 || shiftedY < 1 || shiftedY >= GRID_HEIGHT - 1) continue;
       const firstValue = first[y * GRID_WIDTH + x];
       const lastValue = last[shiftedY * GRID_WIDTH + shiftedX];
       if (Math.max(firstValue, lastValue) < 6) continue;
@@ -133,6 +143,7 @@ function unavailable(reason: string): CameraStabilityResult {
     confidence: "None",
     shiftXNormalized: 0,
     shiftYNormalized: 0,
+    scaleRatio: 1,
     improvement: 0,
     reason,
   };

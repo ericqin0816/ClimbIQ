@@ -51,6 +51,18 @@ describe("Hold 10 height review estimate", () => {
     expect(estimateHold10HeightPassage(makeResult(frames), calibration).detected).toBe(true);
   });
 
+  it("confirms a continuous height passage when the visible hand changes", () => {
+    const before = frame(5, 8.05);
+    const crossing = frame(5.2, 8.45);
+    const confirmed = frame(5.4, 8.7);
+    crossing.landmarks = crossing.landmarks.map((landmark) => ({ ...landmark, index: landmark.index - 1 }));
+
+    const estimate = estimateHold10HeightPassage(makeResult([before, crossing, confirmed]), calibration);
+
+    expect(estimate.detected).toBe(true);
+    expect(estimate.hand).toBe("left");
+  });
+
   it("requires a valid wall calibration", () => {
     expect(estimateHold10HeightPassage(makeResult([]), undefined).detected).toBe(false);
   });

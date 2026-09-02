@@ -40,7 +40,16 @@
       "durationSeconds": 32.17,
       "start": { "rawTime": 7.13, "status": "accepted", "confidence": "High", "reviewedCorrect": true },
       "finish": { "rawTime": 17.48, "status": "accepted", "confidence": "High", "reviewedCorrect": true },
-      "hold10": { "status": "unavailable", "routeMatches": 8, "requiredRouteMatches": 10 },
+      "hold10": {
+        "status": "review-candidate",
+        "rawTime": 11.515,
+        "climbTime": 4.385,
+        "source": "continuous-hand-height-crossing",
+        "routeMatches": 8,
+        "requiredRouteMatches": 10,
+        "manualAcceptanceWorkflowTested": true,
+        "resultingHold10ToFinishSeconds": 5.965
+      },
       "com": {
         "status": "needs-review",
         "usableFrames": 42,

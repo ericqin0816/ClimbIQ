@@ -11,6 +11,7 @@ describe("fixed-camera stability audit", () => {
     expect(result.stable).toBe(true);
     expect(result.shiftXNormalized).toBe(0);
     expect(result.shiftYNormalized).toBe(0);
+    expect(result.scaleRatio).toBe(1);
   });
 
   it("detects a global camera pan", () => {
@@ -29,6 +30,15 @@ describe("fixed-camera stability audit", () => {
     const result = assessCameraStability(first, last);
     expect(result.assessable).toBe(true);
     expect(result.stable).toBe(true);
+  });
+
+  it("detects a global camera zoom", () => {
+    const first = patternedFrame();
+    const last = scaleFrame(first, 1.06);
+    const result = assessCameraStability(first, last);
+    expect(result.assessable).toBe(true);
+    expect(result.stable).toBe(false);
+    expect(Math.abs(result.scaleRatio - 1)).toBeGreaterThanOrEqual(0.025);
   });
 
   it("is insensitive to a frame-wide exposure offset", () => {
@@ -84,6 +94,25 @@ function translate(frame: CameraStabilityFrame, dx: number, dy: number): Mutable
       if (targetX < 0 || targetX >= frame.width || targetY < 0 || targetY >= frame.height) continue;
       const source = (y * frame.width + x) * 4;
       const target = (targetY * frame.width + targetX) * 4;
+      moved.data[target] = frame.data[source];
+      moved.data[target + 1] = frame.data[source + 1];
+      moved.data[target + 2] = frame.data[source + 2];
+    }
+  }
+  return moved;
+}
+
+function scaleFrame(frame: CameraStabilityFrame, scale: number): MutableFrame {
+  const moved = solidFrame(frame.width, frame.height, 72);
+  const centerX = (frame.width - 1) / 2;
+  const centerY = (frame.height - 1) / 2;
+  for (let y = 0; y < frame.height; y += 1) {
+    for (let x = 0; x < frame.width; x += 1) {
+      const sourceX = Math.round((x - centerX) / scale + centerX);
+      const sourceY = Math.round((y - centerY) / scale + centerY);
+      if (sourceX < 0 || sourceX >= frame.width || sourceY < 0 || sourceY >= frame.height) continue;
+      const source = (sourceY * frame.width + sourceX) * 4;
+      const target = (y * frame.width + x) * 4;
       moved.data[target] = frame.data[source];
       moved.data[target + 1] = frame.data[source + 1];
       moved.data[target + 2] = frame.data[source + 2];

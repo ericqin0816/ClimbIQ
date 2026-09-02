@@ -85,9 +85,18 @@ export async function detectTopFinishSignal({
 
   const times = sampleFramesInRange(searchStart, searchEnd, COARSE_FPS);
   const frames = await captureFrames(video, times, signal, (done, total) => onProgress?.("coarse", done, total));
+  // Physical top tracking needs the camera view from immediately after the
+  // accepted start as its structural reference. If a broadcast cuts or zooms
+  // to a different camera during the climb, comparing only with the first
+  // frame at +3 s can make the top of that cropped view look like the finish.
+  // A fixed phone view remains comparable; a scene change is rejected by the
+  // frame-wide structural guard inside analyzeTopContactFrames.
+  const referenceTime = Math.min(searchStart, Math.max(0, startSignalRawTime + 0.35));
+  const referenceFrames = await captureFrames(video, [referenceTime], signal, () => undefined);
+  const physicalReference = referenceFrames[0] ?? frames[0];
   const laneHintX = laneHintZone ? (laneHintZone.x1 + laneHintZone.x2) / 2 : undefined;
   const indicatorDiscovery = analyzeTopFinishFrames(frames, laneHintX, expectedFinishTime);
-  const contactDiscovery = analyzeTopContactFrames(frames, laneHintX);
+  const contactDiscovery = analyzeTopContactFrames([physicalReference, ...frames], laneHintX);
   const topPresence = contactDiscovery.candidates.find((candidate) => candidate.kind === "Unverified top presence");
   const indicatorLooksLikeReset = Boolean(
     topPresence && indicatorDiscovery.found && indicatorDiscovery.rawTime !== undefined &&
@@ -100,7 +109,7 @@ export async function detectTopFinishSignal({
       REFINE_FPS,
     );
     const refineFrames = await captureFrames(video, refineTimes, signal, (done, total) => onProgress?.("refine", done, total));
-    const refinedPresenceDiscovery = analyzeTopContactFrames([frames[0], ...refineFrames], laneHintX);
+    const refinedPresenceDiscovery = analyzeTopContactFrames([physicalReference, ...refineFrames], laneHintX);
     const refinedPresence = refinedPresenceDiscovery.candidates.find((candidate) =>
       candidate.kind === "Unverified top presence" || candidate.kind === "Physical top contact",
     );
@@ -124,7 +133,7 @@ export async function detectTopFinishSignal({
       REFINE_FPS,
     );
     const refineFrames = await captureFrames(video, refineTimes, signal, (done, total) => onProgress?.("refine", done, total));
-    const refinedContact = analyzeTopContactFrames([frames[0], ...refineFrames], laneHintX);
+    const refinedContact = analyzeTopContactFrames([physicalReference, ...refineFrames], laneHintX);
     const selectedContact = refinedContact.found ? refinedContact : contactDiscovery;
     return {
       result: topContactToResult(selectedContact, refineFrames.length),

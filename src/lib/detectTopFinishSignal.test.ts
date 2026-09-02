@@ -99,6 +99,18 @@ describe("perspective-aware upper finish indicator", () => {
     expect(result.found).toBe(false);
   });
 
+  it("rejects a finish-like trajectory after the camera cuts away from the start view", () => {
+    const laterCamera = makeContactFrames([8, 7, 5, 3, 2, 2, 4, 6]);
+    // The trajectory is plausible when evaluated inside only the cropped later
+    // shot, which is exactly why the post-start camera reference is required.
+    expect(analyzeTopContactFrames(laterCamera, 0.8).found).toBe(true);
+
+    const anchoredAcrossCut = [makeDifferentCameraFrame(), ...laterCamera.slice(1)];
+    const result = analyzeTopContactFrames(anchoredAcrossCut, 0.8);
+    expect(result.found).toBe(false);
+    expect(result.reason).toContain("continuous, occlusion-free");
+  });
+
   it("downgrades an isolated high-confidence upper light to frame review", () => {
     const result = requireUpperFinishCorroboration(finishResult(14.29), { found: false });
     expect(result.confidence).toBe("Medium");
@@ -212,4 +224,21 @@ function makeContactFrames(topRows: number[]): TopFinishFrame[] {
     return { time, width, height, data };
   };
   return [makeFrame(0), ...topRows.map((row, index) => makeFrame((index + 1) / 5, row))];
+}
+
+function makeDifferentCameraFrame(): TopFinishFrame {
+  const width = 30;
+  const height = 30;
+  const data = new Uint8ClampedArray(width * height * 4);
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const offset = (y * width + x) * 4;
+      const value = (x + y) % 2 === 0 ? 18 : 190;
+      data[offset] = value;
+      data[offset + 1] = value;
+      data[offset + 2] = value;
+      data[offset + 3] = 255;
+    }
+  }
+  return { time: 0, width, height, data };
 }

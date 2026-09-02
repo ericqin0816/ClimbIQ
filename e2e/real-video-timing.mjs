@@ -10,7 +10,9 @@ const defaultChromePath = process.platform === "darwin"
 const chromePath = process.env.CLIMBIQ_CHROME ?? defaultChromePath;
 const appUrl = process.env.CLIMBIQ_E2E_URL ?? "http://127.0.0.1:5173/";
 const videoDirectory = path.resolve(process.env.CLIMBIQ_VIDEO_DIR ?? "node_modules/.climbiq-private-videos");
-const requestedFiles = process.env.CLIMBIQ_BENCHMARK_FILES?.split(",").map((value) => value.trim()).filter(Boolean);
+const commandLineFiles = process.argv.slice(2).map((value) => value.trim()).filter(Boolean);
+const environmentFiles = process.env.CLIMBIQ_BENCHMARK_FILES?.split(",").map((value) => value.trim()).filter(Boolean);
+const requestedFiles = commandLineFiles.length ? commandLineFiles : environmentFiles;
 const port = 9334;
 const profile = `${process.env.TEMP ?? "C:/Windows/Temp"}/climbiq-timing-${Date.now()}`;
 const delay = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
@@ -160,11 +162,18 @@ async function runTiming(protocol, fileName) {
     };
     const buttons = [...document.querySelectorAll('button')];
     const reviewStart = buttons.find((button) => button.textContent.includes('Review suggested start'))?.textContent.trim() ?? null;
+    const finishSuggestion = [...document.querySelectorAll('.suggestion-card')]
+      .find((card) => card.querySelector('h3')?.textContent.trim() === 'Detected lane-light finish');
+    const finishStatus = [...document.querySelectorAll('.status-line')]
+      .map((line) => line.textContent.trim())
+      .find((text) => /finish|upper timing/i.test(text)) ?? '';
     return {
       start: marker('Start Signal'),
       firstMovement: marker('Earliest Visible Motion'),
       finish: marker('Finish Pad'),
       reviewStart,
+      finishStatus,
+      finishSuggestion: finishSuggestion?.innerText ?? '',
       status: document.querySelector('.quick-analysis-box .status-message')?.textContent.trim() ?? '',
       summary: document.querySelector('.run-summary')?.innerText ?? '',
     };
@@ -173,10 +182,15 @@ async function runTiming(protocol, fileName) {
 }
 
 async function main() {
+  const expectations = JSON.parse(await readFile(new URL("../benchmarks/real-video-results.json", import.meta.url), "utf8"));
+  const expectedById = new Map((expectations.trials ?? []).map((trial) => [trial.id, trial]));
   const available = (await readdir(videoDirectory))
     .filter((fileName) => /\.(mov|mp4|m4v)$/i.test(fileName))
     .sort();
-  const files = requestedFiles?.length ? requestedFiles : available;
+  // Extra exploratory clips can live beside the private regression set without
+  // silently becoming required benchmarks. Explicit file arguments still run
+  // them and report their observations as unbaselined.
+  const files = requestedFiles?.length ? requestedFiles : [...expectedById.keys()];
   if (!files.length) throw new Error(`No benchmark videos found in ${videoDirectory}.`);
   const missing = files.filter((fileName) => !available.includes(fileName));
   if (missing.length) throw new Error(`Benchmark videos not found: ${missing.join(", ")}`);
@@ -185,8 +199,6 @@ async function main() {
     await waitUntil(protocol.evaluate, `document.readyState === 'complete' && Boolean(document.querySelector('.upload-dropzone'))`, 15000, "app load");
     const outcomes = [];
     for (const fileName of files) outcomes.push(await runTiming(protocol, fileName));
-    const expectations = JSON.parse(await readFile(new URL("../benchmarks/real-video-results.json", import.meta.url), "utf8"));
-    const expectedById = new Map((expectations.trials ?? []).map((trial) => [trial.id, trial]));
     const assertions = outcomes.map((outcome) => validateOutcome(outcome, expectedById.get(outcome.fileName)));
     const failures = assertions.flatMap((assertion) => assertion.errors.map((error) => `${assertion.fileName}: ${error}`));
     console.log(JSON.stringify({ appUrl, videoDirectory, passed: failures.length === 0, assertions, outcomes }, null, 2));
@@ -198,7 +210,7 @@ async function main() {
 
 function validateOutcome(outcome, expected) {
   const errors = [];
-  if (!expected) return { fileName: outcome.fileName, errors: ["No benchmark expectation exists."] };
+  if (!expected) return { fileName: outcome.fileName, baselineStatus: "unbaselined", errors };
   const acceptedStart = parseTime(outcome.start?.rawTime);
   const reviewStart = parseFirstTime(outcome.reviewStart);
   if (expected.start?.status === "accepted") {
@@ -219,7 +231,7 @@ function validateOutcome(outcome, expected) {
       compareTime(errors, "review Finish boundary", parseFirstTime(outcome.status.match(/finish[^.]*?(\d+\.\d+)s/i)?.[0]), expected.finish.rawTime);
     }
   }
-  return { fileName: outcome.fileName, errors };
+  return { fileName: outcome.fileName, baselineStatus: "compared", errors };
 }
 
 function parseTime(value) {

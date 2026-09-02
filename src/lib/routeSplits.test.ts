@@ -108,6 +108,18 @@ describe("COM-derived route splits", () => {
       { rawTime: 0.3, progressMeters: 2, chunkId: 1 },
     ]);
   });
+
+  it("caps wall crossings and sections at the wall-calibration confidence", () => {
+    const result = makeResult(
+      Array.from({ length: 101 }, (_, index) => sample(index / 10, index * 0.15)),
+      0,
+      10,
+    );
+    const analysis = analyzeRouteSplits(result, 15, "Low");
+    expect(analysis.confidence).toBe("Low");
+    expect(analysis.halfway.confidence).toBe("Low");
+    expect(analysis.sections.every((section) => section.confidence === "Low")).toBe(true);
+  });
 });
 
 function sample(rawTime: number, heightMeters: number): BiomechanicsFrame {

@@ -23,6 +23,7 @@ import { estimateHold10HeightPassage } from "./lib/hold10HeightEstimate";
 import { resolveHold10Target } from "./lib/holdTarget";
 import { analyzePoseVideo, PoseAnalysisCancelledError } from "./lib/poseAnalysis";
 import { analyzeRouteSplits } from "./lib/routeSplits";
+import { sanitizeAnalysisSessionSettings } from "./lib/analysisSettings";
 import {
   alignStandardSpeedRouteWithFallback,
   type RouteAlignmentResult,
@@ -340,8 +341,10 @@ function App() {
   }, [timestamps]);
 
   const routeSplitAnalysis = useMemo(
-    () => effectiveBiomechanicsResult ? analyzeRouteSplits(effectiveBiomechanicsResult) : null,
-    [effectiveBiomechanicsResult],
+    () => effectiveBiomechanicsResult
+      ? analyzeRouteSplits(effectiveBiomechanicsResult, 15, biomechanics.calibration?.confidence ?? "High")
+      : null,
+    [biomechanics.calibration?.confidence, effectiveBiomechanicsResult],
   );
 
   const hold10Target = useMemo(
@@ -2401,18 +2404,19 @@ function App() {
     setSessionNotes(session.notes ?? "");
     setZones(session.zones ?? {});
     setStartLightCalibration(session.startLightCalibration ?? {});
-    setStartSearchStart(session.settings.startSearchStart);
-    setStartSearchEnd(session.settings.startSearchEnd);
-    setStartSensitivity(session.settings.startSensitivity);
-    setStartLightVisibility(session.settings.startLightVisibility);
-    setStartDetectionProfile(session.settings.startDetectionProfile);
-    setReactionTimeOffset(session.settings.reactionTimeOffset);
-    setStartSignalOffset(session.settings.startSignalOffset);
-    setMovementSensitivity(session.settings.movementSensitivity);
-    setFirstMovementDefinition(session.settings.firstMovementDefinition);
-    setCommittedLaunchMinDelay(session.settings.committedLaunchMinDelay);
-    setFirstMovementOffset(session.settings.firstMovementOffset);
-    setOfficialTotalTime(session.settings.officialTotalTime);
+    const safeSettings = sanitizeAnalysisSessionSettings(session.settings);
+    setStartSearchStart(safeSettings.startSearchStart);
+    setStartSearchEnd(safeSettings.startSearchEnd);
+    setStartSensitivity(safeSettings.startSensitivity);
+    setStartLightVisibility(safeSettings.startLightVisibility);
+    setStartDetectionProfile(safeSettings.startDetectionProfile);
+    setReactionTimeOffset(safeSettings.reactionTimeOffset);
+    setStartSignalOffset(safeSettings.startSignalOffset);
+    setMovementSensitivity(safeSettings.movementSensitivity);
+    setFirstMovementDefinition(safeSettings.firstMovementDefinition);
+    setCommittedLaunchMinDelay(safeSettings.committedLaunchMinDelay);
+    setFirstMovementOffset(safeSettings.firstMovementOffset);
+    setOfficialTotalTime(safeSettings.officialTotalTime);
     setTimestamps(sanitizeTimestampSequence(
       mergeTimestampDefaults(session.timestamps ?? []),
       session.videoMetadata?.duration,
@@ -2541,10 +2545,15 @@ function App() {
         throw new Error("This file is not a ClimbIQ analysis session.");
       }
 
-      const session = {
+      const session: SavedAnalysisSession = {
         ...parsedSession,
         id: parsedSession.id || createSessionId(),
         updatedAt: new Date().toISOString(),
+        settings: sanitizeAnalysisSessionSettings(parsedSession.settings),
+        timestamps: sanitizeTimestampSequence(
+          mergeTimestampDefaults(parsedSession.timestamps),
+          parsedSession.videoMetadata?.duration,
+        ),
       };
       const next = [session, ...savedSessions.filter((item) => item.id !== session.id)].sort((a, b) =>
         b.updatedAt.localeCompare(a.updatedAt),
@@ -3460,21 +3469,25 @@ function App() {
                 <div>
                   <strong>Hold 10 hand contact</strong>
                   <span>
-                    {hold10Contact?.detected && hold10Contact.climbTime !== undefined
-                      ? `${hold10Contact.climbTime.toFixed(3)}s after start · ${hold10Contact.hand} hand · ${hold10Contact.distanceMeters?.toFixed(2)} m from the projected hold center${hold10Contact.evidence?.contactScore === undefined ? "" : ` · ${hold10Contact.evidence.contactScore.toFixed(0)}/100 evidence`}`
-                      : hold10HeightEstimate?.detected && hold10HeightEstimate.climbTime !== undefined
-                        ? `Review estimate at ${hold10HeightEstimate.climbTime.toFixed(3)}s after start · ${hold10HeightEstimate.hand} hand crossed Hold 10 height`
-                        : hold10Contact?.reason ?? (hold10Target.source === "standard-template"
-                          ? "Hold 10 timing is paused until the visible route aligns or you mark a manual Hold 10 zone."
-                          : "Run center-of-mass analysis to check hand contact with Hold 10.")}
+                    {acceptedHold10.climbTime !== null
+                      ? `Accepted at ${acceptedHold10.climbTime.toFixed(3)}s after start · ${acceptedHold10.source} · ${acceptedHold10.confidence} confidence`
+                      : hold10Contact?.detected && hold10Contact.climbTime !== undefined
+                        ? `${hold10Contact.climbTime.toFixed(3)}s after start · ${hold10Contact.hand} hand · ${hold10Contact.distanceMeters?.toFixed(2)} m from the projected hold center${hold10Contact.evidence?.contactScore === undefined ? "" : ` · ${hold10Contact.evidence.contactScore.toFixed(0)}/100 evidence`}`
+                        : hold10HeightEstimate?.detected && hold10HeightEstimate.climbTime !== undefined
+                          ? `Review estimate at ${hold10HeightEstimate.climbTime.toFixed(3)}s after start · ${hold10HeightEstimate.hand} hand crossed Hold 10 height`
+                          : hold10HeightEstimate?.reason ?? hold10Contact?.reason ?? (hold10Target.source === "standard-template"
+                            ? "Hold 10 timing is paused until the visible route aligns or you mark a manual Hold 10 zone."
+                            : "Run center-of-mass analysis to check hand contact with Hold 10.")}
                   </span>
-                  <small>{hold10Target.source === "standard-template"
+                  <small>{acceptedHold10.rawTime !== null
+                    ? "The accepted contact frame drives the two race-phase splits below. Reopen it from the marker editor to adjust or clear it."
+                    : hold10Target.source === "standard-template"
                     ? hold10HeightEstimate?.detected
                       ? "Height crossing is only a review aid; it is not treated as Hold 10 contact until you confirm the exact frame."
                       : "The generic diagram is used only as a search prior; ClimbIQ will not time contact from its unregistered position."
                     : hold10Target.reason}</small>
                 </div>
-                {hold10Contact?.detected && hold10Contact.rawTime !== undefined && (
+                {acceptedHold10.rawTime === null && hold10Contact?.detected && hold10Contact.rawTime !== undefined && (
                   <button onClick={() => reviewTimestamp({
                     label: "Detected Hold 10 hand contact",
                     suggestedRawTime: hold10Contact.rawTime!,
@@ -3489,7 +3502,7 @@ function App() {
                     Review Hold 10
                   </button>
                 )}
-                {!hold10Contact?.detected && hold10HeightEstimate?.detected && hold10HeightEstimate.rawTime !== undefined && (
+                {acceptedHold10.rawTime === null && !hold10Contact?.detected && hold10HeightEstimate?.detected && hold10HeightEstimate.rawTime !== undefined && (
                   <button onClick={() => reviewTimestamp({
                     label: "Possible Hold 10 height passage",
                     suggestedRawTime: hold10HeightEstimate.rawTime!,
@@ -4656,6 +4669,12 @@ function datasetToSavedSession(dataset: any): SavedAnalysisSession {
   const video = dataset.video ?? {};
   const zonesFromDataset = dataset.zones ?? {};
   const settings = dataset.settings ?? {};
+  const sanitizedSettings = sanitizeAnalysisSessionSettings({
+    ...settings,
+    officialTotalTime: video.officialTotalTime !== null && video.officialTotalTime !== undefined
+      ? String(video.officialTotalTime)
+      : settings.officialTotalTime,
+  });
   const timestamps = timestampsFromDataset(dataset.acceptedTimestamps ?? [], Number(video.duration) || undefined);
 
   return {
@@ -4692,20 +4711,7 @@ function datasetToSavedSession(dataset: any): SavedAnalysisSession {
       calibrationFrameAfterTime: dataset.calibration?.calibrationFrameAfterTime ?? undefined,
       colorDelta: dataset.calibration?.colorDelta ?? undefined,
     },
-    settings: {
-      startSearchStart: Number(settings.startSearchStart) || 0,
-      startSearchEnd: Number(settings.startSearchEnd) || 8,
-      startSensitivity: settings.startSensitivity ?? "medium",
-      startLightVisibility: settings.startLightVisibility ?? "clear",
-      startDetectionProfile: settings.startDetectionProfile ?? "auto",
-      reactionTimeOffset: Number(settings.reactionTimeOffset) || 0.2,
-      startSignalOffset: Number(settings.startSignalOffset) || 0,
-      movementSensitivity: settings.movementSensitivity ?? "medium",
-      firstMovementDefinition: settings.firstMovementDefinition ?? "earliest",
-      committedLaunchMinDelay: Number(settings.committedLaunchMinDelay) || 0.1,
-      firstMovementOffset: Number(settings.firstMovementOffset) || 0,
-      officialTotalTime: video.officialTotalTime !== null && video.officialTotalTime !== undefined ? String(video.officialTotalTime) : settings.officialTotalTime ?? "",
-    },
+    settings: sanitizedSettings,
     timestamps,
     splitCalculations: dataset.splitCalculations ?? {},
     biomechanics: sanitizeBiomechanicsSession(dataset.biomechanics),
@@ -4787,7 +4793,17 @@ function readSavedSessions(): SavedAnalysisSession[] {
     if (!Array.isArray(parsed)) {
       return [];
     }
-    return parsed.filter(isSavedAnalysisSession).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+    return parsed
+      .filter(isSavedAnalysisSession)
+      .map((session) => ({
+        ...session,
+        settings: sanitizeAnalysisSessionSettings(session.settings),
+        timestamps: sanitizeTimestampSequence(
+          mergeTimestampDefaults(session.timestamps),
+          session.videoMetadata?.duration,
+        ),
+      }))
+      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
   } catch {
     return [];
   }

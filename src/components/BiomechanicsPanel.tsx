@@ -4,6 +4,7 @@ import type {
   BiomechanicsFrame,
   BiomechanicsResult,
   BiomechanicsSession,
+  Confidence,
   NormalizedPoint,
   NormalizedZone,
   VideoMetadata,
@@ -636,7 +637,12 @@ export function BiomechanicsPanel({
       )}
 
       {visibleResult && !resultStale && (
-        <BiomechanicsResultView result={visibleResult} currentTime={currentTime} onJump={onJump} />
+        <BiomechanicsResultView
+          result={visibleResult}
+          calibrationConfidence={session.calibration?.confidence ?? "High"}
+          currentTime={currentTime}
+          onJump={onJump}
+        />
       )}
     </div>
   );
@@ -806,16 +812,18 @@ function ReadinessItem({ ready, label, detail }: { ready: boolean; label: string
 
 function BiomechanicsResultView({
   result,
+  calibrationConfidence,
   currentTime,
   onJump,
 }: {
   result: BiomechanicsResult;
+  calibrationConfidence: Confidence;
   currentTime: number;
   onJump: (time: number) => void;
 }) {
   const { metrics } = result;
   const hasComData = result.frames.some((frame) => Boolean(frame.smoothedWallCom));
-  const routeSplits = analyzeRouteSplits(result);
+  const routeSplits = analyzeRouteSplits(result, 15, calibrationConfidence);
   const selectedFrames = metrics.selectedFrames ?? metrics.detectedFrames;
   const resultSummary = metrics.validFrames === 0
     ? metrics.detectedFrames === 0
@@ -1049,7 +1057,9 @@ function RouteSplitsPanel({
   onJump: (time: number) => void;
 }) {
   const slowest = analysis.sections.find((section) => section.id === analysis.slowestSectionId);
-  const pacingMessage = slowest?.sectionTimeSeconds !== undefined
+  const pacingMessage = analysis.confidence === "Low" || analysis.confidence === "None"
+    ? "Wall-section timing remains review-only because tracking or wall calibration confidence is too low for a pacing conclusion."
+    : slowest?.sectionTimeSeconds !== undefined
     ? `${slowest.label} took the most time at ${slowest.sectionTimeSeconds.toFixed(3)}s. Review it first.`
     : analysis.evenPacing
       ? "Your three section times were close, so no single wall third stands out as the main slowdown."
@@ -1063,7 +1073,7 @@ function RouteSplitsPanel({
           <h4 id="route-splits-heading">Where time went</h4>
         </div>
         <span className={`split-confidence confidence-${analysis.confidence.toLowerCase()}`}>
-          {analysis.confidence === "None" ? "Not enough tracking" : `${analysis.confidence} tracking confidence`}
+          {analysis.confidence === "None" ? "Not enough split evidence" : `${analysis.confidence} split confidence`}
         </span>
       </div>
       <p className="route-pacing-summary">{pacingMessage}</p>

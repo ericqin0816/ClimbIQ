@@ -45,29 +45,35 @@ export function estimateHold10HeightPassage(
     .filter((frame) => frame.poseSelected !== false && frame.landmarks.length && Number.isFinite(frame.rawTime))
     .sort((left, right) => left.rawTime - right.rawTime);
 
-  const candidates = (["left", "right"] as const).flatMap((hand) => {
-    const observations = frames.flatMap((frame) => {
-      const height = robustHandHeight(frame, HAND_POINTS[hand], validation.matrix!);
-      return height === undefined ? [] : [{ rawTime: frame.rawTime, height }];
-    });
-    for (let index = 1; index < observations.length; index += 1) {
-      const previous = observations[index - 1];
-      const current = observations[index];
-      const gap = current.rawTime - previous.rawTime;
-      if (gap <= 0 || gap > 0.25) continue;
-      if (previous.height > targetHeight - 0.18 || current.height < targetHeight) continue;
-      const confirmation = observations.slice(index, index + 3)
-        .filter((sample) => sample.rawTime - current.rawTime <= 0.3 && sample.height >= targetHeight - 0.12);
-      if (confirmation.length < 2) continue;
-      const rise = current.height - previous.height;
-      const amount = rise > 1e-6 ? (targetHeight - previous.height) / rise : 1;
-      const rawTime = roundTime(previous.rawTime + gap * clamp(amount, 0, 1));
-      return [{ hand, rawTime, rise, confirmations: confirmation.length }];
-    }
-    return [];
-  }).sort((left, right) => left.rawTime - right.rawTime || right.rise - left.rise);
-
-  const selected = candidates[0];
+  // Use the higher visible hand on each frame. At 5 fps the climber can move
+  // one hand through the target height and have only the other hand visible on
+  // the next sample. Athlete-level continuity is sufficient for this
+  // review-only estimate; it still does not claim contact with the hold.
+  const observations = frames.flatMap((frame) => {
+    const left = robustHandHeight(frame, HAND_POINTS.left, validation.matrix!);
+    const right = robustHandHeight(frame, HAND_POINTS.right, validation.matrix!);
+    if (left === undefined && right === undefined) return [];
+    const hand = right === undefined || (left !== undefined && left >= right) ? "left" as const : "right" as const;
+    return [{ rawTime: frame.rawTime, height: hand === "left" ? left! : right!, hand }];
+  });
+  let selected: { hand: "left" | "right"; rawTime: number } | undefined;
+  for (let index = 1; index < observations.length; index += 1) {
+    const previous = observations[index - 1];
+    const current = observations[index];
+    const gap = current.rawTime - previous.rawTime;
+    if (gap <= 0 || gap > 0.25) continue;
+    if (previous.height > targetHeight - 0.18 || current.height < targetHeight) continue;
+    const confirmation = observations.slice(index, index + 3)
+      .filter((sample) => sample.rawTime - current.rawTime <= 0.3 && sample.height >= targetHeight - 0.12);
+    if (confirmation.length < 2) continue;
+    const rise = current.height - previous.height;
+    const amount = rise > 1e-6 ? (targetHeight - previous.height) / rise : 1;
+    selected = {
+      hand: current.hand,
+      rawTime: roundTime(previous.rawTime + gap * clamp(amount, 0, 1)),
+    };
+    break;
+  }
   if (!selected) {
     return unavailable("No continuous tracked hand crossing of Hold 10 height was observed. ClimbIQ will not guess across a tracking gap.");
   }

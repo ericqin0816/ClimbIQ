@@ -44,6 +44,7 @@ const report = {
   },
   hold10: {
     available: trials.filter((trial) => trial.hold10?.status === "available").length,
+    reviewCandidates: trials.filter((trial) => trial.hold10?.status === "review-candidate").length,
     unavailable: trials.filter((trial) => trial.hold10?.status === "unavailable").length,
   },
 };

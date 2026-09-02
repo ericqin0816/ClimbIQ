@@ -35,10 +35,13 @@ The September 2 evaluation reran every clip from a fresh page using the producti
 | Repeated 10 fps COM runs | 43–45/104 usable frames (41.3–43.3%) |
 | 15 fps complete COM run | 0/156 usable frames (0%) |
 | Automatic Hold 10 contacts on the complete COM run | 0 |
+| Review-level Hold 10 height candidates | 1 (11.515 s raw / 4.385 s after start) |
 
 This is a precision-first regression sample, not a population accuracy claim. Five related phone recordings are not enough to estimate general accuracy. The next useful dataset should contain labeled start, Hold 10 contact, and finish frames from different phones, gyms, lanes, lighting conditions, and camera angles.
 
-The complete `IMG_9199.MOV` run exposed the largest remaining data limitation: timing was stable at 7.130 s → 17.480 s across repeated runs, but visual route registration consistently found only 8 of the 10 matches required by policy, so Hold 10 contact stayed unavailable. COM tracking changed sharply with sample rate: 5 fps produced 42/52 usable frames (80.8%) and recovered every wall-height split, 10 fps produced only 43–45/104 (41.3–43.3%), and 15 fps failed identity selection. The measured 5 fps setting is now the phone-video default; 10/15 fps remain advanced options. ClimbIQ keeps missing contact outputs explicit instead of substituting a wall-height estimate for Hold 10.
+The complete `IMG_9199.MOV` run exposed the largest remaining data limitation: timing was stable at 7.130 s → 17.480 s across repeated runs, but visual route registration consistently found only 8 of the 10 matches required by policy, so Hold 10 contact could not be accepted automatically. COM tracking changed sharply with sample rate: 5 fps produced 42/52 usable frames (80.8%) and recovered every wall-height split, 10 fps produced only 43–45/104 (41.3–43.3%), and 15 fps failed identity selection. The measured 5 fps setting is now the phone-video default; 10/15 fps remain advanced options.
+
+With the improved 5 fps track, the review-only hand-height fallback found a continuous crossing at 11.515 s raw (4.385 s after Start). Reviewing and accepting that frame in the UI produced 4.385 s Start → Hold 10 and 5.965 s Hold 10 → Finish. The independent 7.5 m COM-height crossing was 4.409 s, 0.024 s later; they remain separately labeled instead of treating that near-agreement as proof of contact. This remains a human-confirmed workflow rather than an automatic contact claim because Hold 10 itself was not visually registered.
 
 ## Acceptance policy
 
@@ -54,3 +57,9 @@ Automatic timestamps are intentionally precision-first:
 ## Automated coverage
 
 The test suite includes tiny upper indicators, exposure changes, transient and full-frame occlusions, frame-level transition refinement, physical top reach/descent, missing descent, and automatic-start body-audit cases. Run it with `npm test`.
+
+The browser timing runner executes only the five IDs recorded in the benchmark JSON by default, so extra research clips can safely live in the private video directory. Run one new clip without claiming a baseline using:
+
+```bash
+npm run benchmark:timing -- new-race-clip.mp4
+```
