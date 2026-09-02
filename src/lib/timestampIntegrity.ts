@@ -18,6 +18,13 @@ export interface TimestampAcceptanceResult {
   reason?: string;
 }
 
+const INTERMEDIATE_MARKER_ORDER: TimestampMarker["id"][] = [
+  "firstMovement",
+  "committedLaunch",
+  "firstHold",
+  "hold10",
+];
+
 export function applyTimestampAcceptance(
   timestamps: TimestampMarker[],
   options: TimestampAcceptanceOptions,
@@ -38,7 +45,7 @@ export function applyTimestampAcceptance(
   if (options.id !== "startSignal" && startRawTime === null) {
     return rejected(timestamps, "Set Start Signal before accepting a derived timing marker.");
   }
-  if (options.id !== "startSignal" && roundedRawTime < startRawTime! - 0.001) {
+  if (options.id !== "startSignal" && roundedRawTime < startRawTime!) {
     return rejected(timestamps, "A climb marker cannot occur before the accepted Start Signal.");
   }
   if (options.id === "finishPad" && roundedRawTime <= startRawTime! + 0.001) {
@@ -47,6 +54,21 @@ export function applyTimestampAcceptance(
   if (options.id !== "startSignal" && options.id !== "finishPad" && finishRawTime !== null &&
       roundedRawTime >= finishRawTime - 0.001) {
     return rejected(timestamps, "This marker must occur before the accepted Finish Pad time.");
+  }
+  const intermediateIndex = INTERMEDIATE_MARKER_ORDER.indexOf(options.id);
+  if (intermediateIndex >= 0) {
+    const previous = [...INTERMEDIATE_MARKER_ORDER.slice(0, intermediateIndex)].reverse()
+      .map((id) => getMarker(timestamps, id))
+      .find((marker) => marker?.rawTime !== null && marker?.rawTime !== undefined);
+    const next = INTERMEDIATE_MARKER_ORDER.slice(intermediateIndex + 1)
+      .map((id) => getMarker(timestamps, id))
+      .find((marker) => marker?.rawTime !== null && marker?.rawTime !== undefined);
+    if (previous?.rawTime !== null && previous?.rawTime !== undefined && roundedRawTime < previous.rawTime) {
+      return rejected(timestamps, `${getMarker(timestamps, options.id)?.label ?? "This marker"} cannot occur before ${previous.label}.`);
+    }
+    if (next?.rawTime !== null && next?.rawTime !== undefined && roundedRawTime > next.rawTime) {
+      return rejected(timestamps, `${getMarker(timestamps, options.id)?.label ?? "This marker"} cannot occur after ${next.label}.`);
+    }
   }
 
   let next = timestamps.map((marker) => ({ ...marker }));
@@ -98,7 +120,9 @@ export function sanitizeTimestampSequence(
   const rawIsValid = (rawTime: number | null) => rawTime === null || (
     Number.isFinite(rawTime) && rawTime >= 0 && (!durationValid || rawTime <= durationSeconds! + 0.001)
   );
-  next = next.map((marker) => rawIsValid(marker.rawTime) ? sanitizeEvidenceLabels(marker) : clearMarker(marker));
+  next = next.map((marker) => rawIsValid(marker.rawTime)
+    ? sanitizeEvidenceMetadata(marker, durationValid ? durationSeconds : undefined)
+    : clearMarker(marker));
   // Older versions could write detector proposals directly into Hold 10. A
   // restored proposal is not reviewed evidence and cannot define phase splits.
   next = next.map((marker) => isLegacyAutomaticHold10Marker(marker) ? clearMarker(marker) : marker);
@@ -113,12 +137,22 @@ export function sanitizeTimestampSequence(
   const validFinish = getMarker(next, "finishPad")?.rawTime ?? null;
   next = next.map((marker) => {
     if (marker.id === "startSignal" || marker.rawTime === null) return marker;
-    if (marker.rawTime < start.rawTime! - 0.001) return clearMarker(marker);
+    if (marker.rawTime < start.rawTime!) return clearMarker(marker);
     if (marker.id !== "finishPad" && validFinish !== null && marker.rawTime >= validFinish - 0.001) {
       return clearMarker(marker);
     }
     return marker;
   });
+  let lastOrderedRawTime = start.rawTime;
+  for (const id of INTERMEDIATE_MARKER_ORDER) {
+    const marker = getMarker(next, id);
+    if (!marker || marker.rawTime === null) continue;
+    if (marker.rawTime < lastOrderedRawTime) {
+      next = next.map((item) => item.id === id ? clearMarker(item) : item);
+    } else {
+      lastOrderedRawTime = marker.rawTime;
+    }
+  }
   return recalculateTimestampClimbs(next);
 }
 
@@ -147,7 +181,7 @@ function clearMarker(marker: TimestampMarker): TimestampMarker {
   };
 }
 
-function sanitizeEvidenceLabels(marker: TimestampMarker): TimestampMarker {
+function sanitizeEvidenceMetadata(marker: TimestampMarker, durationSeconds?: number): TimestampMarker {
   const sources: TimestampSource[] = [
     "Not set", "Manual", "Start light detection", "Fused start detection", "Motion-based estimate",
     "Body motion detection", "Finish light detection", "Official total time", "COM halfway estimate",
@@ -158,7 +192,18 @@ function sanitizeEvidenceLabels(marker: TimestampMarker): TimestampMarker {
     ...marker,
     source: sources.includes(marker.source) ? marker.source : marker.rawTime === null ? "Not set" : "Manual",
     confidence: confidences.includes(marker.confidence) ? marker.confidence : marker.rawTime === null ? "None" : "Low",
+    detectedRawTime: finiteInVideo(marker.detectedRawTime, durationSeconds),
+    offsetApplied: typeof marker.offsetApplied === "number" && Number.isFinite(marker.offsetApplied)
+      ? marker.offsetApplied
+      : undefined,
+    note: typeof marker.note === "string" ? marker.note.slice(0, 4000) : undefined,
   };
+}
+
+function finiteInVideo(value: unknown, durationSeconds?: number): number | undefined {
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) return undefined;
+  if (durationSeconds !== undefined && value > durationSeconds + 0.001) return undefined;
+  return value;
 }
 
 function getMarker(timestamps: TimestampMarker[], id: TimestampMarker["id"]): TimestampMarker | undefined {

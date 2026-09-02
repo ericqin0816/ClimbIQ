@@ -54,6 +54,12 @@ describe("analysis session settings", () => {
     expect(sanitizeAnalysisSessionSettings({ officialTotalTime: 6.18 }).officialTotalTime).toBe("6.18");
   });
 
+  it("drops invalid persisted official totals", () => {
+    expect(sanitizeAnalysisSessionSettings({ officialTotalTime: "not-a-time" }).officialTotalTime).toBe("");
+    expect(sanitizeAnalysisSessionSettings({ officialTotalTime: "0" }).officialTotalTime).toBe("");
+    expect(sanitizeAnalysisSessionSettings({ officialTotalTime: " 6.180 " }).officialTotalTime).toBe("6.180");
+  });
+
   it("returns complete defaults for missing input", () => {
     expect(sanitizeAnalysisSessionSettings(null)).toEqual(DEFAULT_ANALYSIS_SESSION_SETTINGS);
   });

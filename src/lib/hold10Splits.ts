@@ -6,6 +6,8 @@ export interface Hold10PhaseSplits {
   hold10ToFinishSeconds?: number;
   totalSeconds?: number;
   hold10Share?: number;
+  phaseDifferenceSeconds?: number;
+  slowerPhase?: "start-to-hold10" | "hold10-to-finish" | "balanced";
   confidence: Confidence;
   reason: string;
 }
@@ -41,12 +43,20 @@ export function calculateHold10PhaseSplits(
   const startToHold10Seconds = roundTime(hold10 - start);
   const hold10ToFinishSeconds = roundTime(finish - hold10);
   const totalSeconds = roundTime(finish - start);
+  const phaseDifferenceSeconds = roundTime(Math.abs(startToHold10Seconds - hold10ToFinishSeconds));
+  const slowerPhase = phaseDifferenceSeconds <= 0.05
+    ? "balanced"
+    : startToHold10Seconds > hold10ToFinishSeconds
+      ? "start-to-hold10"
+      : "hold10-to-finish";
   return {
     available: true,
     startToHold10Seconds,
     hold10ToFinishSeconds,
     totalSeconds,
     hold10Share: roundTime(startToHold10Seconds / totalSeconds),
+    phaseDifferenceSeconds,
+    slowerPhase,
     confidence: hold10Confidence,
     reason: "Race phases use the accepted start, verified Hold 10 hand contact, and accepted finish.",
   };

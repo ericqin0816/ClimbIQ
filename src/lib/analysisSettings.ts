@@ -37,9 +37,7 @@ export function sanitizeAnalysisSessionSettings(value: unknown): AnalysisSession
     firstMovementDefinition: oneOf(candidate.firstMovementDefinition, ["earliest", "committed"] as const, "earliest"),
     committedLaunchMinDelay: bounded(candidate.committedLaunchMinDelay, 0, 2, 0.1),
     firstMovementOffset: bounded(candidate.firstMovementOffset, -2, 2, 0),
-    officialTotalTime: typeof candidate.officialTotalTime === "string"
-      ? candidate.officialTotalTime
-      : finiteNonNegativeString(candidate.officialTotalTime),
+    officialTotalTime: finitePositiveString(candidate.officialTotalTime),
   };
 }
 
@@ -59,8 +57,11 @@ export function resolveStartSearchWindow(
   };
 }
 
-function finiteNonNegativeString(value: unknown): string {
-  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? String(value) : "";
+function finitePositiveString(value: unknown): string {
+  if (typeof value !== "number" && typeof value !== "string") return "";
+  const text = String(value).trim();
+  const number = Number(text);
+  return text && Number.isFinite(number) && number > 0 ? text : "";
 }
 
 function bounded(value: unknown, minimum: number, maximum: number, fallback: number): number {

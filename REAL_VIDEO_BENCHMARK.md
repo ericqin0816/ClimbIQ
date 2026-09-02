@@ -28,6 +28,7 @@ The September 2 evaluation reran every clip from a fresh page using the producti
 | Videos evaluated | 5 |
 | Starts automatically accepted | 2 |
 | Known false starts automatically accepted | 0 |
+| Reviewed automatic-start precision | 2/2 in this sample; 95% Wilson interval 34.2%–100% |
 | Starts conservatively sent to review | 3 |
 | Accepted-start clips with an automatic High finish | 1/2 |
 | Accepted-start clips with a bounded review finish | 1/2 |
@@ -43,8 +44,8 @@ This is a precision-first regression sample, not a population accuracy claim. Fi
 
 Six short 720p race crops from World Climbing's [Chamonix 2026 speed finals](https://www.youtube.com/watch?v=RvZXoTVxGBs) were also tested locally: three women's attempts and three men's attempts. These are kept in `benchmarks/public-broadcast-results.json` and summarized separately because a moving multi-camera broadcast is a different input class from a fixed phone recording.
 
-- All six start cues remained review-only; frame inspection showed that they were broadcast cuts or already-underway motion rather than safe exact start frames.
-- No known-false public start was automatically accepted. The full-frame audit measured 31.0%–79.1% structural change across four proposed cues and labeled them as camera cuts instead of treating the edit as athlete launch motion. One other cue had no reliable lane-local launch.
+- All six start cues remained review-only. They are recorded as unverified rather than mislabeled as confirmed timing errors: broadcast edits and incomplete lane-local evidence make them unsafe automatic ground truth even when an underlying beep may be real.
+- No unsafe public start was automatically accepted. The full-frame audit measured 31.0%–79.1% structural change across four proposed cues and labeled them as camera cuts instead of treating the edit as athlete launch motion. One other cue had no reliable lane-local launch.
 - The remaining clip exposed a late audio/light cue: the climber was already launching, but the estimated movement timestamp followed the cue by only 0.033 s. The [World Climbing competition rule](https://images.ifsc-climbing.org/ifsc/image/private/t_q_good/prd/jaq7awz9jmqwpddwnbpr.pdf) defining sub-0.100 s reactions as false starts is now a conservative automatic-acceptance floor, so this candidate is review-only too.
 - Before the camera-reference guard, one mid-wall reframe produced a false 13.983 s physical-finish review boundary, only 3.100 s after Start despite the official winning time being 6.20 s.
 - Anchoring physical top tracking to the post-start camera view removed that false boundary. The detector now reports no verified finish for the moving-camera crop instead of supplying an inaccurate time.
@@ -53,7 +54,7 @@ This stress test supports the current precision-first policy: fixed-camera foota
 
 The complete `IMG_9199.MOV` run exposed the largest remaining data limitation: timing was stable at 7.130 s → 17.480 s across repeated runs, but visual route registration consistently found only 8 of the 10 matches required by policy, so Hold 10 contact could not be accepted automatically. COM tracking changed sharply with sample rate: 5 fps produced 42/52 usable frames (80.8%) and recovered every wall-height split, 10 fps produced only 43–45/104 (41.3–43.3%), and 15 fps failed identity selection. The measured 5 fps setting is now the phone-video default; 10/15 fps remain advanced options.
 
-With the improved 5 fps track, the review-only hand-height fallback found a continuous crossing at 11.515 s raw (4.385 s after Start). Reviewing and accepting that frame in the UI produced 4.385 s Start → Hold 10 and 5.965 s Hold 10 → Finish. The independent 7.5 m COM-height crossing was 4.409 s, 0.024 s later; they remain separately labeled instead of treating that near-agreement as proof of contact. This remains a human-confirmed workflow rather than an automatic contact claim because Hold 10 itself was not visually registered.
+With the improved 5 fps track, the review-only hand-height fallback found a continuous crossing at 11.515 s raw (4.385 s after Start). Reviewing and accepting that frame in the UI produced 4.385 s Start → Hold 10 and 5.965 s Hold 10 → Finish: 42.4% of the race before Hold 10 and 57.6% after, with the top phase taking 1.580 s longer. The independent 7.5 m COM-height crossing was 4.409 s, 0.024 s later; they remain separately labeled instead of treating that near-agreement as proof of contact. This remains a human-confirmed workflow rather than an automatic contact claim because Hold 10 itself was not visually registered.
 
 ## Acceptance policy
 

@@ -29,6 +29,10 @@ const report = {
     reviewedAcceptancePrecision: acceptedStarts.length
       ? knownCorrectAcceptedStarts.length / acceptedStarts.length
       : null,
+    reviewedAcceptancePrecisionWilson95: wilsonInterval(
+      knownCorrectAcceptedStarts.length,
+      acceptedStarts.length,
+    ),
   },
   finish: {
     accepted: acceptedFinishes.length,
@@ -58,6 +62,27 @@ if (knownFalseAcceptedStarts.length || knownFalseAcceptedFinishes.length) {
   process.exitCode = 1;
 }
 
+function wilsonInterval(successes, total, z = 1.96) {
+  if (!Number.isInteger(successes) || !Number.isInteger(total) || total <= 0 || successes < 0 || successes > total) {
+    return null;
+  }
+  const estimate = successes / total;
+  const zSquared = z * z;
+  const denominator = 1 + zSquared / total;
+  const center = (estimate + zSquared / (2 * total)) / denominator;
+  const margin = z * Math.sqrt((estimate * (1 - estimate) + zSquared / (4 * total)) / total) / denominator;
+  return {
+    lower: roundRate(Math.max(0, center - margin)),
+    upper: roundRate(Math.min(1, center + margin)),
+    successes,
+    total,
+  };
+}
+
+function roundRate(value) {
+  return Math.round(value * 1000) / 1000;
+}
+
 function summarizePublicBroadcast(research) {
   const publicTrials = research.trials ?? [];
   const accepted = publicTrials.filter((trial) => trial.start?.status === "accepted");
@@ -72,7 +97,8 @@ function summarizePublicBroadcast(research) {
     acceptedStarts: accepted.length,
     reviewOnlyStarts: reviewed.length,
     knownFalseAcceptedStarts: accepted.filter((trial) => trial.start?.reviewedCorrect === false).length,
-    knownFalseReviewCandidates: reviewed.filter((trial) => trial.start?.reviewedCorrect === false).length,
+    manuallyConfirmedFalseReviewCandidates: reviewed.filter((trial) => trial.start?.reviewedCorrect === false).length,
+    unverifiedReviewCandidates: reviewed.filter((trial) => trial.start?.reviewedCorrect == null).length,
     reactionCrossChecks: comparedReactions.map((trial) => ({
       id: trial.id,
       measuredSeconds: trial.start.measuredReactionSeconds,

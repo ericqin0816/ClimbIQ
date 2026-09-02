@@ -366,6 +366,9 @@ function App() {
       { label: "Calculated Total Time", value: diff(finish, start) },
     ];
   }, [timestamps]);
+  const displayedStartSearchWindow = metadata?.metadataLoaded
+    ? resolveStartSearchWindow({ startSearchStart, startSearchEnd }, metadata.duration)
+    : null;
 
   const routeSplitAnalysis = useMemo(
     () => effectiveBiomechanicsResult
@@ -2842,6 +2845,11 @@ function App() {
             <span className="upload-action">{hasSelectedVideo ? "Replace video" : "Choose video"}</span>
             <input aria-label={hasSelectedVideo ? "Replace video" : "Choose video"} type="file" accept="video/*" onChange={handleVideoUpload} disabled={videoAnalysisRunning} />
           </label>
+          {!hasSelectedVideo && (
+            <p className="muted recording-guidance">
+              Best accuracy: use one unedited, fixed-camera attempt with the full selected lane, start lights, and finish area visible.
+            </p>
+          )}
           {metadata?.metadataLoaded && (
             <div className="video-meta-line" aria-label="Loaded video details">
               <span><i /> Ready</span>
@@ -2857,9 +2865,9 @@ function App() {
               <p className="muted">
                 Finds timing, first movement, the correct lane, athlete tracking, center of mass, and route splits.
               </p>
-              {metadata?.metadataLoaded && (
+              {displayedStartSearchWindow && (
                 <p className="muted">
-                  Start search: {resolveStartSearchWindow({ startSearchStart, startSearchEnd }, metadata.duration).start.toFixed(1)}–{resolveStartSearchWindow({ startSearchStart, startSearchEnd }, metadata.duration).end.toFixed(1)}s video time. For a full meet, set one race window in Review &amp; advanced tools.
+                  Start search: {displayedStartSearchWindow.start.toFixed(1)}–{displayedStartSearchWindow.end.toFixed(1)}s video time. For a full meet, set one race window in Review &amp; advanced tools.
                 </p>
               )}
             </div>
@@ -3521,7 +3529,7 @@ function App() {
           {startSignalRaw === null ? (
             <p className="muted">Set Start Signal first; an official time can still calculate a fallback Finish Pad.</p>
           ) : officialTimeError ? (
-            <p className="error-message">{officialTimeError}</p>
+            <p className="error-message" role="alert">{officialTimeError}</p>
           ) : finishSuggestion ? (
             <div className="suggestion-card">
               <h3>Suggested Finish Pad</h3>
@@ -3625,7 +3633,7 @@ function App() {
               </tbody>
             </table>
           </div>
-          {timestampStatus && <p className="error-message">{timestampStatus}</p>}
+          {timestampStatus && <p className="error-message" role="alert">{timestampStatus}</p>}
           </details>
         </Card>
 
@@ -3708,7 +3716,9 @@ function App() {
                 />
               </div>
               <p className="muted">
-                Contact-defined race phases · {hold10PhaseSplits.confidence} Hold 10 confidence. These are separate from the wall-height halves below.
+                Contact-defined race phases · {(hold10PhaseSplits.hold10Share! * 100).toFixed(1)}% before Hold 10 and {((1 - hold10PhaseSplits.hold10Share!) * 100).toFixed(1)}% after · {hold10PhaseSplits.slowerPhase === "balanced"
+                  ? "phases are balanced within 0.050s"
+                  : `${hold10PhaseSplits.slowerPhase === "start-to-hold10" ? "bottom phase" : "top phase"} took ${hold10PhaseSplits.phaseDifferenceSeconds!.toFixed(3)}s longer`} · {hold10PhaseSplits.confidence} Hold 10 confidence. These are separate from the wall-height halves below.
               </p>
             </>
           ) : (
@@ -4864,10 +4874,15 @@ function timestampsFromDataset(values: any[], durationSeconds?: number): Timesta
 }
 
 function mergeTimestampDefaults(values: TimestampMarker[]) {
-  return INITIAL_TIMESTAMPS.map((defaultMarker) => ({
-    ...defaultMarker,
-    ...values.find((item) => item.id === defaultMarker.id),
-  }));
+  return INITIAL_TIMESTAMPS.map((defaultMarker) => {
+    const imported = values.find((item) => item?.id === defaultMarker.id);
+    return {
+      ...defaultMarker,
+      ...imported,
+      id: defaultMarker.id,
+      label: defaultMarker.label,
+    };
+  });
 }
 
 function videoMetadataMatches(actual: VideoMetadata, expected: VideoMetadata): boolean {

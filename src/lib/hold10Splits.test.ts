@@ -9,6 +9,8 @@ describe("Hold 10 race-phase splits", () => {
       hold10ToFinishSeconds: 4.95,
       totalSeconds: 10.35,
       hold10Share: 0.522,
+      phaseDifferenceSeconds: 0.45,
+      slowerPhase: "start-to-hold10",
       confidence: "High",
       reason: "Race phases use the accepted start, verified Hold 10 hand contact, and accepted finish.",
     });
@@ -19,6 +21,14 @@ describe("Hold 10 race-phase splits", () => {
     expect(result.startToHold10Seconds).toBe(5.358);
     expect(result.hold10ToFinishSeconds).toBe(4.642);
     expect(result.totalSeconds).toBe(10);
+    expect(result.phaseDifferenceSeconds).toBe(0.716);
+    expect(result.slowerPhase).toBe("start-to-hold10");
+  });
+
+  it("treats phases within 0.050 seconds as balanced", () => {
+    const result = calculateHold10PhaseSplits(0, 5.02, 10, "High");
+    expect(result.phaseDifferenceSeconds).toBe(0.04);
+    expect(result.slowerPhase).toBe("balanced");
   });
 
   it.each([

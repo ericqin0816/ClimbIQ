@@ -17,7 +17,7 @@
         "rawTime": 10.783,
         "status": "review",
         "confidence": "High",
-        "reviewedCorrect": false,
+        "reviewedCorrect": null,
         "reason": "broadcast cut before the true launch changed 31.0% of the frame"
       },
       "finish": {
@@ -32,7 +32,7 @@
       "division": "women",
       "sourceStartSeconds": 702,
       "durationSeconds": 25,
-      "start": { "rawTime": 8.517, "status": "review", "reviewedCorrect": false, "reason": "broadcast cut changed 73.9% of the frame" },
+      "start": { "rawTime": 8.517, "status": "review", "reviewedCorrect": null, "reason": "broadcast cut changed 73.9% of the frame" },
       "finish": { "status": "not-run" }
     },
     {
@@ -40,7 +40,7 @@
       "division": "women",
       "sourceStartSeconds": 816,
       "durationSeconds": 25,
-      "start": { "rawTime": 6.517, "status": "review", "reviewedCorrect": false, "reason": "broadcast cut changed 79.1% of the frame" },
+      "start": { "rawTime": 6.517, "status": "review", "reviewedCorrect": null, "reason": "broadcast cut changed 79.1% of the frame" },
       "finish": { "status": "not-run" }
     },
     {
@@ -48,7 +48,7 @@
       "division": "men",
       "sourceStartSeconds": 1552,
       "durationSeconds": 23,
-      "start": { "rawTime": 8.817, "status": "review", "reviewedCorrect": false, "reason": "measured reaction was only 0.033s, below the 0.100s valid-race floor" },
+      "start": { "rawTime": 8.817, "status": "review", "reviewedCorrect": null, "reason": "measured reaction was only 0.033s, below the 0.100s valid-race floor" },
       "finish": { "status": "not-run" }
     },
     {
@@ -56,7 +56,7 @@
       "division": "men",
       "sourceStartSeconds": 1652,
       "durationSeconds": 23,
-      "start": { "rawTime": 7.908, "status": "review", "reviewedCorrect": false, "reason": "selected lane did not show a reliable launch after the proposed cue" },
+      "start": { "rawTime": 7.908, "status": "review", "reviewedCorrect": null, "reason": "selected lane did not show a reliable launch after the proposed cue" },
       "finish": { "status": "not-run" }
     },
     {
@@ -64,7 +64,7 @@
       "division": "men",
       "sourceStartSeconds": 1745,
       "durationSeconds": 23,
-      "start": { "rawTime": 1.017, "status": "review", "reviewedCorrect": false, "reason": "broadcast cut changed 57.2% of the frame" },
+      "start": { "rawTime": 1.017, "status": "review", "reviewedCorrect": null, "reason": "broadcast cut changed 57.2% of the frame" },
       "finish": { "status": "not-run" }
     }
   ]

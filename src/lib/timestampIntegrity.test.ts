@@ -40,6 +40,12 @@ describe("timestamp integrity", () => {
     expect(accept("finishPad", 5).accepted).toBe(false);
   });
 
+  it("rejects intermediate markers that would make race splits run backward", () => {
+    expect(accept("committedLaunch", 5.05).reason).toContain("before Earliest Visible Motion");
+    expect(accept("firstMovement", 5.3).reason).toContain("after Committed Launch");
+    expect(accept("hold10", 5.5).reason).toContain("before First Hold");
+  });
+
   it("rejects timestamps outside the loaded video", () => {
     const result = applyTimestampAcceptance(populated(), {
       id: "finishPad",
@@ -98,6 +104,16 @@ describe("timestamp integrity", () => {
     expect(sanitized.find((marker) => marker.id === "hold10")?.rawTime).toBeNull();
   });
 
+  it("clears imported intermediate markers that violate canonical race order", () => {
+    const markers = populated();
+    markers.find((marker) => marker.id === "committedLaunch")!.rawTime = 5.05;
+    const sanitized = sanitizeTimestampSequence(markers, 20);
+    expect(sanitized.find((marker) => marker.id === "firstMovement")?.rawTime).toBe(5.1);
+    expect(sanitized.find((marker) => marker.id === "committedLaunch")?.rawTime).toBeNull();
+    expect(sanitized.find((marker) => marker.id === "firstHold")?.rawTime).toBe(6);
+    expect(sanitized.find((marker) => marker.id === "hold10")?.rawTime).toBe(10);
+  });
+
   it("clears an imported sequence when Start is missing", () => {
     const markers = populated();
     markers.find((marker) => marker.id === "startSignal")!.rawTime = Number.NaN;
@@ -114,6 +130,20 @@ describe("timestamp integrity", () => {
       rawTime: 10,
       source: "Manual",
       confidence: "Low",
+    });
+  });
+
+  it("removes malformed imported evidence metadata", () => {
+    const markers = populated();
+    const movement = markers.find((marker) => marker.id === "firstMovement")!;
+    movement.detectedRawTime = 99;
+    movement.offsetApplied = Number.NaN;
+    movement.note = 123 as never;
+    const sanitized = sanitizeTimestampSequence(markers, 20);
+    expect(sanitized.find((marker) => marker.id === "firstMovement")).toMatchObject({
+      detectedRawTime: undefined,
+      offsetApplied: undefined,
+      note: undefined,
     });
   });
 });

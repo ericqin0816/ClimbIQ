@@ -48,7 +48,11 @@
         "routeMatches": 8,
         "requiredRouteMatches": 10,
         "manualAcceptanceWorkflowTested": true,
-        "resultingHold10ToFinishSeconds": 5.965
+        "resultingHold10ToFinishSeconds": 5.965,
+        "bottomPhaseShare": 0.424,
+        "topPhaseShare": 0.576,
+        "slowerPhase": "top",
+        "phaseDifferenceSeconds": 1.58
       },
       "com": {
         "status": "needs-review",
