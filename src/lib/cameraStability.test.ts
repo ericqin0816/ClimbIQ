@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { assessCameraStability, type CameraStabilityFrame } from "./cameraStability";
+import { assessCameraStability, assessSceneContinuity, type CameraStabilityFrame } from "./cameraStability";
 
 type MutableFrame = Omit<CameraStabilityFrame, "data"> & { data: Uint8ClampedArray };
 
@@ -57,6 +57,34 @@ describe("fixed-camera stability audit", () => {
     const result = assessCameraStability(frame, clone(frame));
     expect(result.assessable).toBe(false);
     expect(result.confidence).toBe("None");
+  });
+
+  it("distinguishes local launch motion from a full broadcast scene cut", () => {
+    const before = patternedFrame();
+    const localMotion = clone(before);
+    fill(localMotion, 32, 72, 17, 18, 230);
+    expect(assessSceneContinuity(before, localMotion).continuous).toBe(true);
+
+    const newCamera = clone(before);
+    for (let y = 0; y < newCamera.height; y += 1) {
+      for (let x = 0; x < newCamera.width; x += 1) {
+        if ((x + y) % 2 === 0) fill(newCamera, x, y, 1, 1, 210);
+      }
+    }
+    const cut = assessSceneContinuity(before, newCamera);
+    expect(cut.continuous).toBe(false);
+    expect(cut.structuralChangeRatio).toBeGreaterThan(0.28);
+  });
+
+  it("ignores a uniform exposure change across the start cue", () => {
+    const before = patternedFrame();
+    const after = clone(before);
+    for (let index = 0; index < after.data.length; index += 4) {
+      after.data[index] += 24;
+      after.data[index + 1] += 24;
+      after.data[index + 2] += 24;
+    }
+    expect(assessSceneContinuity(before, after).continuous).toBe(true);
   });
 });
 

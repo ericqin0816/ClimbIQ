@@ -144,6 +144,8 @@ npm run test
 
 Open the dev server URL, upload a local climbing video, and press **Run full analysis**. Zones are optional unless another person appears in frame or automatic light discovery needs manual help.
 
+For a full meet replay, open **Review & advanced tools** and enter the absolute source-time window for one race (for example, ignore before `590` and stop the start search at `610`). ClimbIQ analyzes one attempt at a time and limits automatic finish search to 30 seconds after the accepted start so later races and timer resets cannot leak into the result. Edited multi-camera footage is intentionally sent to review when the frame composition changes at the cue.
+
 ### Real-video timing regression
 
 Keep private test clips outside Git in `node_modules/.climbiq-private-videos/`, start the development server, then run:
@@ -154,6 +156,8 @@ npm run benchmark:summary
 ```
 
 The timing runner uses the real browser workflow, stops after timing when possible, compares accepted/review outcomes with `benchmarks/real-video-results.json`, and exits nonzero if an expected Start or Finish policy regresses. Set `CLIMBIQ_VIDEO_DIR` for a different private directory, or use `npm run benchmark:timing -- clip1.mov clip2.mov` for a subset or a new exploratory clip. New clips are reported as `unbaselined`; they do not become required regression inputs until they are deliberately added to the benchmark JSON. Videos and frames are never written into the repository.
+
+`npm run benchmark:summary` also reports the separately labeled public broadcast stress test from `benchmarks/public-broadcast-results.json`, including the official reaction-time cross-check and moving-camera rejection results.
 
 ## Deploy On Vercel
 

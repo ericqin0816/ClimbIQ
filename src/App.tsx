@@ -10,7 +10,7 @@ import {
   createDefaultBiomechanicsSession,
   sanitizeBiomechanicsSession,
 } from "./lib/biomechanicsSession";
-import { assessCameraStability } from "./lib/cameraStability";
+import { assessCameraStability, assessSceneContinuity } from "./lib/cameraStability";
 import { detectFirstMovement } from "./lib/detectFirstMovement";
 import { detectFinishSignal } from "./lib/detectFinishSignal";
 import { calculateHold10PhaseSplits } from "./lib/hold10Splits";
@@ -23,7 +23,7 @@ import { estimateHold10HeightPassage } from "./lib/hold10HeightEstimate";
 import { resolveHold10Target } from "./lib/holdTarget";
 import { analyzePoseVideo, PoseAnalysisCancelledError } from "./lib/poseAnalysis";
 import { analyzeRouteSplits } from "./lib/routeSplits";
-import { sanitizeAnalysisSessionSettings } from "./lib/analysisSettings";
+import { resolveStartSearchWindow, sanitizeAnalysisSessionSettings } from "./lib/analysisSettings";
 import {
   alignStandardSpeedRouteWithFallback,
   type RouteAlignmentResult,
@@ -167,7 +167,7 @@ function App() {
   const [videoRestoreStatus, setVideoRestoreStatus] = useState("");
 
   const [startSearchStart, setStartSearchStart] = useState(0);
-  const [startSearchEnd, setStartSearchEnd] = useState(8);
+  const [startSearchEnd, setStartSearchEnd] = useState(15);
   const [startSensitivity, setStartSensitivity] = useState<Sensitivity>("medium");
   const [startLightVisibility, setStartLightVisibility] = useState<"clear" | "blocked">("clear");
   const [startDetectionProfile, setStartDetectionProfile] = useState<StartDetectionProfile>("auto");
@@ -422,6 +422,12 @@ function App() {
     startLightCalibration.afterStartRGB &&
     startLightCalibration.colorDelta !== undefined,
   );
+  const hasCalibrationSamples = Boolean(
+    startLightCalibration.beforeStartRGB ||
+    startLightCalibration.afterStartRGB ||
+    startLightCalibration.calibrationFrameBeforeTime !== undefined ||
+    startLightCalibration.calibrationFrameAfterTime !== undefined,
+  );
   const resolvedStartProfile: StartDetectionProfile =
     startDetectionProfile === "auto" && calibrationReady ? "calibrated" : startDetectionProfile;
   const isCalibrationWeak =
@@ -465,6 +471,7 @@ function App() {
     setMovementPreviewFrames({});
     setMovementPreviewRunning(false);
     setStartSearchStart(0);
+    setStartSearchEnd(15);
     setStartSignalOffset(0);
     setFirstMovementOffset(0);
     setStartLightVisibility("clear");
@@ -855,6 +862,7 @@ function App() {
     const userDrawnLightZone = zones.startLight && !zones.startLight.label.startsWith("Auto-detected")
       ? zones.startLight
       : undefined;
+    const searchWindow = resolveStartSearchWindow({ startSearchStart, startSearchEnd }, video.duration);
     pendingAutomaticContextRef.current = null;
     setStartRunning(true);
     let reviewSeekTarget: number | null = null;
@@ -866,8 +874,8 @@ function App() {
             setStartResult(await detectMotionBasedStartEstimate({
               video,
               zone: zones.startBody,
-              searchStart: startSearchStart,
-              searchEnd: startSearchEnd,
+              searchStart: searchWindow.start,
+              searchEnd: searchWindow.end,
               reactionOffset: reactionTimeOffset,
               sensitivity: startSensitivity,
             }));
@@ -877,8 +885,8 @@ function App() {
             setStartResult(await detectStartSignal({
               video,
               zone: userDrawnLightZone,
-              searchStart: startSearchStart,
-              searchEnd: startSearchEnd,
+              searchStart: searchWindow.start,
+              searchEnd: searchWindow.end,
               sensitivity: startSensitivity,
               lightVisibility: startLightVisibility,
               profile: resolvedStartProfile,
@@ -912,8 +920,31 @@ function App() {
           }
           setStartResult(automaticStart);
           if (decision.autoAccept) {
-            pendingAutomaticContextRef.current = null;
             const acceptedStart = Math.max(0, roundTime(decision.rawTime + startSignalOffset));
+            const startAudit = await auditAutomaticStartCandidate(
+              video,
+              acceptedStart,
+              analysisBodyZone,
+            );
+            setStartResult({
+              ...automaticStart,
+              debug: { ...automaticStart.debug, sceneContinuity: startAudit.scene },
+            });
+            setMovementResult(startAudit.movement);
+            setStartEvidenceStatus(`${decision.reason} ${startAudit.reason} Audio: ${audioReason}`);
+            if (!startAudit.safeToAutoAccept) {
+              pendingAutomaticContextRef.current = {
+                analysisBodyZone,
+                analysisLightZone,
+                analysisLightCalibration,
+                analysisLaneCandidates,
+              };
+              setSuggestedStartRawTime(decision.rawTime);
+              reviewSeekTarget = decision.rawTime;
+              setAutoAnalysisStatus(`Start cues need review. ${startAudit.reason}`);
+              return;
+            }
+            pendingAutomaticContextRef.current = null;
             acceptTimestamp(
               "startSignal",
               acceptedStart,
@@ -961,6 +992,7 @@ function App() {
 
     setStartDetectionProfile("motion");
     setStartRunning(true);
+    const searchWindow = resolveStartSearchWindow({ startSearchStart, startSearchEnd }, video.duration);
     try {
       await runWithVideoRestore(
         video,
@@ -968,8 +1000,8 @@ function App() {
           const result = await detectMotionBasedStartEstimate({
             video,
             zone: zones.startBody,
-            searchStart: startSearchStart,
-            searchEnd: startSearchEnd,
+            searchStart: searchWindow.start,
+            searchEnd: searchWindow.end,
             reactionOffset: reactionTimeOffset,
             sensitivity: startSensitivity,
           });
@@ -1097,11 +1129,12 @@ function App() {
     onStatus: (message: string) => void,
   ): Promise<FusedStartEvidenceOutcome> {
     automaticLaneCandidatesRef.current = [];
-    const searchStart = clamp(startSearchStart, 0, Math.max(0, video.duration - 0.5));
-    // Uploaded race clips often contain a long setup period. Automatic mode
-    // scans the complete clip; sustained post-start-state validation prevents
-    // the later finish reversal from being mistaken for another start.
-    const searchEnd = video.duration;
+    const searchWindow = resolveStartSearchWindow({ startSearchStart, startSearchEnd }, video.duration);
+    const searchStart = searchWindow.start;
+    // Honor an absolute search end so timing resets and later races cannot
+    // become Start candidates. A full-event video can still target one attempt
+    // by entering that attempt's source-time range in the advanced controls.
+    const searchEnd = searchWindow.end;
     onStatus("Listening for two matching beeps and the different-pitch start beep…");
     const audioStart: AudioStartResult = videoFileRef.current
       ? await detectAudioStartSignal({
@@ -1315,7 +1348,6 @@ function App() {
       analysisLightCalibration,
       analysisLaneCandidates,
     };
-    setVideoLoadError("");
   }
 
   async function locateVisibleRouteHolds(
@@ -1345,6 +1377,44 @@ function App() {
     });
     setRouteAlignment(result);
     return result;
+  }
+
+  async function auditAutomaticStartCandidate(
+    video: HTMLVideoElement,
+    acceptedStart: number,
+    analysisBodyZone?: NormalizedZone,
+    signal?: AbortSignal,
+  ) {
+    const movement = await detectFirstMovement({
+      video,
+      zone: analysisBodyZone,
+      startSignalRawTime: acceptedStart,
+      sensitivity: movementSensitivity,
+      movementDefinition: firstMovementDefinition,
+      committedLaunchMinDelay,
+    });
+    if (signal?.aborted) {
+      throw new PoseAnalysisCancelledError();
+    }
+    const bodyAudit = assessAutomaticStartBodyAudit(movement, acceptedStart);
+    const beforeTime = Math.max(0, acceptedStart - 0.18);
+    const afterTime = Math.min(Math.max(0, video.duration - 0.001), acceptedStart + 0.18);
+    await seekTo(video, beforeTime);
+    const before = captureFrame(video).imageData;
+    await seekTo(video, afterTime);
+    const after = captureFrame(video).imageData;
+    if (signal?.aborted) {
+      throw new PoseAnalysisCancelledError();
+    }
+    const scene = assessSceneContinuity(before, after);
+    const sceneSafe = !scene.assessable || scene.continuous;
+    return {
+      movement,
+      safeToAutoAccept: bodyAudit.safeToAutoAccept && sceneSafe,
+      reason: !sceneSafe ? scene.reason : bodyAudit.reason,
+      bodyAudit,
+      scene,
+    };
   }
 
   async function runAutomaticAnalysis() {
@@ -1410,21 +1480,20 @@ function App() {
 
           const acceptedStart = Math.max(0, roundTime(decision.rawTime + startSignalOffset));
           setAutoAnalysisStatus("Start cues found. Verifying that the selected athlete launches after them…");
-          const preflightMovement = await detectFirstMovement({
+          const startAudit = await auditAutomaticStartCandidate(
             video,
-            zone: analysisBodyZone,
-            startSignalRawTime: acceptedStart,
-            sensitivity: movementSensitivity,
-            movementDefinition: firstMovementDefinition,
-            committedLaunchMinDelay,
+            acceptedStart,
+            analysisBodyZone,
+            abortController.signal,
+          );
+          const preflightMovement = startAudit.movement;
+          setStartResult({
+            ...automaticStart,
+            debug: { ...automaticStart.debug, sceneContinuity: startAudit.scene },
           });
-          if (abortController.signal.aborted) {
-            throw new PoseAnalysisCancelledError();
-          }
           setMovementResult(preflightMovement);
-          const bodyAudit = assessAutomaticStartBodyAudit(preflightMovement, acceptedStart);
-          setStartEvidenceStatus(`${decision.reason} ${bodyAudit.reason} Audio: ${audioReason}`);
-          if (!bodyAudit.safeToAutoAccept) {
+          setStartEvidenceStatus(`${decision.reason} ${startAudit.reason} Audio: ${audioReason}`);
+          if (!startAudit.safeToAutoAccept) {
             pendingAutomaticContextRef.current = {
               analysisBodyZone,
               analysisLightZone,
@@ -1434,7 +1503,7 @@ function App() {
             setSuggestedStartRawTime(decision.rawTime);
             reviewSeekTarget = decision.rawTime;
             setAutoAnalysisStatus(
-              `Start cues need review because lane-local body motion did not confirm a new launch. ${bodyAudit.reason}`,
+              `Start cues need review before the timestamp can be accepted. ${startAudit.reason}`,
             );
             return;
           }
@@ -2034,6 +2103,20 @@ function App() {
     setTimestamps((current) => clearMarkerTimestamp(current, id));
   }
 
+  function handleOfficialTotalTimeChange(value: string) {
+    const officialFinishWasAccepted = getTimestamp(timestamps, "finishPad").source === "Official total time";
+    if (officialFinishWasAccepted) {
+      // The marker was calculated from the previous field value, so retaining
+      // it would silently display an obsolete total and stale pose range.
+      clearTimestamp("finishPad");
+    }
+    setOfficialTotalTime(value);
+    setFinishResult(null);
+    setFinishStatus(officialFinishWasAccepted
+      ? "The previous official-time Finish Pad was cleared. Review and accept the updated suggestion."
+      : "Official-time cross-check changed. Rerun automatic finish detection if you want it compared.");
+  }
+
   function setTimestampFromInput(id: TimestampMarker["id"], value: string, mode: "raw" | "climb") {
     const parsed = parseOptionalNumber(value);
     if (parsed === null) {
@@ -2080,6 +2163,9 @@ function App() {
     }
     if (movementResult?.debug.suspiciousFirstFrameDetection) {
       warnings.push("First Movement candidate occurred at the first sampled frame.");
+    }
+    if (startResult?.debug.sceneContinuity?.assessable && !startResult.debug.sceneContinuity.continuous) {
+      warnings.push(startResult.debug.sceneContinuity.reason);
     }
     if (zones.startLight && zoneArea(zones.startLight) > 0.05) {
       warnings.push("Start Light Zone may be large for light detection.");
@@ -2159,6 +2245,11 @@ function App() {
       },
       splitCalculations: splits,
       detectionWarnings: buildDetectionWarnings(),
+      automationAudit: {
+        startEvidence: startEvidenceStatus || null,
+        automaticAnalysis: autoAnalysisStatus || null,
+        finishAnalysis: finishStatus || null,
+      },
       biomechanics,
       athleteNotes: sessionNotes.trim(),
     };
@@ -2990,7 +3081,7 @@ function App() {
 
         <Card id="timing" title="Start timing">
           <p className="muted">
-            Quick Analyze searches the full clip, ignores upper-wall activity, and timestamps the first real blue-directed change near the floor instead of treating a climber covering green as the start. The later clear blue state verifies the faint onset. Exact octave-up audio anchors timing, and first movement is measured above the light spill inside the selected athlete lane.
+            Quick Analyze searches the selected opening window, ignores upper-wall activity, and timestamps the first real blue-directed change near the floor instead of treating a climber covering green as the start. The later clear blue state verifies the faint onset. Exact octave-up audio anchors timing, and first movement is measured above the light spill inside the selected athlete lane.
           </p>
           <details className="help-details">
             <summary>Manual timing settings</summary>
@@ -3000,8 +3091,8 @@ function App() {
               <input type="number" value={startSearchStart} step="0.1" onChange={(event) => setStartSearchStart(Number(event.target.value))} />
             </label>
             <label>
-              Motion-fallback search end
-              <input type="number" value={startSearchEnd} step="0.1" onChange={(event) => setStartSearchEnd(Number(event.target.value))} />
+              Stop start search at video time (seconds)
+              <input type="number" min="0.5" value={startSearchEnd} step="0.1" onChange={(event) => setStartSearchEnd(Number(event.target.value))} />
             </label>
             <label>
               Sensitivity
@@ -3065,13 +3156,6 @@ function App() {
               />
             </label>
           </div>
-          <div className="button-row compact-row">
-            {[0.1, 0.15, 0.2, 0.25, 0.3].map((value) => (
-              <button key={value} onClick={() => setReactionTimeOffset(value)}>
-                reaction {value.toFixed(2)}s
-              </button>
-            ))}
-          </div>
           {startLightVisibility === "blocked" && (
             <p className="guidance">
               Because the light may be blocked, the visible color change can occur slightly after the true start.
@@ -3086,14 +3170,16 @@ function App() {
           <div className="button-row">
             <button disabled={videoAnalysisRunning || !zones.startLight} onClick={() => setCalibrationSample("before")}>Use current frame as green</button>
             <button disabled={videoAnalysisRunning || !zones.startLight} onClick={() => setCalibrationSample("after")}>Use current frame as blue</button>
-            <button
-              disabled={videoAnalysisRunning}
-              onClick={() => {
-                invalidateStartLightDependents("Manual light calibration and dependent finish timing were cleared.");
-              }}
-            >
-              Clear light calibration
-            </button>
+            {hasCalibrationSamples && (
+              <button
+                disabled={videoAnalysisRunning}
+                onClick={() => {
+                  invalidateStartLightDependents("Manual light calibration and dependent finish timing were cleared.");
+                }}
+              >
+                Clear light calibration
+              </button>
+            )}
           </div>
           {calibrationStatus && <p className="status-message">{calibrationStatus}</p>}
           <CalibrationPanel calibration={startLightCalibration} lightZone={zones.startLight} />
@@ -3291,7 +3377,7 @@ function App() {
 
         <Card title="Finish timing">
           <p className="muted">
-            ClimbIQ follows the same selected lane light after the start. It learns the during-climb state, timestamps the first persistent switch to the opposite calibrated state, and verifies it afterward—whether the video shows blue → green or green → blue.
+            ClimbIQ follows the same selected lane light for up to 30 seconds after the start. It learns the during-climb state, timestamps the first persistent switch to the opposite calibrated state, and verifies it afterward—whether the video shows blue → green or green → blue.
           </p>
           <div className="button-row">
             <button
@@ -3343,11 +3429,7 @@ function App() {
               step="0.001"
               value={officialTotalTime}
               placeholder="13.125"
-              onChange={(event) => {
-                setOfficialTotalTime(event.target.value);
-                setFinishResult(null);
-                setFinishStatus("Official-time cross-check changed. Rerun automatic finish detection if you want it compared.");
-              }}
+              onChange={(event) => handleOfficialTotalTimeChange(event.target.value)}
             />
           </label>
           {startSignalRaw === null ? (

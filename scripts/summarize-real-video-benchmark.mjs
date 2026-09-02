@@ -2,6 +2,8 @@ import { readFile } from "node:fs/promises";
 
 const path = new URL("../benchmarks/real-video-results.json", import.meta.url);
 const benchmark = JSON.parse(await readFile(path, "utf8"));
+const publicPath = new URL("../benchmarks/public-broadcast-results.json", import.meta.url);
+const publicBenchmark = JSON.parse(await readFile(publicPath, "utf8"));
 const trials = benchmark.trials ?? [];
 const acceptedStarts = trials.filter((trial) => trial.start?.status === "accepted");
 const reviewedStarts = trials.filter((trial) => trial.start?.status === "review");
@@ -47,10 +49,38 @@ const report = {
     reviewCandidates: trials.filter((trial) => trial.hold10?.status === "review-candidate").length,
     unavailable: trials.filter((trial) => trial.hold10?.status === "unavailable").length,
   },
+  publicBroadcastResearch: summarizePublicBroadcast(publicBenchmark),
 };
 
 console.log(JSON.stringify(report, null, 2));
 
 if (knownFalseAcceptedStarts.length || knownFalseAcceptedFinishes.length) {
   process.exitCode = 1;
+}
+
+function summarizePublicBroadcast(research) {
+  const publicTrials = research.trials ?? [];
+  const accepted = publicTrials.filter((trial) => trial.start?.status === "accepted");
+  const reviewed = publicTrials.filter((trial) => trial.start?.status === "review");
+  const comparedReactions = publicTrials.filter((trial) =>
+    Number.isFinite(trial.start?.measuredReactionSeconds) && Number.isFinite(trial.start?.officialReactionSeconds),
+  );
+  return {
+    source: research.source?.url,
+    videos: publicTrials.length,
+    divisions: [...new Set(publicTrials.map((trial) => trial.division).filter(Boolean))],
+    acceptedStarts: accepted.length,
+    reviewOnlyStarts: reviewed.length,
+    knownFalseAcceptedStarts: accepted.filter((trial) => trial.start?.reviewedCorrect === false).length,
+    knownFalseReviewCandidates: reviewed.filter((trial) => trial.start?.reviewedCorrect === false).length,
+    reactionCrossChecks: comparedReactions.map((trial) => ({
+      id: trial.id,
+      measuredSeconds: trial.start.measuredReactionSeconds,
+      officialSeconds: trial.start.officialReactionSeconds,
+      absoluteErrorSeconds: Math.abs(trial.start.measuredReactionSeconds - trial.start.officialReactionSeconds),
+    })),
+    falseFinishReviewBoundariesAfterSceneCutGuard: publicTrials.filter((trial) =>
+      trial.finish?.status === "false-review-boundary",
+    ).length,
+  };
 }

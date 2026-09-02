@@ -91,6 +91,12 @@ export interface StartSignalDebug {
   topCandidates?: DetectionCandidate[];
   detectedRawTime?: number;
   failureReason?: string;
+  sceneContinuity?: {
+    assessable: boolean;
+    continuous: boolean;
+    structuralChangeRatio: number;
+    reason: string;
+  };
   samples: Array<{
     time: number;
     averageRgb: RGB;

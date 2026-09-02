@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_ANALYSIS_SESSION_SETTINGS, sanitizeAnalysisSessionSettings } from "./analysisSettings";
+import {
+  DEFAULT_ANALYSIS_SESSION_SETTINGS,
+  resolveStartSearchWindow,
+  sanitizeAnalysisSessionSettings,
+} from "./analysisSettings";
 
 describe("analysis session settings", () => {
   it("preserves valid zero-valued timing settings", () => {
@@ -25,7 +29,7 @@ describe("analysis session settings", () => {
     });
     expect(result).toMatchObject({
       startSearchStart: 0,
-      startSearchEnd: 8,
+      startSearchEnd: 15,
       startSensitivity: "medium",
       startDetectionProfile: "auto",
       firstMovementDefinition: "earliest",
@@ -36,13 +40,13 @@ describe("analysis session settings", () => {
   it("repairs an end bound that is not after the start bound", () => {
     const result = sanitizeAnalysisSessionSettings({ startSearchStart: 12, startSearchEnd: 8 });
     expect(result.startSearchStart).toBe(12);
-    expect(result.startSearchEnd).toBe(20);
+    expect(result.startSearchEnd).toBe(27);
   });
 
   it("keeps the search window valid at the supported upper boundary", () => {
-    const result = sanitizeAnalysisSessionSettings({ startSearchStart: 3600, startSearchEnd: 3600 });
+    const result = sanitizeAnalysisSessionSettings({ startSearchStart: 21600, startSearchEnd: 21600 });
     expect(result.startSearchStart).toBe(0);
-    expect(result.startSearchEnd).toBe(3600);
+    expect(result.startSearchEnd).toBe(21600);
     expect(result.startSearchEnd).toBeGreaterThan(result.startSearchStart);
   });
 
@@ -52,5 +56,19 @@ describe("analysis session settings", () => {
 
   it("returns complete defaults for missing input", () => {
     expect(sanitizeAnalysisSessionSettings(null)).toEqual(DEFAULT_ANALYSIS_SESSION_SETTINGS);
+  });
+
+  it("resolves an absolute window without scanning the rest of a long video", () => {
+    expect(resolveStartSearchWindow({ startSearchStart: 590, startSearchEnd: 610 }, 5855)).toEqual({
+      start: 590,
+      end: 610,
+    });
+  });
+
+  it("repairs invalid live values and clips the window to video duration", () => {
+    expect(resolveStartSearchWindow({ startSearchStart: Number.NaN, startSearchEnd: 99 }, 12)).toEqual({
+      start: 0,
+      end: 12,
+    });
   });
 });

@@ -119,6 +119,8 @@ describe("COM-derived route splits", () => {
     expect(analysis.confidence).toBe("Low");
     expect(analysis.halfway.confidence).toBe("Low");
     expect(analysis.sections.every((section) => section.confidence === "Low")).toBe(true);
+    expect(analysis.slowestSectionId).toBeUndefined();
+    expect(analysis.evenPacing).toBe(false);
   });
 });
 

@@ -14,7 +14,7 @@
     {
       "id": "IMG_9075.MOV",
       "durationSeconds": 30.44,
-      "start": { "rawTime": 14.9, "status": "review", "confidence": "High", "reviewedCorrect": false, "manualRawTime": 8.9 },
+      "start": { "rawTime": 7.617, "status": "review", "confidence": "High", "reviewedCorrect": false, "manualRawTime": 8.9 },
       "finish": { "rawTime": 17.333, "status": "review", "confidence": "Medium" },
       "hold10": { "status": "unavailable" },
       "com": { "status": "insufficient-tracking", "usableFrames": 1, "requestedFrames": 85 }
@@ -22,7 +22,7 @@
     {
       "id": "IMG_9076.MOV",
       "durationSeconds": 33.74,
-      "start": { "rawTime": 24.82, "status": "review", "confidence": "Medium", "reviewedCorrect": false },
+      "start": { "rawTime": 2.79, "status": "review", "confidence": "Medium", "reviewedCorrect": false },
       "finish": { "status": "not-run" },
       "hold10": { "status": "unavailable" },
       "com": { "status": "not-run" }

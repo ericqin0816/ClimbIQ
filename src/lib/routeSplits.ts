@@ -163,6 +163,13 @@ export function analyzeRouteSplits(
   }
 
   const confidence = minimumConfidence(overallConfidence(result, samples), calibrationConfidence);
+  // Low-confidence geometry can still provide useful review cursors, but the
+  // ordering between sections is not reliable enough to label a definitive
+  // slowdown or claim even pacing.
+  if (confidence === "Low" || confidence === "None") {
+    slowestSectionId = undefined;
+    evenPacing = false;
+  }
   return {
     available: sections.some((section) => section.available) || halfway.available,
     confidence,

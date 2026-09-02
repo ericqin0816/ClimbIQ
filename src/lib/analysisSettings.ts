@@ -1,8 +1,10 @@
 import type { AnalysisSessionSettings } from "../types";
 
+const MAX_ANALYSIS_VIDEO_SECONDS = 6 * 60 * 60;
+
 export const DEFAULT_ANALYSIS_SESSION_SETTINGS: AnalysisSessionSettings = {
   startSearchStart: 0,
-  startSearchEnd: 8,
+  startSearchEnd: 15,
   startSensitivity: "medium",
   startLightVisibility: "clear",
   startDetectionProfile: "auto",
@@ -17,14 +19,15 @@ export const DEFAULT_ANALYSIS_SESSION_SETTINGS: AnalysisSessionSettings = {
 
 export function sanitizeAnalysisSessionSettings(value: unknown): AnalysisSessionSettings {
   const candidate = value && typeof value === "object" ? value as Partial<AnalysisSessionSettings> : {};
-  // Leave at least one second of room for a valid search window. A value of
-  // exactly 3600 could never have an end bound after it within our supported
-  // one-hour range.
-  const startSearchStart = bounded(candidate.startSearchStart, 0, 3599, 0);
-  const requestedEnd = bounded(candidate.startSearchEnd, 0, 3600, 8);
+  // Leave room for a valid search window while supporting full event replays,
+  // which commonly run longer than one hour.
+  const startSearchStart = bounded(candidate.startSearchStart, 0, MAX_ANALYSIS_VIDEO_SECONDS - 0.5, 0);
+  const requestedEnd = bounded(candidate.startSearchEnd, 0, MAX_ANALYSIS_VIDEO_SECONDS, 15);
   return {
     startSearchStart,
-    startSearchEnd: requestedEnd > startSearchStart ? requestedEnd : Math.min(3600, startSearchStart + 8),
+    startSearchEnd: requestedEnd > startSearchStart
+      ? requestedEnd
+      : Math.min(MAX_ANALYSIS_VIDEO_SECONDS, startSearchStart + 15),
     startSensitivity: oneOf(candidate.startSensitivity, ["low", "medium", "high"] as const, "medium"),
     startLightVisibility: oneOf(candidate.startLightVisibility, ["clear", "blocked"] as const, "clear"),
     startDetectionProfile: oneOf(candidate.startDetectionProfile, ["auto", "calibrated", "generic", "blocked", "motion", "manual"] as const, "auto"),
@@ -37,6 +40,22 @@ export function sanitizeAnalysisSessionSettings(value: unknown): AnalysisSession
     officialTotalTime: typeof candidate.officialTotalTime === "string"
       ? candidate.officialTotalTime
       : finiteNonNegativeString(candidate.officialTotalTime),
+  };
+}
+
+export function resolveStartSearchWindow(
+  value: unknown,
+  videoDurationSeconds: number,
+): { start: number; end: number } {
+  const settings = sanitizeAnalysisSessionSettings(value);
+  const duration = Number.isFinite(videoDurationSeconds) && videoDurationSeconds > 0
+    ? videoDurationSeconds
+    : 0;
+  const start = Math.min(settings.startSearchStart, Math.max(0, duration - 0.5));
+  const minimumEnd = Math.min(duration, start + 0.5);
+  return {
+    start,
+    end: Math.min(duration, Math.max(minimumEnd, settings.startSearchEnd)),
   };
 }
 

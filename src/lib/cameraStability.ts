@@ -17,9 +17,62 @@ export interface CameraStabilityResult {
   reason: string;
 }
 
+export interface SceneContinuityResult {
+  assessable: boolean;
+  continuous: boolean;
+  structuralChangeRatio: number;
+  reason: string;
+}
+
 const GRID_WIDTH = 72;
 const GRID_HEIGHT = 96;
 const MAX_SHIFT = 7;
+
+/**
+ * Detects an abrupt edit/reframe between two nearby video frames. Unlike the
+ * longer camera-stability audit, this is intentionally sensitive to a large
+ * fraction of pixels changing at once while ignoring a uniform exposure jump.
+ */
+export function assessSceneContinuity(
+  before: CameraStabilityFrame,
+  after: CameraStabilityFrame,
+): SceneContinuityResult {
+  if (!validFrame(before) || !validFrame(after)) {
+    return {
+      assessable: false,
+      continuous: false,
+      structuralChangeRatio: 1,
+      reason: "Scene continuity could not be checked because a comparison frame was invalid.",
+    };
+  }
+  const first = colorGrid(before);
+  const second = colorGrid(after);
+  const channelShift = {
+    r: averageChannel(second, 0) - averageChannel(first, 0),
+    g: averageChannel(second, 1) - averageChannel(first, 1),
+    b: averageChannel(second, 2) - averageChannel(first, 2),
+  };
+  let changed = 0;
+  const pixels = first.length / 3;
+  for (let index = 0; index < first.length; index += 3) {
+    const residual = (
+      Math.abs((second[index] - first[index]) - channelShift.r) +
+      Math.abs((second[index + 1] - first[index + 1]) - channelShift.g) +
+      Math.abs((second[index + 2] - first[index + 2]) - channelShift.b)
+    ) / 3;
+    if (residual >= 30) changed += 1;
+  }
+  const structuralChangeRatio = changed / Math.max(1, pixels);
+  const continuous = structuralChangeRatio <= 0.28;
+  return {
+    assessable: true,
+    continuous,
+    structuralChangeRatio: roundMetric(structuralChangeRatio),
+    reason: continuous
+      ? "The full-frame composition stayed continuous across the proposed start."
+      : `About ${(structuralChangeRatio * 100).toFixed(1)}% of the frame changed structure at the proposed start, which looks like a camera cut or reframe.`,
+  };
+}
 
 /**
  * Estimates global camera translation from robust edge alignment. Brightness
@@ -101,6 +154,32 @@ function edgeGrid(frame: CameraStabilityFrame): Float32Array {
     }
   }
   return edges;
+}
+
+function colorGrid(frame: CameraStabilityFrame): Float32Array {
+  const colors = new Float32Array(GRID_WIDTH * GRID_HEIGHT * 3);
+  for (let gy = 0; gy < GRID_HEIGHT; gy += 1) {
+    const sourceY = Math.min(frame.height - 1, Math.round(gy * (frame.height - 1) / (GRID_HEIGHT - 1)));
+    for (let gx = 0; gx < GRID_WIDTH; gx += 1) {
+      const sourceX = Math.min(frame.width - 1, Math.round(gx * (frame.width - 1) / (GRID_WIDTH - 1)));
+      const source = (sourceY * frame.width + sourceX) * 4;
+      const target = (gy * GRID_WIDTH + gx) * 3;
+      colors[target] = Number(frame.data[source]);
+      colors[target + 1] = Number(frame.data[source + 1]);
+      colors[target + 2] = Number(frame.data[source + 2]);
+    }
+  }
+  return colors;
+}
+
+function averageChannel(colors: Float32Array, channel: 0 | 1 | 2): number {
+  let total = 0;
+  let count = 0;
+  for (let index = channel; index < colors.length; index += 3) {
+    total += colors[index];
+    count += 1;
+  }
+  return total / Math.max(1, count);
 }
 
 function alignmentError(

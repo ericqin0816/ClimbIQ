@@ -1056,8 +1056,9 @@ function RouteSplitsPanel({
   analysis: RouteSplitAnalysis;
   onJump: (time: number) => void;
 }) {
+  const reviewOnly = analysis.confidence === "Low" || analysis.confidence === "None";
   const slowest = analysis.sections.find((section) => section.id === analysis.slowestSectionId);
-  const pacingMessage = analysis.confidence === "Low" || analysis.confidence === "None"
+  const pacingMessage = reviewOnly
     ? "Wall-section timing remains review-only because tracking or wall calibration confidence is too low for a pacing conclusion."
     : slowest?.sectionTimeSeconds !== undefined
     ? `${slowest.label} took the most time at ${slowest.sectionTimeSeconds.toFixed(3)}s. Review it first.`
@@ -1083,7 +1084,9 @@ function RouteSplitsPanel({
           <strong>Halfway up the wall</strong>
           <span>
             {analysis.halfway.available && analysis.halfway.climbTime !== undefined
-              ? `${analysis.halfway.climbTime.toFixed(3)}s after the accepted start`
+              ? reviewOnly
+                ? `≈${analysis.halfway.climbTime.toFixed(3)}s review estimate after the accepted start`
+                : `${analysis.halfway.climbTime.toFixed(3)}s after the accepted start`
               : analysis.halfway.reason}
           </span>
           <small>This is a wall-section split only. Hold 10 is timed separately from sustained hand contact.</small>
@@ -1099,6 +1102,7 @@ function RouteSplitsPanel({
             key={section.id}
             section={section}
             slowest={section.id === analysis.slowestSectionId}
+            reviewOnly={reviewOnly}
             onJump={onJump}
           />
         ))}
@@ -1110,10 +1114,12 @@ function RouteSplitsPanel({
 function RouteSectionCard({
   section,
   slowest,
+  reviewOnly,
   onJump,
 }: {
   section: RouteSectionSplit;
   slowest: boolean;
+  reviewOnly: boolean;
   onJump: (time: number) => void;
 }) {
   return (
@@ -1128,11 +1134,13 @@ function RouteSectionCard({
       {section.available && section.sectionTimeSeconds !== undefined ? (
         <>
           <div className="route-section-times">
-            <span><small>Section</small><strong>{section.sectionTimeSeconds.toFixed(3)}s</strong></span>
-            <span><small>Cumulative</small><strong>{section.cumulativeTimeSeconds?.toFixed(3)}s</strong></span>
+            <span><small>{reviewOnly ? "Section estimate" : "Section"}</small><strong>{reviewOnly ? "≈" : ""}{section.sectionTimeSeconds.toFixed(3)}s</strong></span>
+            <span><small>{reviewOnly ? "Cumulative estimate" : "Cumulative"}</small><strong>{reviewOnly ? "≈" : ""}{section.cumulativeTimeSeconds?.toFixed(3)}s</strong></span>
           </div>
           <p>
-            {section.averageVerticalPaceMps !== undefined
+            {reviewOnly
+              ? `${section.confidence} confidence · review the video before comparing this section`
+              : section.averageVerticalPaceMps !== undefined
               ? `${section.averageVerticalPaceMps.toFixed(2)} m/s observed vertical pace`
               : "Vertical pace needs more continuous tracking"}
           </p>

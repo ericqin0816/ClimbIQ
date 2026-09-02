@@ -183,14 +183,19 @@ async function runTiming(protocol, fileName) {
 
 async function main() {
   const expectations = JSON.parse(await readFile(new URL("../benchmarks/real-video-results.json", import.meta.url), "utf8"));
-  const expectedById = new Map((expectations.trials ?? []).map((trial) => [trial.id, trial]));
+  const publicResearch = JSON.parse(await readFile(new URL("../benchmarks/public-broadcast-results.json", import.meta.url), "utf8"));
+  const privateTrials = expectations.trials ?? [];
+  const expectedById = new Map([
+    ...privateTrials.map((trial) => [trial.id, { trial, baselineStatus: "compared" }]),
+    ...(publicResearch.trials ?? []).map((trial) => [trial.id, { trial, baselineStatus: "research-compared" }]),
+  ]);
   const available = (await readdir(videoDirectory))
     .filter((fileName) => /\.(mov|mp4|m4v)$/i.test(fileName))
     .sort();
   // Extra exploratory clips can live beside the private regression set without
   // silently becoming required benchmarks. Explicit file arguments still run
   // them and report their observations as unbaselined.
-  const files = requestedFiles?.length ? requestedFiles : [...expectedById.keys()];
+  const files = requestedFiles?.length ? requestedFiles : privateTrials.map((trial) => trial.id);
   if (!files.length) throw new Error(`No benchmark videos found in ${videoDirectory}.`);
   const missing = files.filter((fileName) => !available.includes(fileName));
   if (missing.length) throw new Error(`Benchmark videos not found: ${missing.join(", ")}`);
@@ -199,7 +204,10 @@ async function main() {
     await waitUntil(protocol.evaluate, `document.readyState === 'complete' && Boolean(document.querySelector('.upload-dropzone'))`, 15000, "app load");
     const outcomes = [];
     for (const fileName of files) outcomes.push(await runTiming(protocol, fileName));
-    const assertions = outcomes.map((outcome) => validateOutcome(outcome, expectedById.get(outcome.fileName)));
+    const assertions = outcomes.map((outcome) => {
+      const expected = expectedById.get(outcome.fileName);
+      return validateOutcome(outcome, expected?.trial, expected?.baselineStatus);
+    });
     const failures = assertions.flatMap((assertion) => assertion.errors.map((error) => `${assertion.fileName}: ${error}`));
     console.log(JSON.stringify({ appUrl, videoDirectory, passed: failures.length === 0, assertions, outcomes }, null, 2));
     if (failures.length) process.exitCode = 1;
@@ -208,13 +216,16 @@ async function main() {
   }
 }
 
-function validateOutcome(outcome, expected) {
+function validateOutcome(outcome, expected, baselineStatus = "unbaselined") {
   const errors = [];
   if (!expected) return { fileName: outcome.fileName, baselineStatus: "unbaselined", errors };
   const acceptedStart = parseTime(outcome.start?.rawTime);
   const reviewStart = parseFirstTime(outcome.reviewStart);
   if (expected.start?.status === "accepted") {
     compareTime(errors, "accepted Start", acceptedStart, expected.start.rawTime);
+    if (Number.isFinite(expected.start.firstMovementRawTime)) {
+      compareTime(errors, "accepted First Movement", parseTime(outcome.firstMovement?.rawTime), expected.start.firstMovementRawTime);
+    }
   } else if (expected.start?.status === "review") {
     if (acceptedStart !== null) errors.push(`Start was automatically accepted at ${acceptedStart.toFixed(3)}s but review was expected.`);
     compareTime(errors, "review Start candidate", reviewStart, expected.start.rawTime);
@@ -229,9 +240,14 @@ function validateOutcome(outcome, expected) {
     } else if (expected.finish?.status === "review") {
       if (acceptedFinish !== null) errors.push(`Finish was automatically accepted at ${acceptedFinish.toFixed(3)}s but review was expected.`);
       compareTime(errors, "review Finish boundary", parseFirstTime(outcome.status.match(/finish[^.]*?(\d+\.\d+)s/i)?.[0]), expected.finish.rawTime);
+    } else if (expected.finish?.status === "not-found-after-scene-cut-guard") {
+      if (acceptedFinish !== null) errors.push(`Finish was automatically accepted at ${acceptedFinish.toFixed(3)}s after a moving-camera finish should have been rejected.`);
+      const reviewBoundary = parseFirstTime(outcome.finishStatus) ??
+        parseFirstTime(outcome.status.match(/finish[^.]*?(\d+\.\d+)s/i)?.[0]);
+      if (reviewBoundary !== null) errors.push(`Finish supplied a ${reviewBoundary.toFixed(3)}s review boundary after the scene-cut guard should have rejected it.`);
     }
   }
-  return { fileName: outcome.fileName, baselineStatus: "compared", errors };
+  return { fileName: outcome.fileName, baselineStatus, errors };
 }
 
 function parseTime(value) {
