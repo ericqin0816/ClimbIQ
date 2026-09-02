@@ -1,5 +1,7 @@
 # ClimbIQ Detection Lab
 
+[![CI](https://github.com/ericqin0816/ClimbIQ/actions/workflows/ci.yml/badge.svg)](https://github.com/ericqin0816/ClimbIQ/actions/workflows/ci.yml)
+
 **Local-first video analysis for speed climbing.** ClimbIQ turns an ordinary race video into reviewable timing markers, route splits, and wall-projected biomechanics without uploading the video.
 
 [Try the live detection lab](https://climbiq-detection-lab-ericqin0816s-projects.vercel.app)

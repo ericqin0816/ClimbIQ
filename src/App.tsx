@@ -1675,6 +1675,9 @@ function App() {
       );
       return;
     }
+    const boundaryStatusNote = poseFinishBoundary.source === "official-time"
+      ? ` Official time bounded analysis at ${poseFinishBoundary.endRawTime.toFixed(3)}s raw; Finish remains unaccepted until it is reviewed.`
+      : "";
 
     let analysisWallCalibration = biomechanics.calibration;
     const savedCalibrationValidation = validateWallCalibration(analysisWallCalibration);
@@ -1697,7 +1700,7 @@ function App() {
           : current);
         setRouteAlignment(null);
         setAutoAnalysisStatus(
-          `Timing finished${automaticMovementAccepted ? ", first movement was accepted" : "; first movement needs review"}, but center-of-mass and route splits were paused because the camera moved. ${cameraStability.reason} Use a fixed-camera recording for trustworthy wall positions and Hold 10 timing.`,
+          `Timing finished${automaticMovementAccepted ? ", first movement was accepted" : "; first movement needs review"}, but center-of-mass and route splits were paused because the camera moved.${boundaryStatusNote} ${cameraStability.reason} Use a fixed-camera recording for trustworthy wall positions and Hold 10 timing.`,
         );
         return;
       }
@@ -1721,7 +1724,7 @@ function App() {
           : current);
         setRouteAlignment(null);
         setAutoAnalysisStatus(
-          `Timing finished${automaticMovementAccepted ? ", first movement was accepted" : "; first movement needs review"}${automaticFinish && !automaticFinish.accepted ? `; finish is bounded at ${automaticFinish.rawTime.toFixed(3)}s and still needs frame review` : ""}, but center of mass needs a full-wall view. ${automaticCalibration.reason} You can mark four lane corners below as a fallback.`,
+          `Timing finished${automaticMovementAccepted ? ", first movement was accepted" : "; first movement needs review"}${automaticFinish && !automaticFinish.accepted ? `; finish is bounded at ${automaticFinish.rawTime.toFixed(3)}s and still needs frame review` : ""}, but center of mass needs a full-wall view.${boundaryStatusNote} ${automaticCalibration.reason} You can mark four lane corners below as a fallback.`,
         );
         return;
       }
@@ -1791,7 +1794,7 @@ function App() {
           ? ` Finish was bounded at ${automaticFinish.rawTime.toFixed(3)}s from verified light evidence and still needs frame review before it becomes an accepted time.`
           : "";
         setAutoAnalysisStatus(
-          `Quick Analyze finished: ${poseResult.metrics.validFrames}/${poseResult.metrics.requestedFrames} usable COM frames${automaticMovementAccepted ? ", with start and first movement accepted." : "; first movement still needs review."}${routeSummary}${finishReviewNote}`,
+          `Quick Analyze finished: ${poseResult.metrics.validFrames}/${poseResult.metrics.requestedFrames} usable COM frames${automaticMovementAccepted ? ", with start and first movement accepted." : "; first movement still needs review."}${routeSummary}${finishReviewNote}${boundaryStatusNote}`,
         );
       } else if (poseResult.metrics.detectedFrames === 0) {
         setAutoAnalysisStatus("Timing finished, but the pose scan still found no athlete. Recheck the wall corners and make the Start Body Zone surround the climber at the start.");

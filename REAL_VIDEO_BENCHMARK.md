@@ -32,6 +32,7 @@ The September 2 evaluation reran every clip from a fresh page using the producti
 | Starts conservatively sent to review | 3 |
 | Accepted-start clips with an automatic High finish | 1/2 |
 | Accepted-start clips with a bounded review finish | 1/2 |
+| Reviewed automatic-finish precision | 1/1 in this sample; 95% Wilson interval 20.7%–100% |
 | 5 fps complete COM run | 42/52 usable frames (80.8%) |
 | Repeated 10 fps COM runs | 43–45/104 usable frames (41.3–43.3%) |
 | 15 fps complete COM run | 0/156 usable frames (0%) |
@@ -51,6 +52,8 @@ Six short 720p race crops from World Climbing's [Chamonix 2026 speed finals](htt
 - All six start cues remained review-only. They are recorded as unverified rather than mislabeled as confirmed timing errors: broadcast edits and incomplete lane-local evidence make them unsafe automatic ground truth even when an underlying beep may be real.
 - No unsafe public start was automatically accepted. The full-frame audit measured 31.0%–79.1% structural change across four proposed cues and labeled them as camera cuts instead of treating the edit as athlete launch motion. One other cue had no reliable lane-local launch.
 - The remaining clip exposed a late audio/light cue: the climber was already launching, but the estimated movement timestamp followed the cue by only 0.033 s. The [World Climbing competition rule](https://images.ifsc-climbing.org/ifsc/image/private/t_q_good/prd/jaq7awz9jmqwpddwnbpr.pdf) defining sub-0.100 s reactions as false starts is now a conservative automatic-acceptance floor, so this candidate is review-only too.
+- As a downstream safety stress test, the unverified 8.817 s men’s cursor was manually continued without promoting it to ground truth. Neither the lower lane light nor the angled upper search verified a Finish, and pose analysis stayed paused; the app did not manufacture a total or scan the descent.
+- The women’s source-590 crop was also continued with its known 6.20 s winning time. Official time supplied a safe analysis boundary but did not create an accepted Finish when neither lower nor upper visual evidence verified one; approximate wall calibration then refused the broadcast framing and requested manual corners.
 - Before the camera-reference guard, one mid-wall reframe produced a false 13.983 s physical-finish review boundary, only 3.100 s after Start despite the official winning time being 6.20 s.
 - Anchoring physical top tracking to the post-start camera view removed that false boundary. The detector now reports no verified finish for the moving-camera crop instead of supplying an inaccurate time.
 

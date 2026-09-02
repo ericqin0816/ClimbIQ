@@ -12,6 +12,7 @@ const knownCorrectAcceptedStarts = acceptedStarts.filter((trial) => trial.start?
 const acceptedFinishes = trials.filter((trial) => trial.finish?.status === "accepted");
 const reviewFinishes = trials.filter((trial) => trial.finish?.status === "review");
 const knownFalseAcceptedFinishes = acceptedFinishes.filter((trial) => trial.finish?.reviewedCorrect === false);
+const knownCorrectAcceptedFinishes = acceptedFinishes.filter((trial) => trial.finish?.reviewedCorrect === true);
 const comTrials = trials.filter((trial) => Number.isFinite(trial.com?.usableFrames) && Number.isFinite(trial.com?.requestedFrames));
 const usableFrames = comTrials.reduce((sum, trial) => sum + trial.com.usableFrames, 0);
 const requestedFrames = comTrials.reduce((sum, trial) => sum + trial.com.requestedFrames, 0);
@@ -37,7 +38,15 @@ const report = {
   finish: {
     accepted: acceptedFinishes.length,
     review: reviewFinishes.length,
+    knownCorrectAccepted: knownCorrectAcceptedFinishes.length,
     knownFalseAccepted: knownFalseAcceptedFinishes.length,
+    reviewedAcceptancePrecisionWilson95: wilsonInterval(
+      knownCorrectAcceptedFinishes.length,
+      acceptedFinishes.filter((trial) => trial.finish?.reviewedCorrect != null).length,
+    ),
+    manuallyConfirmedCorrectReviewCandidates: reviewFinishes.filter((trial) => trial.finish?.reviewedCorrect === true).length,
+    manuallyConfirmedFalseReviewCandidates: reviewFinishes.filter((trial) => trial.finish?.reviewedCorrect === false).length,
+    unverifiedReviewCandidates: reviewFinishes.filter((trial) => trial.finish?.reviewedCorrect == null).length,
   },
   com: {
     evaluatedVideos: comTrials.length,

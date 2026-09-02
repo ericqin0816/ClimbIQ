@@ -24,7 +24,13 @@
         "status": "not-found-after-scene-cut-guard",
         "officialWinningTimeSeconds": 6.2,
         "beforeGuardFalseReviewBoundaryRawTime": 13.983,
-        "beforeGuardFalseClimbTimeSeconds": 3.1
+        "beforeGuardFalseClimbTimeSeconds": 3.1,
+        "officialTimeStressTest": {
+          "automaticFinishAccepted": false,
+          "visualFinishFound": false,
+          "poseBoundaryAvailable": true,
+          "poseResult": "manual-wall-calibration-required"
+        }
       }
     },
     {
@@ -49,7 +55,12 @@
       "sourceStartSeconds": 1552,
       "durationSeconds": 23,
       "start": { "rawTime": 8.817, "status": "review", "reviewedCorrect": null, "reason": "measured reaction was only 0.033s, below the 0.100s valid-race floor" },
-      "finish": { "status": "not-run" }
+      "finish": {
+        "status": "not-found-after-unverified-reviewed-start",
+        "automaticAccepted": false,
+        "poseAnalysisStarted": false,
+        "reason": "lane light never showed a connected return-color flash and no upper finish was verified"
+      }
     },
     {
       "id": "public-chamonix-attempt-1652.mp4",
