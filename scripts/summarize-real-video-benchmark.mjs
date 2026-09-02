@@ -25,6 +25,8 @@ const report = {
   start: {
     accepted: acceptedStarts.length,
     review: reviewedStarts.length,
+    automaticAcceptanceRate: trials.length ? acceptedStarts.length / trials.length : null,
+    reviewRate: trials.length ? reviewedStarts.length / trials.length : null,
     knownCorrectAccepted: knownCorrectAcceptedStarts.length,
     knownFalseAccepted: knownFalseAcceptedStarts.length,
     reviewedAcceptancePrecision: acceptedStarts.length
@@ -38,6 +40,9 @@ const report = {
   finish: {
     accepted: acceptedFinishes.length,
     review: reviewFinishes.length,
+    automaticAcceptanceRateAmongAcceptedStarts: acceptedStarts.length
+      ? acceptedFinishes.length / acceptedStarts.length
+      : null,
     knownCorrectAccepted: knownCorrectAcceptedFinishes.length,
     knownFalseAccepted: knownFalseAcceptedFinishes.length,
     reviewedAcceptancePrecisionWilson95: wilsonInterval(

@@ -4,7 +4,9 @@
 
 **Local-first video analysis for speed climbing.** ClimbIQ turns an ordinary race video into reviewable timing markers, route splits, and wall-projected biomechanics without uploading the video.
 
-[Try the live detection lab](https://climbiq-detection-lab-ericqin0816s-projects.vercel.app)
+[Try the live detection lab](https://climbiq-detection-lab.vercel.app)
+
+[College demo guide and measured talking points](COLLEGE_DEMO.md)
 
 ![ClimbIQ: Every frame. Race-ready insight.](public/og.png)
 
@@ -165,7 +167,7 @@ Before starting new work on either computer, sync the pushed `main` branch:
 git pull --ff-only origin main
 ```
 
-Private videos are intentionally excluded from Git. You can upload a downloaded Drive video directly in the app. To run the repeatable timing benchmark on the Mac, put clips in `node_modules/.climbiq-private-videos/` or set `CLIMBIQ_VIDEO_DIR` to their local folder. The benchmark runner supports the standard macOS Google Chrome location and uses the macOS temporary directory for its isolated profile.
+Private videos are intentionally excluded from Git. You can upload a downloaded Drive video directly in the app. To run the repeatable timing benchmark on the Mac, put clips in `node_modules/.climbiq-private-videos/` or set `CLIMBIQ_VIDEO_DIR` to their local folder. The benchmark runner supports the standard macOS Google Chrome location and uses the macOS temporary directory for its isolated profile; set `CLIMBIQ_CHROME` only if Chrome lives somewhere else.
 
 For a full meet replay, open **Review & advanced tools** and enter the absolute source-time window for one race (for example, ignore before `590` and stop the start search at `610`). ClimbIQ analyzes one attempt at a time and limits automatic finish search to 30 seconds after the accepted start so later races and timer resets cannot leak into the result. Edited multi-camera footage is intentionally sent to review when the frame composition changes at the cue.
 

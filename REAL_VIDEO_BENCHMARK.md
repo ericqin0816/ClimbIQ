@@ -23,6 +23,8 @@ This benchmark records behavior on five private 1080 × 1920 phone recordings. T
 
 The September 2 evaluation reran every clip from a fresh page using the production workflow rather than calling detector helpers directly.
 
+The same `IMG_9199.MOV` workflow was also rerun against the public production deployment. It reproduced the local result exactly: Start 7.130 s, first movement 7.230 s (0.100 s reaction), Finish 17.480 s, total 10.350 s, and 42/52 usable COM frames.
+
 | Measurement | Result |
 | --- | --- |
 | Videos evaluated | 5 |
