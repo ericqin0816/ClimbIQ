@@ -52,6 +52,22 @@ describe("timestamp integrity", () => {
     expect(result.reason).toContain("end of the loaded video");
   });
 
+  it.each(["COM halfway estimate", "Hold contact detection", "Future / experimental"] as const)(
+    "clears an imported legacy automatic Hold 10 marker from %s",
+    (source) => {
+      const markers = populated();
+      const hold10 = markers.find((marker) => marker.id === "hold10")!;
+      hold10.source = source;
+      hold10.confidence = "High";
+      const sanitized = sanitizeTimestampSequence(markers, 20);
+      expect(sanitized.find((marker) => marker.id === "hold10")).toMatchObject({
+        rawTime: null,
+        source: "Not set",
+        confidence: "None",
+      });
+    },
+  );
+
   it("clearing Start also clears all dependent timing", () => {
     const result = clearMarkerTimestamp(populated(), "startSignal");
     expect(result.every((marker) => marker.rawTime === null)).toBe(true);

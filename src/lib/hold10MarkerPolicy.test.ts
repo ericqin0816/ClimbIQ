@@ -1,29 +1,31 @@
 import { describe, expect, it } from "vitest";
 import type { TimestampMarker, TimestampSource } from "../types";
-import { reconcileHold10Marker } from "./hold10MarkerPolicy";
+import { isLegacyAutomaticHold10Marker } from "./hold10MarkerPolicy";
 
 describe("Hold 10 accepted-marker policy", () => {
   it("does not turn a fresh detector proposal into an accepted marker", () => {
     const timestamps = sequence("Not set", null);
-    expect(reconcileHold10Marker(timestamps, 11.515)).toBe(timestamps);
+    expect(isLegacyAutomaticHold10Marker(timestamps.find((marker) => marker.id === "hold10")!)).toBe(false);
     expect(timestamps.find((marker) => marker.id === "hold10")?.rawTime).toBeNull();
   });
 
   it("preserves a user-reviewed manual marker when detection changes", () => {
     const timestamps = sequence("Manual", 11.5);
-    expect(reconcileHold10Marker(timestamps, 11.8)).toBe(timestamps);
+    expect(isLegacyAutomaticHold10Marker(timestamps.find((marker) => marker.id === "hold10")!)).toBe(false);
   });
 
-  it("clears a stale marker written automatically by an older version", () => {
-    const reconciled = reconcileHold10Marker(sequence("Hold contact detection", 11.5), 11.8);
-    const hold10 = reconciled.find((marker) => marker.id === "hold10")!;
-    expect(hold10.rawTime).toBeNull();
-    expect(hold10.source).toBe("Not set");
-  });
+  it.each(["COM halfway estimate", "Hold contact detection", "Future / experimental"] as const)(
+    "identifies a legacy automatic marker from %s",
+    (source) => {
+      const marker = sequence(source, 11.5).find((item) => item.id === "hold10")!;
+      expect(isLegacyAutomaticHold10Marker(marker)).toBe(true);
+    },
+  );
 
-  it("keeps a matching legacy automatic marker until the user reviews it", () => {
-    const timestamps = sequence("Hold contact detection", 11.5);
-    expect(reconcileHold10Marker(timestamps, 11.5)).toBe(timestamps);
+  it("does not classify another marker as legacy Hold 10 evidence", () => {
+    const start = sequence("Manual", 11.5).find((marker) => marker.id === "startSignal")!;
+    start.source = "Hold contact detection";
+    expect(isLegacyAutomaticHold10Marker(start)).toBe(false);
   });
 });
 

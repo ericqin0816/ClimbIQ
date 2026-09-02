@@ -8,6 +8,7 @@ import type {
 } from "../types";
 import { applyTrajectoryKinematics } from "./biomechanics";
 import { getStandardSpeedHold } from "./standardSpeedRoute";
+import { resolveOfficialFinishRawTime } from "./officialTime";
 import { projectImagePointToWall, validateWallCalibration } from "./wallCalibration";
 
 export type BiomechanicsFinishSource = "top-completion" | "accepted-finish" | "analysis-end";
@@ -86,13 +87,11 @@ export function resolveAutomaticPoseFinishBoundary({
       lightFinish <= videoDuration + 0.001
     ? Math.min(videoDuration, lightFinish)
     : undefined;
-  const officialDuration = finiteNumber(officialTotalSeconds);
-  const proposedOfficialFinish = officialDuration !== undefined && officialDuration > 0
-    ? startRawTime + officialDuration
-    : undefined;
-  const officialFinish = proposedOfficialFinish !== undefined && proposedOfficialFinish <= videoDuration + 0.001
-    ? Math.min(videoDuration, proposedOfficialFinish)
-    : undefined;
+  const officialFinish = resolveOfficialFinishRawTime({
+    startRawTime,
+    videoDuration,
+    officialTotalSeconds,
+  });
 
   if (lightFinishAccepted && validLightFinish !== undefined) {
     return {

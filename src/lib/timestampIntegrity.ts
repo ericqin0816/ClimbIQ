@@ -1,4 +1,5 @@
 import type { Confidence, TimestampMarker, TimestampSource } from "../types";
+import { isLegacyAutomaticHold10Marker } from "./hold10MarkerPolicy";
 
 export interface TimestampAcceptanceOptions {
   id: TimestampMarker["id"];
@@ -98,6 +99,9 @@ export function sanitizeTimestampSequence(
     Number.isFinite(rawTime) && rawTime >= 0 && (!durationValid || rawTime <= durationSeconds! + 0.001)
   );
   next = next.map((marker) => rawIsValid(marker.rawTime) ? sanitizeEvidenceLabels(marker) : clearMarker(marker));
+  // Older versions could write detector proposals directly into Hold 10. A
+  // restored proposal is not reviewed evidence and cannot define phase splits.
+  next = next.map((marker) => isLegacyAutomaticHold10Marker(marker) ? clearMarker(marker) : marker);
   const start = getMarker(next, "startSignal");
   if (!start || start.rawTime === null) {
     return next.map(clearMarker);

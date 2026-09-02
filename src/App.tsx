@@ -19,7 +19,8 @@ import { detectAudioStartSignal, type AudioStartResult } from "./lib/detectAudio
 import { detectMotionBasedStartEstimate } from "./lib/detectMotionBasedStartEstimate";
 import { detectStartSignal } from "./lib/detectStartSignal";
 import { detectHoldContact } from "./lib/holdContact";
-import { reconcileHold10Marker } from "./lib/hold10MarkerPolicy";
+import { resolveOfficialFinishRawTime } from "./lib/officialTime";
+import { sanitizeStartLightCalibration, sanitizeVideoMetadata, sanitizeZoneMap } from "./lib/sessionEvidenceIntegrity";
 import { estimateHold10HeightPassage } from "./lib/hold10HeightEstimate";
 import { resolveHold10Target } from "./lib/holdTarget";
 import { analyzePoseVideo, PoseAnalysisCancelledError } from "./lib/poseAnalysis";
@@ -194,6 +195,7 @@ function App() {
   const [finishRunning, setFinishRunning] = useState(false);
   const [finishStatus, setFinishStatus] = useState("");
   const [timestamps, setTimestamps] = useState<TimestampMarker[]>(INITIAL_TIMESTAMPS);
+  const [timestampStatus, setTimestampStatus] = useState("");
   const [copyStatus, setCopyStatus] = useState("");
   const [sessionName, setSessionName] = useState("Untitled climb analysis");
   const [climberName, setClimberName] = useState("");
@@ -201,7 +203,7 @@ function App() {
   const [attemptLocation, setAttemptLocation] = useState("");
   const [attemptType, setAttemptType] = useState("Training");
   const [sessionNotes, setSessionNotes] = useState("");
-  const [savedSessions, setSavedSessions] = useState<SavedAnalysisSession[]>([]);
+  const [savedSessions, setSavedSessions] = useState<SavedAnalysisSession[]>(readSavedSessions);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [sessionStatus, setSessionStatus] = useState("");
   const [exportStatus, setExportStatus] = useState("");
@@ -215,8 +217,13 @@ function App() {
   const [routeAlignment, setRouteAlignment] = useState<RouteAlignmentResult | null>(null);
 
   useEffect(() => {
-    setSavedSessions(readSavedSessions());
-    return () => autoAnalysisAbortRef.current?.abort();
+    return () => {
+      autoAnalysisAbortRef.current?.abort();
+      if (previousObjectUrl.current) {
+        URL.revokeObjectURL(previousObjectUrl.current);
+        previousObjectUrl.current = null;
+      }
+    };
   }, []);
 
   useEffect(() => {
@@ -282,12 +289,16 @@ function App() {
     if (startSignalRaw === null || !Number.isFinite(official) || official <= 0) {
       return null;
     }
-    const rawTime = roundTime(startSignalRaw + official);
-    if (metadata?.duration && rawTime > metadata.duration + 0.001) {
+    const rawTime = metadata?.duration === undefined ? undefined : resolveOfficialFinishRawTime({
+      startRawTime: startSignalRaw,
+      videoDuration: metadata.duration,
+      officialTotalSeconds: official,
+    });
+    if (rawTime === undefined) {
       return null;
     }
     return {
-      rawTime,
+      rawTime: roundTime(rawTime),
       climbTime: roundTime(official),
     };
   }, [metadata?.duration, officialTotalTime, startSignalRaw]);
@@ -393,13 +404,6 @@ function App() {
     [biomechanics.calibration, effectiveBiomechanicsResult, hold10Contact?.detected],
   );
 
-  useEffect(() => {
-    setTimestamps((current) => reconcileHold10Marker(
-      current,
-      hold10Contact?.detected ? hold10Contact.rawTime : undefined,
-    ));
-  }, [hold10Contact?.detected, hold10Contact?.rawTime]);
-
   const startFinalRaw = startResult?.rawTime !== undefined ? Math.max(0, roundTime(startResult.rawTime + startSignalOffset)) : undefined;
   const movementFinalRaw = movementResult?.rawTime !== undefined ? Math.max(0, roundTime(movementResult.rawTime + firstMovementOffset)) : undefined;
   const movementFinalClimb =
@@ -455,6 +459,7 @@ function App() {
     setMovementResult(null);
     setFinishResult(null);
     setFinishStatus("");
+    setTimestampStatus("");
     setMovementPreviewFrames({});
     setMovementPreviewRunning(false);
     setStartSearchStart(0);
@@ -1038,7 +1043,15 @@ function App() {
       }
       return next;
     });
-    clearFinishDependents();
+    const acceptedStart = getTimestamp(timestamps, "startSignal");
+    const lightDerivedStart = acceptedStart.source === "Start light detection" || acceptedStart.source === "Fused start detection";
+    if (lightDerivedStart) {
+      clearTimestamp("startSignal");
+      setAutoAnalysisStatus("The accepted Start used the old light calibration, so Start and all dependent timing were cleared.");
+    } else {
+      invalidateStartDetectorSuggestion("Start-light calibration changed. Run the analysis again to generate a matching suggestion.");
+      clearFinishDependents();
+    }
     setCalibrationStatus(`${kind === "before" ? "Before-start" : "After-start"} sample set at ${sample.time.toFixed(3)}s.`);
   }
 
@@ -1785,9 +1798,11 @@ function App() {
     laneCandidates: AnalysisLaneCandidate[] = [],
   ): Promise<AutomaticFinishOutcome | null> {
     const officialDuration = Number(officialTotalTime);
-    const expectedFinishTime = Number.isFinite(officialDuration) && officialDuration > 0
-      ? acceptedStart + officialDuration
-      : undefined;
+    const expectedFinishTime = resolveOfficialFinishRawTime({
+      startRawTime: acceptedStart,
+      videoDuration: video.duration,
+      officialTotalSeconds: officialDuration,
+    });
     const primaryCandidate: AnalysisLaneCandidate[] = lightZone
       ? [{
           zone: lightZone,
@@ -2054,6 +2069,29 @@ function App() {
     });
   }
 
+  function acceptManualTimestamp(
+    id: TimestampMarker["id"],
+    rawTime: number,
+    acceptanceMetadata?: { detectedRawTime?: number; offsetApplied?: number; note?: string },
+  ) {
+    const validation = applyTimestampAcceptance(timestamps, {
+      id,
+      rawTime,
+      source: "Manual",
+      confidence: "Medium",
+      durationSeconds: metadata?.duration,
+      detectedRawTime: acceptanceMetadata?.detectedRawTime,
+      offsetApplied: acceptanceMetadata?.offsetApplied,
+      note: acceptanceMetadata?.note,
+    });
+    if (!validation.accepted) {
+      setTimestampStatus(validation.reason ?? "That timestamp could not be accepted.");
+      return;
+    }
+    setTimestampStatus("");
+    acceptTimestamp(id, rawTime, "Manual", "Medium", acceptanceMetadata);
+  }
+
   function clearFinishDependents(clearMarker = true) {
     setFinishResult(null);
     setFinishStatus("");
@@ -2062,12 +2100,37 @@ function App() {
     }
   }
 
+  function invalidateStartDetectorSuggestion(message: string) {
+    pendingAutomaticContextRef.current = null;
+    automaticLaneCandidatesRef.current = [];
+    setStartResult(null);
+    setSuggestedStartRawTime(null);
+    setMovementResult(null);
+    setMovementPreviewFrames({});
+    setStartEvidenceStatus("");
+    setAutoAnalysisStatus(message);
+  }
+
+  function invalidateMovementSuggestion(message: string) {
+    setMovementResult(null);
+    setMovementPreviewFrames({});
+    setAutoAnalysisStatus(message);
+  }
+
   function invalidateStartLightDependents(message: string) {
     pendingAutomaticContextRef.current = null;
     automaticLaneCandidatesRef.current = [];
     setStartLightCalibration({});
     setCalibrationStatus(message);
-    clearFinishDependents();
+    const acceptedStart = getTimestamp(timestamps, "startSignal");
+    const lightDerivedStart = acceptedStart.source === "Start light detection" || acceptedStart.source === "Fused start detection";
+    if (lightDerivedStart) {
+      clearTimestamp("startSignal");
+      setAutoAnalysisStatus("The accepted Start used the changed light evidence, so Start and all dependent timing were cleared.");
+    } else {
+      invalidateStartDetectorSuggestion("Start-light evidence changed. Run the analysis again to generate a matching suggestion.");
+      clearFinishDependents();
+    }
   }
 
   function clearTimestamp(id: TimestampMarker["id"]) {
@@ -2110,23 +2173,21 @@ function App() {
     } else {
       setStartSearchEnd(value);
     }
-    pendingAutomaticContextRef.current = null;
-    setStartResult(null);
-    setSuggestedStartRawTime(null);
-    setMovementResult(null);
-    setStartEvidenceStatus("");
-    setAutoAnalysisStatus("Start search window changed. Run the analysis again to generate a matching suggestion.");
+    invalidateStartDetectorSuggestion("Start search window changed. Run the analysis again to generate a matching suggestion.");
   }
 
   function setTimestampFromInput(id: TimestampMarker["id"], value: string, mode: "raw" | "climb") {
     const parsed = parseOptionalNumber(value);
     if (parsed === null) {
+      if (value.trim()) {
+        setTimestampStatus("Enter a valid number for the timestamp.");
+      }
       return;
     }
 
     const startRaw = getTimestamp(timestamps, "startSignal").rawTime ?? startResult?.rawTime;
     const rawTime = mode === "climb" && startRaw !== null && startRaw !== undefined ? startRaw + parsed : parsed;
-    acceptTimestamp(id, rawTime, "Manual", "Medium");
+    acceptManualTimestamp(id, rawTime);
   }
 
   function buildDebugReport(): DetectionDebugReport {
@@ -2456,8 +2517,12 @@ function App() {
     const next = [session, ...savedSessions.filter((item) => item.id !== session.id)].sort((a, b) =>
       b.updatedAt.localeCompare(a.updatedAt),
     );
+    const storageError = writeSavedSessions(next);
+    if (storageError) {
+      setSessionStatus(storageError);
+      return;
+    }
     setSavedSessions(next);
-    writeSavedSessions(next);
     setActiveSessionId(session.id);
     setSessionName(session.name);
     setSessionStatus(`Saved "${session.name}" locally.`);
@@ -2472,8 +2537,9 @@ function App() {
     // the review prevents a frame accepted for one climb from mutating the
     // session that is about to be loaded or duplicated.
     setTimestampReview(null);
+    const safeVideoMetadata = sanitizeVideoMetadata(session.videoMetadata);
     const currentVideoMatches = Boolean(
-      videoUrl && metadata?.metadataLoaded && session.videoMetadata && videoMetadataMatches(metadata, session.videoMetadata),
+      videoUrl && metadata?.metadataLoaded && safeVideoMetadata && videoMetadataMatches(metadata, safeVideoMetadata),
     );
     if (!currentVideoMatches) {
       if (previousObjectUrl.current) {
@@ -2494,8 +2560,11 @@ function App() {
     setAttemptLocation(session.location ?? "");
     setAttemptType(session.attemptType ?? "Training");
     setSessionNotes(session.notes ?? "");
-    setZones(session.zones ?? {});
-    setStartLightCalibration(session.startLightCalibration ?? {});
+    setZones(sanitizeZoneMap(session.zones));
+    setStartLightCalibration(sanitizeStartLightCalibration(
+      session.startLightCalibration,
+      safeVideoMetadata?.duration,
+    ));
     const safeSettings = sanitizeAnalysisSessionSettings(session.settings);
     setStartSearchStart(safeSettings.startSearchStart);
     setStartSearchEnd(safeSettings.startSearchEnd);
@@ -2511,7 +2580,7 @@ function App() {
     setOfficialTotalTime(safeSettings.officialTotalTime);
     setTimestamps(sanitizeTimestampSequence(
       mergeTimestampDefaults(session.timestamps ?? []),
-      session.videoMetadata?.duration,
+      safeVideoMetadata?.duration,
     ));
     setBiomechanics(sanitizeBiomechanicsSession(session.biomechanics));
     setRouteAlignment(null);
@@ -2523,7 +2592,7 @@ function App() {
     setFinishStatus("");
     setFrameDebug(null);
     if (!currentVideoMatches) {
-      setMetadata(session.videoMetadata ? { ...session.videoMetadata, metadataLoaded: false } : null);
+      setMetadata(safeVideoMetadata);
     }
     setSessionStatus(currentVideoMatches
       ? `Loaded "${session.name}" with the matching local video still attached.`
@@ -2547,8 +2616,12 @@ function App() {
       return;
     }
     const next = savedSessions.filter((session) => session.id !== activeSessionId);
+    const storageError = writeSavedSessions(next);
+    if (storageError) {
+      setSessionStatus(storageError);
+      return;
+    }
     setSavedSessions(next);
-    writeSavedSessions(next);
     setActiveSessionId(null);
     setSessionStatus("Saved session deleted.");
   }
@@ -2574,8 +2647,12 @@ function App() {
         ? { ...session, name: nextName, updatedAt: new Date().toISOString() }
         : session,
     ).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+    const storageError = writeSavedSessions(next);
+    if (storageError) {
+      setSessionStatus(storageError);
+      return;
+    }
     setSavedSessions(next);
-    writeSavedSessions(next);
     setSessionStatus(`Renamed session to "${nextName}".`);
   }
 
@@ -2601,8 +2678,12 @@ function App() {
       updatedAt: now,
     };
     const next = [duplicate, ...savedSessions].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+    const storageError = writeSavedSessions(next);
+    if (storageError) {
+      setSessionStatus(storageError);
+      return;
+    }
     setSavedSessions(next);
-    writeSavedSessions(next);
     applySession(duplicate);
     setSessionStatus(`Duplicated "${source.name}".`);
   }
@@ -2637,21 +2718,29 @@ function App() {
         throw new Error("This file is not a ClimbIQ analysis session.");
       }
 
+      const safeVideoMetadata = sanitizeVideoMetadata(parsedSession.videoMetadata);
       const session: SavedAnalysisSession = {
         ...parsedSession,
         id: parsedSession.id || createSessionId(),
         updatedAt: new Date().toISOString(),
+        videoMetadata: safeVideoMetadata,
+        zones: sanitizeZoneMap(parsedSession.zones),
+        startLightCalibration: sanitizeStartLightCalibration(
+          parsedSession.startLightCalibration,
+          safeVideoMetadata?.duration,
+        ),
         settings: sanitizeAnalysisSessionSettings(parsedSession.settings),
         timestamps: sanitizeTimestampSequence(
           mergeTimestampDefaults(parsedSession.timestamps),
-          parsedSession.videoMetadata?.duration,
+          safeVideoMetadata?.duration,
         ),
       };
       const next = [session, ...savedSessions.filter((item) => item.id !== session.id)].sort((a, b) =>
         b.updatedAt.localeCompare(a.updatedAt),
       );
+      const storageError = writeSavedSessions(next);
+      if (storageError) throw new Error(storageError);
       setSavedSessions(next);
-      writeSavedSessions(next);
       applySession(session);
       setSessionStatus(`Session imported. Reload the matching local video file if you want to review frames.`);
       setExportStatus(`Imported "${session.name}".`);
@@ -3102,7 +3191,14 @@ function App() {
             </label>
             <label>
               Sensitivity
-              <select disabled={videoAnalysisRunning} value={startSensitivity} onChange={(event) => setStartSensitivity(event.target.value as Sensitivity)}>
+              <select
+                disabled={videoAnalysisRunning}
+                value={startSensitivity}
+                onChange={(event) => {
+                  setStartSensitivity(event.target.value as Sensitivity);
+                  invalidateStartDetectorSuggestion("Start sensitivity changed. Run the analysis again to generate a matching suggestion.");
+                }}
+              >
                 <option value="low">Low</option>
                 <option value="medium">Medium</option>
                 <option value="high">High</option>
@@ -3120,6 +3216,7 @@ function App() {
                     setStartLightVisibility("blocked");
                     setStartSignalOffset(-0.1);
                   }
+                  invalidateStartDetectorSuggestion("Start detection profile changed. Run the analysis again to generate a matching suggestion.");
                 }}
               >
                 <option value="auto">Auto / Generic</option>
@@ -3139,6 +3236,7 @@ function App() {
                   const value = event.target.value as "clear" | "blocked";
                   setStartLightVisibility(value);
                   setStartSignalOffset(value === "blocked" ? -0.1 : 0);
+                  invalidateStartDetectorSuggestion("Start-light visibility changed. Run the analysis again to generate a matching suggestion.");
                 }}
               >
                 <option value="clear">Clear</option>
@@ -3162,7 +3260,10 @@ function App() {
                 step="0.01"
                 disabled={videoAnalysisRunning}
                 value={reactionTimeOffset}
-                onChange={(event) => setReactionTimeOffset(Number(event.target.value))}
+                onChange={(event) => {
+                  setReactionTimeOffset(Number(event.target.value));
+                  invalidateStartDetectorSuggestion("Reaction estimate changed. Run the analysis again to generate a matching suggestion.");
+                }}
               />
             </label>
           </div>
@@ -3252,7 +3353,14 @@ function App() {
             <summary>Manual movement settings</summary>
           <label className="single-field">
             Sensitivity
-            <select disabled={videoAnalysisRunning} value={movementSensitivity} onChange={(event) => setMovementSensitivity(event.target.value as Sensitivity)}>
+            <select
+              disabled={videoAnalysisRunning}
+              value={movementSensitivity}
+              onChange={(event) => {
+                setMovementSensitivity(event.target.value as Sensitivity);
+                invalidateMovementSuggestion("Movement sensitivity changed. Detect first movement again before reviewing a suggestion.");
+              }}
+            >
               <option value="low">Low</option>
               <option value="medium">Medium</option>
               <option value="high">High</option>
@@ -3263,7 +3371,10 @@ function App() {
             <select
               disabled={videoAnalysisRunning}
               value={firstMovementDefinition}
-              onChange={(event) => setFirstMovementDefinition(event.target.value as FirstMovementDefinition)}
+              onChange={(event) => {
+                setFirstMovementDefinition(event.target.value as FirstMovementDefinition);
+                invalidateMovementSuggestion("First-movement definition changed. Detect first movement again before reviewing a suggestion.");
+              }}
             >
               <option value="earliest">Earliest visible motion</option>
               <option value="committed">Committed launch</option>
@@ -3279,7 +3390,10 @@ function App() {
             <select
               disabled={videoAnalysisRunning}
               value={committedLaunchMinDelay}
-              onChange={(event) => setCommittedLaunchMinDelay(Number(event.target.value))}
+              onChange={(event) => {
+                setCommittedLaunchMinDelay(Number(event.target.value));
+                invalidateMovementSuggestion("Committed-launch delay changed. Detect first movement again before reviewing a suggestion.");
+              }}
             >
               <option value={0}>0.00s</option>
               <option value={0.05}>0.05s</option>
@@ -3478,7 +3592,7 @@ function App() {
                                 suggestedRawTime: item.rawTime!,
                                 confidence: item.confidence,
                                 acceptLabel: "Update marker",
-                                onAccept: (rawTime) => acceptTimestamp(item.id, rawTime, "Manual", "Medium", {
+                                onAccept: (rawTime) => acceptManualTimestamp(item.id, rawTime, {
                                   detectedRawTime: item.rawTime ?? undefined,
                                   offsetApplied: item.rawTime === null ? undefined : roundTime(rawTime - item.rawTime),
                                   note: "Accepted time reviewed and adjusted in the video player.",
@@ -3490,7 +3604,7 @@ function App() {
                             <button onClick={() => clearTimestamp(item.id)}>Clear</button>
                           </>
                         )}
-                        <button onClick={() => acceptTimestamp(item.id, currentTime, "Manual", "Medium")}>Set current</button>
+                        <button onClick={() => acceptManualTimestamp(item.id, currentTime)}>Set current</button>
                         <input
                           aria-label={`${item.label} raw video time`}
                           inputMode="decimal"
@@ -3511,6 +3625,7 @@ function App() {
               </tbody>
             </table>
           </div>
+          {timestampStatus && <p className="error-message">{timestampStatus}</p>}
           </details>
         </Card>
 
@@ -4709,19 +4824,19 @@ function datasetToSavedSession(dataset: any): SavedAnalysisSession {
           metadataLoaded: false,
         }
       : null,
-    zones: {
+    zones: sanitizeZoneMap({
       startLight: zonesFromDataset.startLightZone ?? undefined,
       startBody: zonesFromDataset.startBodyZone ?? undefined,
       hold10: zonesFromDataset.hold10Zone ?? undefined,
       finishLight: zonesFromDataset.finishLightZone ?? undefined,
-    },
-    startLightCalibration: {
+    }),
+    startLightCalibration: sanitizeStartLightCalibration({
       beforeStartRGB: dataset.calibration?.beforeStartRGB ?? undefined,
       afterStartRGB: dataset.calibration?.afterStartRGB ?? undefined,
       calibrationFrameBeforeTime: dataset.calibration?.calibrationFrameBeforeTime ?? undefined,
       calibrationFrameAfterTime: dataset.calibration?.calibrationFrameAfterTime ?? undefined,
       colorDelta: dataset.calibration?.colorDelta ?? undefined,
-    },
+    }, Number(video.duration) || undefined),
     settings: sanitizedSettings,
     timestamps,
     splitCalculations: dataset.splitCalculations ?? {},
@@ -4806,22 +4921,36 @@ function readSavedSessions(): SavedAnalysisSession[] {
     }
     return parsed
       .filter(isSavedAnalysisSession)
-      .map((session) => ({
-        ...session,
-        settings: sanitizeAnalysisSessionSettings(session.settings),
-        timestamps: sanitizeTimestampSequence(
-          mergeTimestampDefaults(session.timestamps),
-          session.videoMetadata?.duration,
-        ),
-      }))
+      .map((session) => {
+        const videoMetadata = sanitizeVideoMetadata(session.videoMetadata);
+        return {
+          ...session,
+          videoMetadata,
+          zones: sanitizeZoneMap(session.zones),
+          startLightCalibration: sanitizeStartLightCalibration(
+            session.startLightCalibration,
+            videoMetadata?.duration,
+          ),
+          settings: sanitizeAnalysisSessionSettings(session.settings),
+          timestamps: sanitizeTimestampSequence(
+            mergeTimestampDefaults(session.timestamps),
+            videoMetadata?.duration,
+          ),
+        };
+      })
       .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
   } catch {
     return [];
   }
 }
 
-function writeSavedSessions(sessions: SavedAnalysisSession[]) {
-  window.localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(sessions));
+function writeSavedSessions(sessions: SavedAnalysisSession[]): string | null {
+  try {
+    window.localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(sessions));
+    return null;
+  } catch {
+    return "The browser could not save this session locally. Export the session JSON so your analysis is not lost.";
+  }
 }
 
 function isSavedAnalysisSession(value: unknown): value is SavedAnalysisSession {

@@ -1145,7 +1145,7 @@ function RouteSectionCard({
               : "Vertical pace needs more continuous tracking"}
           </p>
           {section.startRawTime !== undefined && (
-            <button onClick={() => onJump(section.startRawTime!)}>Review section</button>
+            <button onClick={() => onJump(section.startRawTime!)}>Review {section.label.toLowerCase()}</button>
           )}
         </>
       ) : (
