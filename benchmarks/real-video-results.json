@@ -41,7 +41,17 @@
       "start": { "rawTime": 7.13, "status": "accepted", "confidence": "High", "reviewedCorrect": true },
       "finish": { "rawTime": 17.48, "status": "accepted", "confidence": "High", "reviewedCorrect": true },
       "hold10": { "status": "unavailable", "routeMatches": 8, "requiredRouteMatches": 10 },
-      "com": { "status": "needs-review", "usableFrames": 45, "requestedFrames": 104 }
+      "com": {
+        "status": "needs-review",
+        "usableFrames": 42,
+        "requestedFrames": 52,
+        "repeatUsableFramesAt10Fps": [45, 43, 45, 45],
+        "samplingComparison": {
+          "5fps": { "usableFrames": 42, "requestedFrames": 52, "validCoverage": 0.808 },
+          "10fps": { "minimumUsableFrames": 43, "maximumUsableFrames": 45, "requestedFrames": 104, "validCoverageRange": [0.413, 0.433] },
+          "15fps": { "usableFrames": 0, "requestedFrames": 156, "validCoverage": 0 }
+        }
+      }
     }
   ]
 }

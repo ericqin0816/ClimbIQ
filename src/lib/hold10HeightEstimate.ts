@@ -39,7 +39,10 @@ export function estimateHold10HeightPassage(
   }
   const targetHeight = getStandardSpeedHold(10).wall.yMeters;
   const frames = [...result.frames]
-    .filter((frame) => frame.poseSelected && frame.landmarks.length && Number.isFinite(frame.rawTime))
+    // poseSelected was added after the first saved-session format. Undefined
+    // remains compatible when usable landmarks are present; explicit false is
+    // still rejected.
+    .filter((frame) => frame.poseSelected !== false && frame.landmarks.length && Number.isFinite(frame.rawTime))
     .sort((left, right) => left.rawTime - right.rawTime);
 
   const candidates = (["left", "right"] as const).flatMap((hand) => {

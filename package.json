@@ -9,6 +9,7 @@
   "scripts": {
     "dev": "vite",
     "benchmark:summary": "node scripts/summarize-real-video-benchmark.mjs",
+    "benchmark:timing": "node e2e/real-video-timing.mjs",
     "build": "tsc -b && vite build",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"

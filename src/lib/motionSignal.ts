@@ -15,6 +15,22 @@ export function causalSmoothMotion<T extends { motionScore: number; smoothedMoti
   }
 }
 
+/** Prefer every available pre-start sample, even in tightly trimmed clips.
+ * Falling back to the first post-start frames can mix the launch into the quiet
+ * baseline and raise the threshold enough to hide real movement. */
+export function selectMotionBaseline<T extends { time: number; smoothedMotionScore: number }>(
+  samples: T[],
+  startRawTime: number,
+  fallbackCount = 5,
+): number[] {
+  const preStart = samples
+    .filter((sample) => sample.time < startRawTime)
+    .map((sample) => sample.smoothedMotionScore);
+  return preStart.length
+    ? preStart
+    : samples.slice(0, Math.max(1, fallbackCount)).map((sample) => sample.smoothedMotionScore);
+}
+
 function median(values: number[]): number {
   const sorted = [...values].sort((left, right) => left - right);
   const middle = Math.floor(sorted.length / 2);

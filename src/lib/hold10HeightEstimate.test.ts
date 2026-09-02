@@ -45,6 +45,12 @@ describe("Hold 10 height review estimate", () => {
     expect(estimate.reason).toContain("will not guess across a tracking gap");
   });
 
+  it("supports older saved frames where poseSelected was not recorded", () => {
+    const frames = [frame(4.9, 7.7), frame(5, 8.1), frame(5.1, 8.55), frame(5.2, 8.7)]
+      .map(({ poseSelected: _poseSelected, ...sample }) => sample as BiomechanicsFrame);
+    expect(estimateHold10HeightPassage(makeResult(frames), calibration).detected).toBe(true);
+  });
+
   it("requires a valid wall calibration", () => {
     expect(estimateHold10HeightPassage(makeResult([]), undefined).detected).toBe(false);
   });

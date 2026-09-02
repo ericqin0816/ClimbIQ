@@ -365,18 +365,22 @@ export function BiomechanicsPanel({
             <button className="primary" onClick={captureCalibrationFrame} disabled={!metadata?.metadataLoaded || running || analysisBlocked}>
               {calibrationFrame ? "Capture a different frame" : "Capture current full-wall frame"}
             </button>
-            <button onClick={() => setDraftPoints((points) => points.slice(0, -1))} disabled={!draftPoints.length || running}>
-              Undo last point
-            </button>
-            <button
-              onClick={() => {
-                setDraftPoints([]);
-                setStatus("Draft wall corners cleared.");
-              }}
-              disabled={!draftPoints.length || running}
-            >
-              Start over
-            </button>
+            {draftPoints.length > 0 && (
+              <>
+                <button onClick={() => setDraftPoints((points) => points.slice(0, -1))} disabled={running}>
+                  Undo last point
+                </button>
+                <button
+                  onClick={() => {
+                    setDraftPoints([]);
+                    setStatus("Draft wall corners cleared.");
+                  }}
+                  disabled={running}
+                >
+                  Start over
+                </button>
+              </>
+            )}
           </div>
 
           {calibrationFrame && (
@@ -457,16 +461,18 @@ export function BiomechanicsPanel({
             <button className="primary" onClick={saveCalibration} disabled={draftPoints.length !== 4 || !staticCameraConfirmed || running}>
               Save wall calibration
             </button>
-            <button
-              onClick={() => {
-                onSessionChange({ ...session, calibration: undefined, result: undefined });
-                setDraftPoints([]);
-                setStatus("Saved wall calibration and center-of-mass results cleared.");
-              }}
-              disabled={running}
-            >
-              Remove saved calibration
-            </button>
+            {session.calibration && (
+              <button
+                onClick={() => {
+                  onSessionChange({ ...session, calibration: undefined, result: undefined });
+                  setDraftPoints([]);
+                  setStatus("Saved wall calibration and center-of-mass results cleared.");
+                }}
+                disabled={running}
+              >
+                Remove saved calibration
+              </button>
+            )}
           </div>
           {!calibrationReady && <p className="guidance">{calibrationValidation.error}</p>}
         </section>
@@ -526,9 +532,9 @@ export function BiomechanicsPanel({
                 onChange={(event) => updateSetting("sampleFps", Number(event.target.value))}
                 disabled={running}
               >
-                <option value={5}>5 fps — faster preview</option>
-                <option value={10}>10 fps — recommended</option>
-                <option value={15}>15 fps — finer velocity</option>
+                <option value={5}>5 fps — recommended for phone video</option>
+                <option value={10}>10 fps — finer timing</option>
+                <option value={15}>15 fps — experimental fine timing</option>
               </select>
             </label>
             <label>
@@ -580,13 +586,15 @@ export function BiomechanicsPanel({
           </details>
           {!rangeValid && <p className="guidance">Choose an analysis range inside the loaded video with end after start.</p>}
           <div className="button-row">
-            <button
-              className="primary"
-              onClick={runAnalysis}
-              disabled={running || analysisBlocked || !metadata?.metadataLoaded || !calibrationReady || !rangeValid}
-            >
-              {running ? "Analyzing center of mass…" : automaticRangeReady ? "Analyze center of mass" : "Analyze selected range"}
-            </button>
+            {(running || (metadata?.metadataLoaded && calibrationReady && rangeValid)) && (
+              <button
+                className="primary"
+                onClick={runAnalysis}
+                disabled={running || analysisBlocked}
+              >
+                {running ? "Analyzing center of mass…" : automaticRangeReady ? "Analyze center of mass" : "Analyze selected range"}
+              </button>
+            )}
             {running && <button onClick={() => {
               cancelledRef.current = true;
               abortControllerRef.current?.abort();

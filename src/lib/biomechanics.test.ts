@@ -17,6 +17,10 @@ const calibration = buildWallCalibration([
 ], 0, true);
 
 describe("weighted COM", () => {
+  it("defaults phone-video tracking to the benchmarked 5 fps rate", () => {
+    expect(DEFAULT_BIOMECHANICS_SETTINGS.sampleFps).toBe(5);
+  });
+
   it("uses segment masses that sum to one", () => {
     expect(BODY_SEGMENTS.reduce((sum, segment) => sum + segment.mass, 0)).toBeCloseTo(1, 12);
   });

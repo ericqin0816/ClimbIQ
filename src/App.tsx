@@ -13,7 +13,6 @@ import {
 import { assessCameraStability } from "./lib/cameraStability";
 import { detectFirstMovement } from "./lib/detectFirstMovement";
 import { detectFinishSignal } from "./lib/detectFinishSignal";
-import { detectTopFinishSignal } from "./lib/detectTopFinishSignal";
 import { calculateHold10PhaseSplits } from "./lib/hold10Splits";
 import { detectAutomaticStartLight, type GreenBlueLaneCandidate } from "./lib/detectAutomaticStartLight";
 import { detectAudioStartSignal, type AudioStartResult } from "./lib/detectAudioStartSignal";
@@ -31,6 +30,7 @@ import {
 import { fuseStartEvidence, type FusedStartDecision, type StartEvidence } from "./lib/startSignalFusion";
 import { assessAutomaticStartBodyAudit } from "./lib/startBodyAudit";
 import { deriveAutomaticStartBodyZone, resolveAnalysisBodyZone } from "./lib/startRegion";
+import { applyTimestampAcceptance, clearMarkerTimestamp, recalculateTimestampClimbs, sanitizeTimestampSequence } from "./lib/timestampIntegrity";
 import { captureFrame, clamp, roundTime, sampleFrameAt, sampleZoneOpponentColor, seekTo } from "./lib/videoFrameSampler";
 import { getVideoUiState } from "./lib/videoUiState";
 import { inferAutomaticWallCalibration, validateWallCalibration } from "./lib/wallCalibration";
@@ -934,7 +934,7 @@ function App() {
             setSuggestedStartRawTime(decision.rawTime);
             reviewSeekTarget = decision.rawTime;
             setAutoAnalysisStatus(
-              `Start evidence needs review. The video has been moved to the suggested start at ${decision.rawTime.toFixed(3)}s — if the frame looks right, press "Accept suggested start", or use the current frame instead.`,
+              `Start evidence needs review at ${decision.rawTime.toFixed(3)}s. Open “Review suggested start,” step to the exact frame, then accept the frame on screen.`,
             );
           }
         },
@@ -1400,7 +1400,7 @@ function App() {
             setSuggestedStartRawTime(decision.rawTime);
             reviewSeekTarget = decision.rawTime;
             setAutoAnalysisStatus(
-              `Start evidence needs review. The video has been moved to the suggested start at ${decision.rawTime.toFixed(3)}s — if the frame looks right, press "Accept suggested start", or use the current frame instead.`,
+              `Start evidence needs review at ${decision.rawTime.toFixed(3)}s. Open “Review suggested start,” step to the exact frame, then accept the frame on screen.`,
             );
             return;
           }
@@ -1825,6 +1825,7 @@ function App() {
     // its own fixed patch, so perspective does not require the top and bottom
     // lights to share one x coordinate.
     onStatus?.("The lower lane light did not verify a finish. Searching the angled upper timing indicators…");
+    const { detectTopFinishSignal } = await import("./lib/detectTopFinishSignal");
     const upperFinish = await detectTopFinishSignal({
       video,
       startSignalRawTime: acceptedStart,
@@ -1969,42 +1970,29 @@ function App() {
     rawTime: number,
     source: TimestampSource,
     confidence: Confidence,
-    metadata?: { detectedRawTime?: number; offsetApplied?: number; note?: string },
+    acceptanceMetadata?: { detectedRawTime?: number; offsetApplied?: number; note?: string },
   ) {
     if (id === "startSignal") {
       pendingAutomaticContextRef.current = null;
       clearFinishDependents(false);
+      setSuggestedStartRawTime(null);
+      setMovementResult(null);
+      setRouteAlignment(null);
+      setBiomechanics((current) => current.result ? { ...current, result: undefined } : current);
     }
-    setTimestamps((current) =>
-      recalculateTimestampClimbs(
-        current.map((item) =>
-          id === "startSignal" && item.id === "finishPad"
-            ? {
-                ...item,
-                rawTime: null,
-                climbTime: null,
-                detectedRawTime: null,
-                offsetApplied: 0,
-                note: undefined,
-                source: "Not set",
-                confidence: "None",
-              }
-            :
-          item.id === id
-            ? {
-                ...item,
-                rawTime: roundTime(rawTime),
-                climbTime: id === "startSignal" ? 0 : item.climbTime,
-                detectedRawTime: metadata?.detectedRawTime ?? rawTime,
-                offsetApplied: metadata?.offsetApplied ?? 0,
-                note: metadata?.note,
-                source,
-                confidence,
-              }
-            : item,
-        ),
-      ),
-    );
+    setTimestamps((current) => {
+      const result = applyTimestampAcceptance(current, {
+        id,
+        rawTime,
+        source,
+        confidence,
+        durationSeconds: metadata?.duration,
+        detectedRawTime: acceptanceMetadata?.detectedRawTime,
+        offsetApplied: acceptanceMetadata?.offsetApplied,
+        note: acceptanceMetadata?.note,
+      });
+      return result.timestamps;
+    });
   }
 
   function clearFinishDependents(clearMarker = true) {
@@ -2024,27 +2012,28 @@ function App() {
   }
 
   function clearTimestamp(id: TimestampMarker["id"]) {
-    setTimestamps((current) =>
-      current.map((item) =>
-        item.id === id
-          ? {
-              ...item,
-              rawTime: null,
-              climbTime: null,
-              detectedRawTime: undefined,
-              offsetApplied: undefined,
-              note: undefined,
-              source: "Not set",
-              confidence: "None",
-            }
-          : item,
-      ),
-    );
+    if (id === "startSignal") {
+      pendingAutomaticContextRef.current = null;
+      automaticLaneCandidatesRef.current = [];
+      setStartResult(null);
+      setSuggestedStartRawTime(null);
+      setMovementResult(null);
+      setFinishResult(null);
+      setFinishStatus("");
+      setRouteAlignment(null);
+      setBiomechanics((current) => current.result ? { ...current, result: undefined } : current);
+    } else if (id === "finishPad") {
+      setFinishResult(null);
+      setFinishStatus("");
+      setRouteAlignment(null);
+      setBiomechanics((current) => current.result ? { ...current, result: undefined } : current);
+    }
+    setTimestamps((current) => clearMarkerTimestamp(current, id));
   }
 
   function setTimestampFromInput(id: TimestampMarker["id"], value: string, mode: "raw" | "climb") {
-    const parsed = Number(value);
-    if (!Number.isFinite(parsed)) {
+    const parsed = parseOptionalNumber(value);
+    if (parsed === null) {
       return;
     }
 
@@ -2184,6 +2173,8 @@ function App() {
     const calculatedTotal = splits["Calculated Total Time"];
     const reactionTime = splits["Reaction Time"];
     const launchDelay = splits["Launch Delay"];
+    const startToHold10 = splits["Start to Hold 10"];
+    const hold10ToFinish = splits["Hold 10 to Finish"];
     const official = parseOptionalNumber(officialTotalTime);
     const date = attemptDate || todayDateString();
 
@@ -2196,6 +2187,8 @@ function App() {
       `official_time: ${yamlNumber(official)}\n` +
       `reaction_time: ${yamlNumber(reactionTime)}\n` +
       `launch_delay: ${yamlNumber(launchDelay)}\n` +
+      `start_to_hold_10: ${yamlNumber(startToHold10)}\n` +
+      `hold_10_to_finish: ${yamlNumber(hold10ToFinish)}\n` +
       `calculated_total_time: ${yamlNumber(calculatedTotal)}\n` +
       `tags:\n` +
       `  - climbiq\n` +
@@ -2209,6 +2202,8 @@ function App() {
       `- Video file: ${metadata?.fileName ?? "Not set"}\n` +
       `- Official time: ${formatExportTime(official)}\n` +
       `- Calculated total: ${formatExportTime(calculatedTotal)}\n` +
+      `- Start → Hold 10: ${formatExportTime(startToHold10)}\n` +
+      `- Hold 10 → Finish: ${formatExportTime(hold10ToFinish)}\n` +
       `- Attempt type: ${attemptType || "Not set"}\n` +
       `- Location / gym: ${attemptLocation || "Not set"}\n` +
       `- Notes: ${sessionNotes || "Not set"}\n\n` +
@@ -2229,6 +2224,7 @@ function App() {
       markdownSplitRow("Preload Gap", splits) +
       markdownSplitRow("Start to First Hold", splits) +
       markdownSplitRow("Movement to First Hold", splits) +
+      markdownSplitRow("Start to Hold 10", splits) +
       markdownSplitRow("First Hold to Hold 10", splits) +
       markdownSplitRow("Hold 10 to Finish", splits) +
       markdownSplitRow("Movement Time", splits) +
@@ -2417,7 +2413,10 @@ function App() {
     setCommittedLaunchMinDelay(session.settings.committedLaunchMinDelay);
     setFirstMovementOffset(session.settings.firstMovementOffset);
     setOfficialTotalTime(session.settings.officialTotalTime);
-    setTimestamps(recalculateTimestampClimbs(mergeTimestampDefaults(session.timestamps ?? [])));
+    setTimestamps(sanitizeTimestampSequence(
+      mergeTimestampDefaults(session.timestamps ?? []),
+      session.videoMetadata?.duration,
+    ));
     setBiomechanics(sanitizeBiomechanicsSession(session.biomechanics));
     setRouteAlignment(null);
     pendingAutomaticContextRef.current = null;
@@ -3407,26 +3406,36 @@ function App() {
                     <td>{item.confidence}</td>
                     <td>
                       <div className="table-actions">
-                        <button
-                          disabled={item.rawTime === null}
-                          onClick={() => item.rawTime !== null && reviewTimestamp({
-                            label: item.label,
-                            suggestedRawTime: item.rawTime,
-                            confidence: item.confidence,
-                            acceptLabel: "Update marker",
-                            onAccept: (rawTime) => acceptTimestamp(item.id, rawTime, "Manual", "Medium", {
-                              detectedRawTime: item.rawTime ?? undefined,
-                              offsetApplied: item.rawTime === null ? undefined : roundTime(rawTime - item.rawTime),
-                              note: "Accepted time reviewed and adjusted in the video player.",
-                            }),
-                          })}
-                        >
-                          Review
-                        </button>
-                        <button onClick={() => clearTimestamp(item.id)}>Clear</button>
+                        {item.rawTime !== null && (
+                          <>
+                            <button
+                              onClick={() => reviewTimestamp({
+                                label: item.label,
+                                suggestedRawTime: item.rawTime!,
+                                confidence: item.confidence,
+                                acceptLabel: "Update marker",
+                                onAccept: (rawTime) => acceptTimestamp(item.id, rawTime, "Manual", "Medium", {
+                                  detectedRawTime: item.rawTime ?? undefined,
+                                  offsetApplied: item.rawTime === null ? undefined : roundTime(rawTime - item.rawTime),
+                                  note: "Accepted time reviewed and adjusted in the video player.",
+                                }),
+                              })}
+                            >
+                              Review
+                            </button>
+                            <button onClick={() => clearTimestamp(item.id)}>Clear</button>
+                          </>
+                        )}
                         <button onClick={() => acceptTimestamp(item.id, currentTime, "Manual", "Medium")}>Set current</button>
-                        <input placeholder="Raw" onBlur={(event) => setTimestampFromInput(item.id, event.target.value, "raw")} />
                         <input
+                          aria-label={`${item.label} raw video time`}
+                          inputMode="decimal"
+                          placeholder="Raw"
+                          onBlur={(event) => setTimestampFromInput(item.id, event.target.value, "raw")}
+                        />
+                        <input
+                          aria-label={`${item.label} climb time`}
+                          inputMode="decimal"
                           placeholder="Climb"
                           disabled={startSignalRaw === null}
                           onBlur={(event) => setTimestampFromInput(item.id, event.target.value, "climb")}
@@ -3522,7 +3531,7 @@ function App() {
           ) : (
             <p className="guidance">Start → Hold 10 and Hold 10 → Finish appear after Hold 10 hand contact is verified.</p>
           )}
-          {routeSplitAnalysis?.available ? (
+          {routeSplitAnalysis?.available && ["Medium", "High"].includes(routeSplitAnalysis.confidence) ? (
             <>
               <div className="split-grid automatic-split-grid">
                 {routeSplitAnalysis.halfway.climbTime !== undefined && effectiveBiomechanicsResult && (
@@ -3554,8 +3563,10 @@ function App() {
                 </p>
               )}
             </>
+          ) : routeSplitAnalysis?.available ? (
+            <p className="guidance">Wall-section estimates are withheld here because overall COM tracking confidence is {routeSplitAnalysis.confidence.toLowerCase()}. Review the diagnostic section in Performance insights instead.</p>
           ) : (
-            <p className="guidance">Run center-of-mass analysis to calculate the bottom half, top half, and three wall-section splits automatically.</p>
+            <p className="guidance">Run center-of-mass analysis to calculate wall-height halves and thirds automatically.</p>
           )}
           <details className="help-details">
             <summary>Manual and contact-based splits</summary>
@@ -4475,22 +4486,6 @@ function startSourceForCandidate(candidate: DetectionCandidate): TimestampSource
       : "Start light detection";
 }
 
-function recalculateTimestampClimbs(timestamps: TimestampMarker[]): TimestampMarker[] {
-  const startRaw = getTimestamp(timestamps, "startSignal").rawTime;
-  return timestamps.map((item) => {
-    if (item.rawTime === null) {
-      return { ...item, climbTime: null };
-    }
-    if (item.id === "startSignal") {
-      return { ...item, climbTime: 0 };
-    }
-    return {
-      ...item,
-      climbTime: startRaw === null ? null : roundTime(item.rawTime - startRaw),
-    };
-  });
-}
-
 function normalizeZone(zone: NormalizedZone): NormalizedZone {
   return {
     ...zone,
@@ -4661,7 +4656,7 @@ function datasetToSavedSession(dataset: any): SavedAnalysisSession {
   const video = dataset.video ?? {};
   const zonesFromDataset = dataset.zones ?? {};
   const settings = dataset.settings ?? {};
-  const timestamps = timestampsFromDataset(dataset.acceptedTimestamps ?? []);
+  const timestamps = timestampsFromDataset(dataset.acceptedTimestamps ?? [], Number(video.duration) || undefined);
 
   return {
     id: session.sessionId || createSessionId(),
@@ -4717,7 +4712,7 @@ function datasetToSavedSession(dataset: any): SavedAnalysisSession {
   };
 }
 
-function timestampsFromDataset(values: any[]): TimestampMarker[] {
+function timestampsFromDataset(values: any[], durationSeconds?: number): TimestampMarker[] {
   const next = INITIAL_TIMESTAMPS.map((item) => ({ ...item }));
   for (const value of values) {
     const markerId = value.markerId as TimestampMarker["id"];
@@ -4733,7 +4728,7 @@ function timestampsFromDataset(values: any[]): TimestampMarker[] {
     existing.confidence = value.confidence ?? "None";
     existing.note = value.note ?? "";
   }
-  return recalculateTimestampClimbs(next);
+  return sanitizeTimestampSequence(next, durationSeconds);
 }
 
 function mergeTimestampDefaults(values: TimestampMarker[]) {

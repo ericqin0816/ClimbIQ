@@ -38,7 +38,10 @@ export interface ComEstimate<TPoint> {
 }
 
 export const DEFAULT_BIOMECHANICS_SETTINGS: BiomechanicsSettings = {
-  sampleFps: 10,
+  // On distant portrait phone footage, 5 fps gave the pose tracker enough
+  // displacement between frames to reacquire the athlete reliably (42/52
+  // usable versus 43–45/104 at 10 fps in the real-video benchmark).
+  sampleFps: 5,
   minVisibility: 0.25,
   minMassCoverage: 0.75,
   smoothingWindowSeconds: 0.2,

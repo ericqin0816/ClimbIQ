@@ -13,6 +13,7 @@ const knownFalseAcceptedFinishes = acceptedFinishes.filter((trial) => trial.fini
 const comTrials = trials.filter((trial) => Number.isFinite(trial.com?.usableFrames) && Number.isFinite(trial.com?.requestedFrames));
 const usableFrames = comTrials.reduce((sum, trial) => sum + trial.com.usableFrames, 0);
 const requestedFrames = comTrials.reduce((sum, trial) => sum + trial.com.requestedFrames, 0);
+const repeatedComRuns = trials.flatMap((trial) => trial.com?.repeatUsableFramesAt10Fps ?? []);
 
 const report = {
   benchmarkVersion: benchmark.version,
@@ -37,6 +38,9 @@ const report = {
     usableFrames,
     requestedFrames,
     usableFrameRate: requestedFrames ? usableFrames / requestedFrames : null,
+    repeatedRunRange: repeatedComRuns.length
+      ? { minimumUsableFrames: Math.min(...repeatedComRuns), maximumUsableFrames: Math.max(...repeatedComRuns) }
+      : null,
   },
   hold10: {
     available: trials.filter((trial) => trial.hold10?.status === "available").length,

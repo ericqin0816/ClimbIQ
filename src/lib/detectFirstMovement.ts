@@ -8,7 +8,7 @@ import type {
   Sensitivity,
 } from "../types";
 import { captureZoneImageData, normalizedZoneToPixelRect, sampleFramesInRange, seekTo } from "./videoFrameSampler";
-import { adaptiveMotionThreshold, causalSmoothMotion } from "./motionSignal";
+import { adaptiveMotionThreshold, causalSmoothMotion, selectMotionBaseline } from "./motionSignal";
 
 interface DetectFirstMovementOptions {
   video: HTMLVideoElement;
@@ -113,12 +113,10 @@ export async function detectFirstMovement({
   debug.firstSampledTimeAfterStart = firstPostStartSample ? roundMetric(firstPostStartSample.time - startSignalRawTime) : undefined;
   debug.firstSampleMotion = firstPostStartSample?.smoothedMotionScore;
 
-  const preStartBaseline = debug.samples
+  const preStartMotion = debug.samples
     .filter((sample) => sample.time < startSignalRawTime)
     .map((sample) => sample.smoothedMotionScore);
-  const baselineSamples = preStartBaseline.length >= 3
-    ? preStartBaseline
-    : debug.samples.slice(0, Math.min(5, debug.samples.length)).map((sample) => sample.smoothedMotionScore);
+  const baselineSamples = selectMotionBaseline(debug.samples, startSignalRawTime);
   const baselineMotion = median(baselineSamples);
   const fixedThreshold = FIXED_THRESHOLDS[sensitivity];
   const dynamicThreshold = adaptiveMotionThreshold(baselineSamples, fixedThreshold, DYNAMIC_ADDS[sensitivity]);
@@ -134,7 +132,7 @@ export async function detectFirstMovement({
     ? roundMetric(firstPostStartSample.smoothedMotionScore / debug.maxMotion)
     : undefined;
   debug.movementAlreadyUnderway = (debug.firstSampleToMaxRatio ?? 0) > 0.8;
-  debug.preStartMotionDetected = debug.samples.some((sample) => sample.time < startSignalRawTime && sample.smoothedMotionScore >= earliestThreshold);
+  debug.preStartMotionDetected = preStartMotion.some((motion) => motion >= earliestThreshold);
 
   for (const sample of debug.samples) {
     if (sample.smoothedMotionScore >= debug.threshold) {

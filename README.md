@@ -56,6 +56,8 @@ ClimbIQ now includes optional pose analysis, but pose never changes accepted tim
 
 Quick Analyze runs MediaPipe Pose Landmarker locally after it has an accepted, official, or verified review-level finish boundary. It never falls back to the full video when finish evidence is missing, so setup footage and the descent cannot silently become part of the climb. It automatically estimates the selected 3 m lane from the upper timing lights and wall-to-mat edge, follows the athlete through the climb range, and builds the center-of-mass path and speed charts. The automatic wall scale is explicitly labeled approximate.
 
+Before automatic wall calibration, ClimbIQ compares robust fixed-scene edges near the start and finish. Frame-wide translation that is materially better explained by a shifted image is treated as camera movement; timing remains available, but COM, metre-per-second output, route registration, and Hold 10 splits pause rather than using one invalid homography for a panned or tilted recording. Local athlete motion and exposure changes are trimmed out of this check.
+
 For more precise metre and m/s output, the **Center of Mass** panel still supports a manual four-corner calibration:
 
 1. Capture a frame showing the complete standardized speed lane.
@@ -78,7 +80,9 @@ COM has a second climb-completion guard for late or previously saved finish rang
 
 ## Automatic Route Splits
 
-Center-of-mass results also calculate the bottom half, top half, and lower/middle/top wall thirds. Split crossings use upward-only COM progress and are never interpolated across tracking gaps longer than 0.25 seconds. ClimbIQ identifies the slowest complete wall section and provides a direct video-review jump. Wall halfway is only a section boundary and never populates Hold 10.
+Center-of-mass results also calculate wall-height halves and lower/middle/top wall thirds. Split crossings use upward-only COM progress and are never interpolated across tracking gaps longer than 0.25 seconds. ClimbIQ identifies the slowest complete wall section and provides a direct video-review jump. Low-confidence wall sections remain in diagnostics instead of being published as exact main-result splits.
+
+The contact-defined race phases are calculated separately: **Start → Hold 10** and **Hold 10 → Finish** appear only after an accepted Hold 10 contact lies strictly between the accepted Start and Finish. This prevents the 7.5 m COM crossing from being mislabeled as Hold 10. Exports include both phase times explicitly.
 
 ## Visually Registered Holds And Hold 10 Contact
 
@@ -90,7 +94,9 @@ Strongly oblique views are supported by the wall homography when the camera is f
 
 Hold 10 timing uses a robust hand point from the visible index, pinky, and thumb landmarks, with the wrist as a fallback. Confirmation is based on elapsed dwell time at 5, 10, or 15 fps rather than a fixed frame count. Median filtering absorbs one bad hand landmark, a single short tracking gap can be bridged, and a longer loss starts a new candidate. The detector rejects fast fly-bys, competing Hold 9/11 proximity, missing hand evidence, and every COM-height-only crossing. Contact onset is refined at the tight confirmation boundary instead of being backdated to the broad search-radius entry.
 
-Each accepted candidate includes deterministic evidence diagnostics and remains reviewable frame-by-frame. Compact saved sessions retain the hand landmarks required to reproduce the same Hold 10 result after reload. A stale pose result cannot populate Hold 10, route splits, or the video overlay after the accepted start, finish, or selected athlete changes. Manual Hold 10 zones are validated and projected once for both detection and overlay; malformed or off-wall corrections fall back to visual route registration or pause contact timing.
+When the route center cannot be registered, a separate review-only fallback can locate a continuous tracked-hand crossing of Hold 10's standardized height. It never accepts contact automatically, never interpolates across a tracking gap, and never substitutes the estimate into race-phase splits. It only opens the exact-frame review workflow so a person can confirm the real hold contact.
+
+Each accepted candidate includes deterministic evidence diagnostics and remains reviewable frame-by-frame. Compact saved sessions retain the hand landmarks required to reproduce the same Hold 10 result after reload. A stale pose result cannot populate Hold 10, route splits, or the video overlay after the accepted start, finish, or selected athlete changes. Changing or clearing Start invalidates all dependent markers; an earlier corrected Finish clears markers that now fall outside the climb. Imported session timestamps are range/order checked and unknown evidence labels are downgraded. Manual Hold 10 zones are validated and projected once for both detection and overlay; malformed or off-wall corrections fall back to visual route registration or pause contact timing.
 
 Suggested timestamps open a dedicated video-review workflow before acceptance. The review panel displays the suggested raw time, exact frame currently on screen, adjustment amount, frame-step controls, and an action that accepts the displayed frame. Sticky workflow navigation and collapsed manual/diagnostic sections reduce long-page scrolling.
 
@@ -136,7 +142,18 @@ npm run typecheck
 npm run test
 ```
 
-Open the dev server URL, upload a local climbing video, and press **Analyze climb automatically**. Zones are optional unless another person appears in frame or automatic light discovery needs manual help.
+Open the dev server URL, upload a local climbing video, and press **Run full analysis**. Zones are optional unless another person appears in frame or automatic light discovery needs manual help.
+
+### Real-video timing regression
+
+Keep private test clips outside Git in `node_modules/.climbiq-private-videos/`, start the development server, then run:
+
+```bash
+npm run benchmark:timing
+npm run benchmark:summary
+```
+
+The timing runner uses the real browser workflow, stops after timing when possible, compares accepted/review outcomes with `benchmarks/real-video-results.json`, and exits nonzero if an expected Start or Finish policy regresses. Set `CLIMBIQ_VIDEO_DIR` for a different private directory or `CLIMBIQ_BENCHMARK_FILES=clip1.mov,clip2.mov` for a subset. Videos and frames are never written into the repository.
 
 ## Deploy On Vercel
 
@@ -169,7 +186,7 @@ Dataset exports retain diagnostic data for troubleshooting without putting devel
 
 ## Obsidian Export
 
-The **Export & Dataset** card can generate an Obsidian-ready Markdown note for each analyzed attempt. Use **Copy Obsidian Note** or **Download Markdown** after accepting timestamps.
+The **Save & export** card can generate an Obsidian-ready Markdown note for each analyzed attempt. Use **Download report**, or open **Copy and Obsidian options**, after accepting timestamps.
 
 The Markdown includes:
 
@@ -195,7 +212,7 @@ Suggested workflow:
 
 1. Create an Obsidian vault called `ClimbIQ Training Log`.
 2. Create folders: `Attempts`, `Exports`, `Debug Reports`, `Templates`.
-3. After analyzing a climb, click **Download Markdown** or **Copy Obsidian Note**.
+3. After analyzing a climb, click **Download report** or open the copy options.
 4. Save the Markdown note into `Attempts`.
 5. Save the JSON export into `Exports`.
 6. Keep videos local. ClimbIQ stores the video file name only, not the video file.

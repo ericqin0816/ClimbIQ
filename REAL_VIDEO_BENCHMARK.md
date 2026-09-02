@@ -31,12 +31,14 @@ The September 2 evaluation reran every clip from a fresh page using the producti
 | Starts conservatively sent to review | 3 |
 | Accepted-start clips with an automatic High finish | 1/2 |
 | Accepted-start clips with a bounded review finish | 1/2 |
-| Best complete COM run | 45/104 usable frames (43.3%) |
+| 5 fps complete COM run | 42/52 usable frames (80.8%) |
+| Repeated 10 fps COM runs | 43–45/104 usable frames (41.3–43.3%) |
+| 15 fps complete COM run | 0/156 usable frames (0%) |
 | Automatic Hold 10 contacts on the complete COM run | 0 |
 
 This is a precision-first regression sample, not a population accuracy claim. Five related phone recordings are not enough to estimate general accuracy. The next useful dataset should contain labeled start, Hold 10 contact, and finish frames from different phones, gyms, lanes, lighting conditions, and camera angles.
 
-The complete `IMG_9199.MOV` run exposed the largest remaining data limitation: timing was stable at 7.130 s → 17.480 s, but visual route registration found only 8 of the 10 matches required by policy, so Hold 10 contact stayed unavailable. COM tracking produced 45/104 usable frames and began too high to publish a lower-wall crossing. ClimbIQ now keeps those missing outputs explicit instead of substituting a wall-height estimate for Hold 10.
+The complete `IMG_9199.MOV` run exposed the largest remaining data limitation: timing was stable at 7.130 s → 17.480 s across repeated runs, but visual route registration consistently found only 8 of the 10 matches required by policy, so Hold 10 contact stayed unavailable. COM tracking changed sharply with sample rate: 5 fps produced 42/52 usable frames (80.8%) and recovered every wall-height split, 10 fps produced only 43–45/104 (41.3–43.3%), and 15 fps failed identity selection. The measured 5 fps setting is now the phone-video default; 10/15 fps remain advanced options. ClimbIQ keeps missing contact outputs explicit instead of substituting a wall-height estimate for Hold 10.
 
 ## Acceptance policy
 
