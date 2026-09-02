@@ -90,7 +90,7 @@ Automatic timestamps are intentionally precision-first:
 
 ## Automated coverage
 
-The test suite includes tiny upper indicators, exposure changes, transient and full-frame occlusions, frame-level transition refinement, physical top reach/descent, missing descent, and automatic-start body-audit cases. Run it with `npm test`.
+The test suite includes tiny upper indicators, exposure changes, transient and full-frame occlusions, frame-level transition refinement, physical top reach/descent, missing descent, and automatic-start body-audit cases. Seeded variance coverage adds 80 noisy climb-state trials that must not invent a Finish and 50 noisy sustained reversals that must retain the correct boundary. Run it with `npm test`.
 
 The browser timing runner executes only the five IDs recorded in the benchmark JSON by default, so extra research clips can safely live in the private video directory. Run one new clip without claiming a baseline using:
 
