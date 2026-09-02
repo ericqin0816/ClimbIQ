@@ -12,6 +12,7 @@ import {
 } from "./lib/biomechanicsSession";
 import { detectFirstMovement } from "./lib/detectFirstMovement";
 import { detectFinishSignal } from "./lib/detectFinishSignal";
+import { detectTopFinishSignal } from "./lib/detectTopFinishSignal";
 import { detectAutomaticStartLight, type GreenBlueLaneCandidate } from "./lib/detectAutomaticStartLight";
 import { detectAudioStartSignal, type AudioStartResult } from "./lib/detectAudioStartSignal";
 import { detectMotionBasedStartEstimate } from "./lib/detectMotionBasedStartEstimate";
@@ -25,6 +26,7 @@ import {
   type RouteAlignmentResult,
 } from "./lib/routeAlignment";
 import { fuseStartEvidence, type FusedStartDecision, type StartEvidence } from "./lib/startSignalFusion";
+import { assessAutomaticStartBodyAudit } from "./lib/startBodyAudit";
 import { deriveAutomaticStartBodyZone, resolveAnalysisBodyZone } from "./lib/startRegion";
 import { captureFrame, clamp, roundTime, sampleFrameAt, sampleZoneOpponentColor, seekTo } from "./lib/videoFrameSampler";
 import { getVideoUiState } from "./lib/videoUiState";
@@ -1394,6 +1396,35 @@ function App() {
           }
 
           const acceptedStart = Math.max(0, roundTime(decision.rawTime + startSignalOffset));
+          setAutoAnalysisStatus("Start cues found. Verifying that the selected athlete launches after them…");
+          const preflightMovement = await detectFirstMovement({
+            video,
+            zone: analysisBodyZone,
+            startSignalRawTime: acceptedStart,
+            sensitivity: movementSensitivity,
+            movementDefinition: firstMovementDefinition,
+            committedLaunchMinDelay,
+          });
+          if (abortController.signal.aborted) {
+            throw new PoseAnalysisCancelledError();
+          }
+          setMovementResult(preflightMovement);
+          const bodyAudit = assessAutomaticStartBodyAudit(preflightMovement, acceptedStart);
+          setStartEvidenceStatus(`${decision.reason} ${bodyAudit.reason} Audio: ${audioReason}`);
+          if (!bodyAudit.safeToAutoAccept) {
+            pendingAutomaticContextRef.current = {
+              analysisBodyZone,
+              analysisLightZone,
+              analysisLightCalibration,
+              analysisLaneCandidates,
+            };
+            setSuggestedStartRawTime(decision.rawTime);
+            reviewSeekTarget = decision.rawTime;
+            setAutoAnalysisStatus(
+              `Start cues need review because lane-local body motion did not confirm a new launch. ${bodyAudit.reason}`,
+            );
+            return;
+          }
           acceptTimestamp(
             "startSignal",
             acceptedStart,
@@ -1413,6 +1444,7 @@ function App() {
             { analysisBodyZone, analysisLightZone, analysisLightCalibration, analysisLaneCandidates },
             "Automatically accepted by Quick Analyze.",
             abortController.signal,
+            preflightMovement,
           );
         },
         "Quick Analyze finished. Video restored to its previous position.",
@@ -1440,8 +1472,9 @@ function App() {
     notePrefix: string,
     signal?: AbortSignal,
     zoneOverride?: NormalizedZone,
+    precomputed?: FirstMovementDetectionResult,
   ): Promise<boolean> {
-    const automaticMovement = await detectFirstMovement({
+    const automaticMovement = precomputed ?? await detectFirstMovement({
       video,
       zone: zoneOverride ?? zones.startBody,
       startSignalRawTime: acceptedStart,
@@ -1483,6 +1516,7 @@ function App() {
     context: PendingAutomaticAnalysisContext,
     notePrefix: string,
     signal?: AbortSignal,
+    preflightMovement?: FirstMovementDetectionResult,
   ): Promise<void> {
     setAutoAnalysisStatus("Start found. Checking the verified lane light for the finish…");
     const automaticFinish = await detectAndMaybeAcceptFinish(
@@ -1517,6 +1551,7 @@ function App() {
       notePrefix,
       signal,
       analysisBodyZone,
+      preflightMovement,
     );
 
     const officialDuration = Number(officialTotalTime);
@@ -1561,7 +1596,7 @@ function App() {
           : current);
         setRouteAlignment(null);
         setAutoAnalysisStatus(
-          `Timing finished${automaticMovementAccepted ? ", first movement was accepted" : "; first movement needs review"}, but center of mass needs a full-wall view. ${automaticCalibration.reason} You can mark four lane corners below as a fallback.`,
+          `Timing finished${automaticMovementAccepted ? ", first movement was accepted" : "; first movement needs review"}${automaticFinish && !automaticFinish.accepted ? `; finish is bounded at ${automaticFinish.rawTime.toFixed(3)}s and still needs frame review` : ""}, but center of mass needs a full-wall view. ${automaticCalibration.reason} You can mark four lane corners below as a fallback.`,
         );
         return;
       }
@@ -1754,6 +1789,70 @@ function App() {
     }
 
     const review = bestReview!;
+
+    // Angled phone recordings make the lower start sensor tiny and unreliable
+    // after the athlete climbs away from it. When no lower-lane reversal is
+    // strong enough to accept, independently search the broad upper band of
+    // that same lane for the finish timing indicator. The upper search discovers
+    // its own fixed patch, so perspective does not require the top and bottom
+    // lights to share one x coordinate.
+    onStatus?.("The lower lane light did not verify a finish. Searching the angled upper timing indicators…");
+    const upperFinish = await detectTopFinishSignal({
+      video,
+      startSignalRawTime: acceptedStart,
+      laneHintZone: review.candidate.zone,
+      expectedFinishTime,
+      signal,
+      onProgress: (phase, processed, total) => {
+        onStatus?.(
+          `${phase === "coarse" ? "Scanning upper timing indicators" : "Refining upper finish"}: ${processed}/${total} frames…`,
+        );
+      },
+    });
+    if (signal?.aborted) {
+      throw new PoseAnalysisCancelledError();
+    }
+    const upperAgreesWithOfficial = expectedFinishTime === undefined ||
+      (upperFinish.result.rawTime !== undefined && Math.abs(upperFinish.result.rawTime - expectedFinishTime) <= 0.45);
+    if (upperFinish.result.detected && upperFinish.result.rawTime !== undefined && upperFinish.zone) {
+      setFinishResult(upperFinish.result);
+      setZones((current) => ({ ...current, finishLight: upperFinish.zone }));
+      automaticLaneCandidatesRef.current = [
+        review.candidate,
+        ...candidates.filter((item) => item !== review.candidate),
+      ];
+      if (upperFinish.result.confidence === "High" && upperAgreesWithOfficial) {
+        acceptTimestamp("finishPad", upperFinish.result.rawTime, "Finish light detection", upperFinish.result.confidence, {
+          detectedRawTime: upperFinish.result.rawTime,
+          note: `${notePrefix} ${upperFinish.result.reason}`,
+        });
+        setFinishStatus(
+          `Finish accepted automatically at ${upperFinish.result.rawTime.toFixed(3)}s from the perspective-aware upper timing indicator. ${upperFinish.result.reason}`,
+        );
+        return {
+          rawTime: upperFinish.result.rawTime,
+          // Keep the lower start-verified lane for athlete identity and wall
+          // calibration; the separately saved finishLight zone is only timing.
+          zone: review.candidate.zone,
+          calibration: review.candidate.calibration,
+          confidence: upperFinish.result.confidence,
+          accepted: true,
+        };
+      }
+      setFinishStatus(
+        upperAgreesWithOfficial
+          ? `Upper timing indicator suggests ${upperFinish.result.rawTime.toFixed(3)}s and needs frame review. ${upperFinish.result.reason}`
+          : `Upper timing indicator suggests ${upperFinish.result.rawTime.toFixed(3)}s, but the official-time cross-check suggests ${expectedFinishTime!.toFixed(3)}s. Review before accepting.`,
+      );
+      return {
+        rawTime: upperFinish.result.rawTime,
+        zone: review.candidate.zone,
+        calibration: review.candidate.calibration,
+        confidence: upperFinish.result.confidence,
+        accepted: false,
+      };
+    }
+
     setFinishResult(review.result);
     setFinishStatus(review.result.reason);
     if (
