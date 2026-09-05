@@ -107,7 +107,23 @@ export async function detectFinishSignal({
     onProgress?.("refine", done, total);
   });
   const refined = analyzeFinishColorSamples(refinedSamples, calibration, expectedFinishTime);
-  return toResult(refined.detected ? refined : coarse, zone, calibration);
+  return toResult(resolveFinishRefinement(coarse, refined), zone, calibration);
+}
+
+/** A failed dense verification must not leave the coarse-only time authoritative. */
+export function resolveFinishRefinement(coarse: FinishAnalysis, refined: FinishAnalysis): FinishAnalysis {
+  if (refined.detected || !coarse.detected) return refined;
+  const reason = `${coarse.reason} The finer scan did not confirm this transition; the coarse time requires frame review.`;
+  return {
+    ...coarse,
+    confidence: coarse.confidence === "High" ? "Medium" : coarse.confidence,
+    reason,
+    candidates: coarse.candidates.map(candidate => ({
+      ...candidate,
+      confidence: candidate.confidence === "High" ? "Medium" : candidate.confidence,
+      reason,
+    })),
+  };
 }
 
 export function analyzeFinishColorSamples(
@@ -180,10 +196,20 @@ export function analyzeFinishColorSamples(
     Math.min(baselineChroma, chroma(calibration.beforeStartRGB), chroma(calibration.afterStartRGB)) * 0.15,
   );
   const targetAdvantageFloor = Math.max(0.5, calibrationSpan * 0.03);
+  // A passing red shirt/hand can have G > B without being the learned green
+  // timing lamp. Opponent color alone loses the red channel. Compare red's
+  // brightness-normalized share with BOTH learned states, retaining tolerance
+  // for compression/exposure changes and pale or mixed-color indicator pixels.
+  const maximumLearnedRedShare = Math.max(
+    redShare(calibration.beforeStartRGB),
+    redShare(calibration.afterStartRGB),
+    median(signalColors.slice(0, baselineCount).map(redShare)),
+  );
   const plausibleLightLevel = signalColors.map((rgb) => {
     const lightLevel = luminance(rgb);
     const lightRatio = lightLevel / Math.max(1, baselineLuminance);
-    return lightRatio >= 0.55 && lightRatio <= 2.4 && chroma(rgb) >= minimumPlausibleChroma;
+    return lightRatio >= 0.55 && lightRatio <= 2.4 && chroma(rgb) >= minimumPlausibleChroma &&
+      redShare(rgb) <= maximumLearnedRedShare + 0.12;
   });
   const targetDirected = signalColors.map((rgb, index) => {
     const sampleOpponent = opponent(rgb);
@@ -546,6 +572,10 @@ function hasCalibration(calibration: StartLightCalibration): calibration is Requ
 function opponent(rgb: RGB): number {
   const total = Math.max(1, rgb.r + rgb.g + rgb.b);
   return (rgb.g - rgb.b) / total * 180;
+}
+
+function redShare(rgb: RGB): number {
+  return rgb.r / Math.max(1, rgb.r + rgb.g + rgb.b);
 }
 
 function luminance(rgb: RGB): number {

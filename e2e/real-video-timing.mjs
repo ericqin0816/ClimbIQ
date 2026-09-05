@@ -2,6 +2,7 @@ import { readFile, readdir } from "node:fs/promises";
 import path from "node:path";
 import { spawn } from "node:child_process";
 import { tmpdir } from "node:os";
+import { createProtocolClient } from "./cdp-client.mjs";
 
 const defaultChromePath = process.platform === "darwin"
   ? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
@@ -60,21 +61,7 @@ async function openProtocol() {
     socket.addEventListener("open", resolve, { once: true });
     socket.addEventListener("error", reject, { once: true });
   });
-  let nextId = 0;
-  const pending = new Map();
-  socket.addEventListener("message", (event) => {
-    const message = JSON.parse(event.data);
-    if (!message.id || !pending.has(message.id)) return;
-    const waiter = pending.get(message.id);
-    pending.delete(message.id);
-    if (message.error) waiter.reject(new Error(message.error.message));
-    else waiter.resolve(message.result);
-  });
-  const send = (method, params = {}) => new Promise((resolve, reject) => {
-    const id = ++nextId;
-    pending.set(id, { resolve, reject });
-    socket.send(JSON.stringify({ id, method, params }));
-  });
+  const { send } = createProtocolClient(socket);
   const evaluate = async (expression) => {
     const response = await send("Runtime.evaluate", { expression, returnByValue: true, awaitPromise: true });
     if (response.exceptionDetails) throw new Error(response.exceptionDetails.text);

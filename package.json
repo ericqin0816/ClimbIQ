@@ -1,7 +1,7 @@
 {
   "name": "climbiq-detection-lab",
   "private": true,
-  "version": "0.22.0",
+  "version": "0.22.1",
   "type": "module",
   "engines": {
     "node": "22.x"
@@ -10,6 +10,7 @@
     "dev": "vite",
     "benchmark:summary": "node scripts/summarize-real-video-benchmark.mjs",
     "benchmark:timing": "node e2e/real-video-timing.mjs",
+    "benchmark:robustness": "node scripts/run-video-robustness.mjs",
     "build": "tsc -b && vite build",
     "check": "npm run typecheck && npm test && npm run build",
     "typecheck": "tsc --noEmit",

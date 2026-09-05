@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { RGB, StartLightCalibration } from "../types";
-import { analyzeFinishColorSamples, type FinishColorSample } from "./detectFinishSignal";
+import { analyzeFinishColorSamples, resolveFinishRefinement, type FinishColorSample } from "./detectFinishSignal";
 
 const green: RGB = { r: 70, g: 92, b: 58 };
 const blue: RGB = { r: 70, g: 62, b: 105 };
@@ -11,6 +11,39 @@ const calibration: StartLightCalibration = {
 };
 
 describe("same-lane automatic finish detection", () => {
+  it("does not mistake a red-dominant obstruction for a green return lamp", () => {
+    const darkCalibration = {
+      beforeStartRGB: { r: 28, g: 37, b: 33 },
+      afterStartRGB: { r: 12, g: 11, b: 20 },
+      colorDelta: 33.181,
+    };
+    const during = { r: 48, g: 49, b: 58 };
+    // Recorded red-dominant pixels from the darkened angled-video failure.
+    const obstruction = [{ r: 83, g: 32, b: 5 }, { r: 146, g: 76, b: 63 }];
+    const samples = seriesAtFps([...repeat(during, 8), ...obstruction, ...repeat(during, 12)], 5);
+    expect(analyzeFinishColorSamples(samples, darkCalibration).detected).toBe(false);
+  });
+
+  it("can still detect the real green return after a red obstruction clears", () => {
+    const samples = seriesAtFps([
+      ...repeat(blue, 8), ...repeat({ r: 150, g: 90, b: 30 }, 3),
+      ...repeat(blue, 5), ...repeat(green, 10),
+    ], 5);
+    expect(analyzeFinishColorSamples(samples, calibration).rawTime).toBeCloseTo(3.2);
+  });
+
+  it("requires review when the dense scan cannot confirm a coarse-only reversal", () => {
+    const coarse = analyzeFinishColorSamples(series([...repeat(blue, 8), ...repeat(green, 12)]), calibration);
+    const missing = analyzeFinishColorSamples(series(repeat(blue, 20)), calibration);
+    expect(coarse.confidence).toBe("High");
+    const result = resolveFinishRefinement(coarse, missing);
+    expect(result.rawTime).toBe(coarse.rawTime);
+    expect(result.confidence).toBe("Medium");
+    expect(result.reason).toContain("finer scan did not confirm");
+    expect(result.candidates.every(candidate => candidate.confidence !== "High")).toBe(true);
+    expect(resolveFinishRefinement(coarse, coarse)).toBe(coarse);
+  });
+
   it("timestamps the first persistent blue-to-green reversal", () => {
     const samples = series([
       ...repeat(blue, 10),
