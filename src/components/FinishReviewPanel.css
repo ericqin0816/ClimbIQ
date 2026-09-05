@@ -1,0 +1,22 @@
+.finish-review-tools { border-top: 1px solid #d4d9df; margin-top: 8px; padding-top: 8px; min-width: 0; }
+.finish-review-tools h4 { margin: 0 0 6px; display: flex; gap: 8px; align-items: center; font-size: .9rem; }
+.finish-review-tools h4 span { font-size: .65rem; font-weight: 500; color: #626a74; }
+.finish-closeup { margin: 0; background: #141719; border-radius: 8px; overflow: hidden; text-align: center; }
+.finish-closeup img { display: block; width: 100%; height: 165px; object-fit: contain; }
+.finish-closeup figcaption { padding: 5px; color: #e7edf2; font-size: .7rem; }
+.finish-review-buttons { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
+.finish-review-tools button { font-size: .75rem; padding: 8px; min-width: 0; }
+.finish-review-help, .finish-rescan-result p, .finish-pad-selection p { font-size: .75rem; line-height: 1.5; margin: 7px 0; }
+.finish-pad-image { display: block; position: relative; width: 100%; margin: 8px auto; padding: 0 !important; border: 0; border-radius: 0; cursor: crosshair; background: #141719; overflow: hidden; }
+.finish-pad-image.full-frame { width: min(100%, 210px); }
+.finish-pad-image img { display: block; width: 100%; height: auto; pointer-events: none; }
+.finish-pad-box { position: absolute; border: 2px solid #ffda4d; background: #ffda4d22; pointer-events: none; }
+.finish-pad-corner { position: absolute; width: 10px; height: 10px; border: 2px solid #ffda4d; border-radius: 50%; transform: translate(-50%, -50%); pointer-events: none; }
+.finish-pad-coordinates { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 5px; }
+.finish-pad-coordinates label { font-size: .7rem; min-width: 0; }
+.finish-pad-coordinates input { width: 100%; min-width: 0; padding: 6px; }
+.finish-review-filmstrip { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 4px; }
+.finish-review-filmstrip button { padding: 2px; overflow: hidden; }
+.finish-review-filmstrip img { display: block; width: 100%; height: 60px; object-fit: contain; background: #141719; }
+.finish-review-filmstrip span { display: block; font-size: .65rem; padding-top: 3px; }
+@media (max-width: 760px) { .finish-closeup img { height: 125px; } .finish-review-filmstrip img { height: 45px; } }

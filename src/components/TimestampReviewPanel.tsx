@@ -1,4 +1,5 @@
 import type { Confidence } from "../types";
+import type { ReactNode } from "react";
 import type { FramePresentation } from "../lib/videoFramePresentation";
 import "./TimestampReviewPanel.css";
 
@@ -16,6 +17,7 @@ export interface TimestampReviewPanelProps {
   onReturn: () => void;
   onAccept: () => void;
   onClose: () => void;
+  children?: ReactNode;
 }
 
 export default function TimestampReviewPanel(props: TimestampReviewPanelProps) {
@@ -34,6 +36,7 @@ export default function TimestampReviewPanel(props: TimestampReviewPanelProps) {
       <div><span>{props.decodedRawTime !== undefined ? "Decoded frame" : "Cursor (approx.)"}</span><strong>{time.toFixed(3)}s</strong></div>
       <div><span>Adjustment</span><strong>{adjustment >= 0 ? "+" : "−"}{Math.abs(adjustment).toFixed(3)}s</strong></div>
     </div>
+    {props.children}
     <p className="review-instruction">Check the visible event, then accept the frame.</p>
     <p className="muted review-frame-source" data-frame-time-source={source}>
       {source === "presentation" ? "Using the presented frame’s timestamp."

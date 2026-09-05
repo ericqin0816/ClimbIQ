@@ -1,4 +1,4 @@
-export type ZoneId = "startLight" | "startBody" | "hold10" | "finishLight";
+export type ZoneId = "startLight" | "startBody" | "hold10" | "finishLight" | "finishPad";
 
 export type Sensitivity = "low" | "medium" | "high";
 

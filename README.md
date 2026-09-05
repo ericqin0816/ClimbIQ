@@ -166,6 +166,14 @@ If the lower sensor cannot verify a finish, a perspective-aware fallback searche
 
 Upper-indicator timing refinement uses the same patch radius as discovery, with explicit pixel-edge coverage. This prevents a tiny light from being diluted into surrounding wall pixels or accidentally enlarged by floating-point rounding. The existing lower-sensor crop policy is preserved: changing its pixel membership produced an unverified new acceptance in testing and was not shipped. This refinement fix is demonstrated by synthetic capture-pipeline tests; it is not a general finish-accuracy estimate.
 
+### Guided finish review
+
+After Start is set, open **Review finish / mark pad** below the video (or open an existing finish suggestion). The full video stays beside a synchronized close-up on desktop; the views stack on phones. **Mark finish pad** opens an enlarged upper-wall image: choose two opposite corners around the actual pad, switch to the full frame if necessary, or enter the four corner percentages. **Use this pad area** saves a separate review region without changing the automatic lane-light calibration or accepted timestamps.
+
+Pause near the finish, then choose **Rescan near current frame**. It inspects up to 1.25 seconds on either side at 15 requested samples/s and shows up to five nearby frames around the largest local appearance change. An approaching hand, shadow, occlusion or camera movement can also cause that change; this is a navigation aid, not contact detection. If no clear change is found, it shows nearby frames without proposing a finish. Repeated decoded frames are not counted as separate native samples. Native timing limitations and cursor fallbacks remain explicit.
+
+Clicking a thumbnail only navigates the full video. Finish changes only after explicit frame acceptance; the marker retains manual-review and selected-area provenance. The pad area survives session save/reload and JSON export/import, while preview images stay transient and clear on video replacement. Use fixed-camera footage and re-mark after camera movement. Test the workflow with `npm run test:finish-review`; set `CLIMBIQ_E2E_DISABLE_VIDEO_FRAME=1` to exercise the native-timing fallback.
+
 Official total time remains available as a fallback or cross-check:
 
 ```text

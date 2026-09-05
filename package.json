@@ -1,7 +1,7 @@
 {
   "name": "climbiq-detection-lab",
   "private": true,
-  "version": "0.27.2",
+  "version": "0.28.0",
   "type": "module",
   "engines": {
     "node": "22.x"
@@ -13,6 +13,7 @@
     "benchmark:robustness": "node scripts/run-video-robustness.mjs",
     "benchmark:compare": "node scripts/compare-video-runs.mjs",
     "test:cancellation": "node e2e/analysis-cancellation.mjs",
+    "test:finish-review": "node e2e/finish-review.mjs",
     "test:upload": "node e2e/upload-flow.mjs",
     "build": "tsc -b && vite build",
     "check": "npm run typecheck && npm test && npm run build",

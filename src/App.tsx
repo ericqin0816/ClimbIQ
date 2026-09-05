@@ -1,6 +1,7 @@
 import { ChangeEvent, CSSProperties, DragEvent, lazy, PointerEvent, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import "./components/SessionWorkflow.css";
 import TimestampReviewPanel from "./components/TimestampReviewPanel";
+import type { FinishReviewScan } from "./lib/finishReview";
 import { readDecodedVideoFrameTime, sourceFrameStepTarget } from "./lib/decodedVideoFrame";
 import { summarizeSourceSampleTiming } from "./lib/sourceSampleTiming";
 import { useVideoFramePresentation } from "./lib/useVideoFramePresentation";
@@ -91,9 +92,10 @@ const INITIAL_TIMESTAMPS: TimestampMarker[] = [
   marker("finishPad", "Finish Pad"),
 ];
 
-const APP_VERSION = "0.27.2";
+const APP_VERSION = "0.28.0";
 const SESSION_STORAGE_KEY = "climbiq.analysisSessions.v1";
 const AttemptComparisonPanel = lazy(() => import("./components/AttemptComparisonPanel"));
+const FinishReviewPanel = lazy(() => import("./components/FinishReviewPanel"));
 const Hold10SecondPassPanel = lazy(() => import("./components/Hold10SecondPassPanel"));
 const BiomechanicsPanel = lazy(async () => {
   const module = await import("./components/BiomechanicsPanel");
@@ -163,6 +165,7 @@ interface AutomaticFinishOutcome {
 }
 
 interface TimestampReviewTarget {
+  kind?: "finish";
   label: string;
   suggestedRawTime: number;
   confidence?: Confidence;
@@ -261,11 +264,15 @@ function App() {
   const [secondPassRunning, setSecondPassRunning] = useState(false);
   const [secondPassStatus, setSecondPassStatus] = useState("");
   const secondPassAbortRef = useRef<AbortController | null>(null);
+  const [finishReviewRunning, setFinishReviewRunning] = useState(false);
+  const [finishReviewProgress, setFinishReviewProgress] = useState("");
+  const finishReviewAbortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     return () => {
       autoAnalysisAbortRef.current?.abort();
       secondPassAbortRef.current?.abort();
+      finishReviewAbortRef.current?.abort();
       if (reviewSeekRequestRef.current !== null) window.cancelAnimationFrame(reviewSeekRequestRef.current);
       if (previousObjectUrl.current) {
         URL.revokeObjectURL(previousObjectUrl.current);
@@ -485,7 +492,7 @@ function App() {
       : calibrationReady && ["calibrated", "blocked", "manual"].includes(resolvedStartProfile)
       ? "Calibrated light transition"
       : "Generic color-distance detection";
-  const videoAnalysisRunning = frameTestRunning || startRunning || movementRunning || movementPreviewRunning || finishRunning || biomechanicsRunning || autoAnalysisRunning || secondPassRunning;
+  const videoAnalysisRunning = frameTestRunning || startRunning || movementRunning || movementPreviewRunning || finishRunning || biomechanicsRunning || autoAnalysisRunning || secondPassRunning || finishReviewRunning;
   const visibleTimestampReview = timestampReview && (!timestampReview.secondPassBasis || timestampReview.secondPassBasis === activeHold10SecondPass) ? timestampReview : null;
   const framePresentation = useVideoFramePresentation(videoRef, videoUrl,
     !videoAnalysisRunning && (Boolean(visibleTimestampReview) || typeof globalThis.VideoFrame === "function"));
@@ -721,6 +728,7 @@ function App() {
       return;
     }
     video.pause();
+    finishReviewAbortRef.current?.abort();
     cancelPendingReviewSeek();
     const source = video.src;
     setTimestampReview(target);
@@ -739,11 +747,13 @@ function App() {
     const video = videoRef.current;
     if (!visibleTimestampReview || !video || !video.paused || video.seeking || videoAnalysisRunning) return;
     const decodedTime = resolvePresentedFrameTime(video, framePresentation);
-    const frameDurationNote = decodedTime !== undefined && framePresentation.status === "available" && framePresentation.durationSeconds !== undefined
-      ? ` Source frame duration ${framePresentation.durationSeconds.toFixed(6)}s; not an event-error bound.` : "";
+    const padNote = visibleTimestampReview.kind === "finish" && zones.finishPad
+      ? ` Reviewed with user-marked finish-pad area ${JSON.stringify(zones.finishPad)}. Local appearance changes are navigation aids, not verified contact.` : "";
+    const frameDurationNote = (decodedTime !== undefined && framePresentation.status === "available" && framePresentation.durationSeconds !== undefined
+      ? ` Source frame duration ${framePresentation.durationSeconds.toFixed(6)}s; not an event-error bound.` : "") + padNote;
     visibleTimestampReview.onAccept(decodedTime ?? video.currentTime, decodedTime !== undefined
       ? `Used browser presented-frame timestamp ${decodedTime.toFixed(6)}s (cursor ${video.currentTime.toFixed(6)}s).${frameDurationNote}`
-      : `Frame timestamp unavailable; used paused cursor ${video.currentTime.toFixed(6)}s.`);
+      : `Frame timestamp unavailable; used paused cursor ${video.currentTime.toFixed(6)}s.${padNote}`);
     closeTimestampReview();
   }
 
@@ -769,7 +779,40 @@ function App() {
 
   function closeTimestampReview() {
     cancelPendingReviewSeek();
+    finishReviewAbortRef.current?.abort();
     setTimestampReview(null);
+  }
+
+  function openGuidedFinishReview() {
+    if (videoAnalysisRunning || !videoRef.current || startSignalRaw === null) return;
+    const cursor = getTimestamp(timestamps, "finishPad")?.rawTime ?? finishResult?.rawTime ??
+      finishResult?.candidates?.[0]?.rawTime ?? finishSuggestion?.rawTime ??
+      (currentTime > startSignalRaw ? currentTime : Math.min(videoRef.current.duration - 0.1, startSignalRaw + 8));
+    reviewTimestamp({ kind: "finish", label: "Finish review — locate pad contact", suggestedRawTime: cursor,
+      confidence: "Low", acceptLabel: "Set reviewed finish",
+      onAccept: (rawTime, frameTimeNote) => acceptManualTimestamp("finishPad", rawTime, {
+        frameReviewed: true, detectedRawTime: cursor, offsetApplied: roundTime(rawTime - cursor),
+        note: `Finish manually reviewed in the full video and guided close-up. The initial review cursor is not a verified event. ${frameTimeNote ?? ""}`,
+      }),
+    });
+  }
+
+  async function rescanMarkedFinishPad(zone: NormalizedZone, center: number): Promise<FinishReviewScan> {
+    const video = videoRef.current;
+    if (!video || videoAnalysisRunning || finishReviewAbortRef.current) throw new Error("Wait for the current video task to finish.");
+    const controller = new AbortController();
+    finishReviewAbortRef.current = controller;
+    setFinishReviewRunning(true);
+    setFinishReviewProgress("Preparing a focused finish review…");
+    try {
+      const { scanFinishPadReview } = await import("./lib/finishReview");
+      return await runWithVideoRestore(video, () => scanFinishPadReview({ video, zone, center,
+        startSignal: startSignalRaw, signal: controller.signal, onProgress: setFinishReviewProgress }),
+        "Finish area inspected. Video position restored; accepted timing was not changed.", "finish review");
+    } finally {
+      finishReviewAbortRef.current = null;
+      setFinishReviewRunning(false);
+    }
   }
 
   async function calculateHold10SecondPass(video: HTMLVideoElement, broad: BiomechanicsResult,
@@ -2660,6 +2703,7 @@ function App() {
         startBodyZone: zones.startBody ?? null,
         hold10Zone: zones.hold10 ?? null,
         finishLightZone: zones.finishLight ?? null,
+        finishPadZone: zones.finishPad ?? null,
       },
       calibration: {
         beforeStartRGB: startLightCalibration.beforeStartRGB ?? null,
@@ -3541,7 +3585,13 @@ function App() {
             frameReady={reviewFrameReady} busy={videoAnalysisRunning} acceptLabel={visibleTimestampReview.acceptLabel}
             onReturn={() => reviewTimestamp(visibleTimestampReview)} onAccept={acceptReviewedTimestamp}
             onClose={closeTimestampReview}
-          /> : null}
+          >{visibleTimestampReview.kind === "finish" && <Suspense fallback={<p>Preparing finish close-up…</p>}><FinishReviewPanel key={`${videoUrl}:${startSignalRaw}`}
+            video={videoRef.current} currentTime={currentTime} frameReady={reviewFrameReady}
+            busy={videoAnalysisRunning} scanning={finishReviewRunning} progress={finishReviewProgress}
+            zone={zones.finishPad} contextZone={zones.finishLight}
+            onZone={zone => setZones(current => zone ? { ...current, finishPad: zone } : omitZone(current, "finishPad"))}
+            onScan={rescanMarkedFinishPad} onCancel={() => finishReviewAbortRef.current?.abort()}
+            onJump={jumpTo} /></Suspense>}</TimestampReviewPanel> : null}
           </div>
           {routeAlignment && (
             <p className={routeAlignment.aligned || routeAlignment.holds.length ? "status-message" : "guidance"}>
@@ -3555,6 +3605,7 @@ function App() {
           {activeHold10SecondPass && <Suspense fallback={<p className="muted">Preparing Hold 10 evidence…</p>}>
             <Hold10SecondPassPanel result={activeHold10SecondPass} disabled={videoAnalysisRunning} onReview={reviewRefinedHold10} />
           </Suspense>}
+          {!visibleTimestampReview && <button disabled={videoAnalysisRunning || startSignalRaw === null} onClick={openGuidedFinishReview}>Review finish / mark pad</button>}
           {videoRestoreStatus && <p className="status-message">{videoRestoreStatus}</p>}
         </Card>
 
@@ -3962,7 +4013,7 @@ function App() {
                 <button
                   className="primary"
                   onClick={() => reviewTimestamp({
-                    label: "Suggested finish",
+                    kind: "finish", label: "Suggested finish",
                     suggestedRawTime: finishResult.rawTime!,
                     confidence: finishResult.confidence,
                     acceptLabel: "Accept finish",
@@ -3987,7 +4038,7 @@ function App() {
               <div className="button-row">
                 {finishResult!.candidates!.slice(0, 5).map((candidate, index) => (
                   <button key={`${candidate.rawTime}-${index}`} disabled={videoAnalysisRunning} onClick={() => reviewTimestamp({
-                    label: "Unverified color change — locate actual finish contact",
+                    kind: "finish", label: "Unverified color change — locate actual finish contact",
                     suggestedRawTime: candidate.rawTime,
                     confidence: "Low", acceptLabel: "Set manual finish",
                     onAccept: (rawTime, frameTimeNote) => acceptManualTimestamp("finishPad", rawTime, {
@@ -4029,7 +4080,7 @@ function App() {
                 <button
                   className="primary"
                   onClick={() => reviewTimestamp({
-                    label: "Official-time finish",
+                    kind: "finish", label: "Official-time finish",
                     suggestedRawTime: finishSuggestion.rawTime,
                     confidence: "High",
                     acceptLabel: "Accept finish",
@@ -5343,6 +5394,7 @@ function datasetToSavedSession(dataset: any): SavedAnalysisSession {
       startBody: zonesFromDataset.startBodyZone ?? undefined,
       hold10: zonesFromDataset.hold10Zone ?? undefined,
       finishLight: zonesFromDataset.finishLightZone ?? undefined,
+      finishPad: zonesFromDataset.finishPadZone ?? undefined,
     }),
     startLightCalibration: sanitizeStartLightCalibration({
       beforeStartRGB: dataset.calibration?.beforeStartRGB ?? undefined,

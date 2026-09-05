@@ -5,6 +5,7 @@ const ZONE_LABELS: Record<ZoneId, string> = {
   startBody: "Start Body Zone",
   hold10: "Hold 10 Zone",
   finishLight: "Finish Light Zone",
+  finishPad: "Finish Pad Review Area",
 };
 const ZONE_IDS = Object.keys(ZONE_LABELS) as ZoneId[];
 const KNOWN_AUTOMATIC_LABELS: Partial<Record<ZoneId, Set<string>>> = {
