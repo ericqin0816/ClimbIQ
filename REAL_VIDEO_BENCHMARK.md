@@ -10,7 +10,7 @@ The September 2 measurements below are retained as the baseline. A controlled ex
 | --- | ---: | ---: |
 | 5 fps | 42/52 (80.8%) | 42/52 (80.8%), unchanged |
 | 10 fps | 45/104 (43.3%) | 85/104 (81.7%) |
-| 15 fps | 0/156 (0%) | 132/156 (84.6%) |
+| 15 fps | 0/156 (0%) | 132–133/156 (84.6–85.3%) across repeats |
 
 Both corrected high-rate results were reproduced through Run full analysis → Save Session → Duplicate Session → page reload → comparison. Start remained 7.130 s, Finish 17.480 s, and total 10.350 s. The new `--full` runner fails if accepted timing has no usable COM, saved timestamps change, or identical attempts claim a gain/loss. This reference recording additionally requires at least 65% usable COM coverage in full mode.
 

@@ -88,8 +88,14 @@ async function openProtocol() {
 async function waitUntil(evaluate, predicate, timeoutMs, label) {
   const started = Date.now();
   while (Date.now() - started < timeoutMs) {
-    const value = await evaluate(predicate);
-    if (value) return value;
+    try {
+      const value = await evaluate(predicate);
+      if (value) return value;
+    } catch (error) {
+      // Read-only readiness polling can straddle a deliberate page reload.
+      // Retry only transient document replacement; never repeat UI mutations.
+      if (!/context was destroyed|Cannot find context|Inspected target navigated or closed/i.test(String(error))) throw error;
+    }
     await delay(150);
   }
   throw new Error(`Timed out waiting for ${label}.`);
@@ -213,8 +219,9 @@ async function verifySavedWorkflow({ evaluate, send }) {
   }
   if (hasFinish && validFrames < 3) throw new Error("Full workflow produced accepted timing but fewer than three usable COM frames.");
   await evaluate(`([...document.querySelectorAll('button')].find(b => b.textContent.trim() === 'Duplicate Session')).click()`);
+  await evaluate(`window.__climbiqReloadSentinel = true`);
   await send("Page.reload");
-  await waitUntil(evaluate, `document.readyState === 'complete' && Boolean(document.querySelector('.comparison-card'))`, 15000, "saved workflow reload");
+  await waitUntil(evaluate, `window.__climbiqReloadSentinel !== true && document.readyState === 'complete' && Boolean(document.querySelector('.comparison-card'))`, 15000, "saved workflow reload");
   if (hasFinish) {
     await waitUntil(evaluate, `Boolean(document.querySelector('.comparison-details'))`, 10000, "reloaded comparison");
     await evaluate(`document.querySelector('.comparison-details').open = true`);

@@ -18,7 +18,7 @@
   "recoveryCadenceCorrection": [
     { "sampleFps": 5, "validFrames": 42, "selectedFrames": 44, "requestedFrames": 52, "repeatedInFullWorkflow": true, "saveReloadComparisonPassed": true },
     { "sampleFps": 10, "validFrames": 85, "selectedFrames": 96, "requestedFrames": 104, "repeatedInFullWorkflow": true, "saveReloadComparisonPassed": true },
-    { "sampleFps": 15, "validFrames": 132, "selectedFrames": 143, "requestedFrames": 156, "repeatedInFullWorkflow": true, "saveReloadComparisonPassed": true }
+    { "sampleFps": 15, "validFrames": 132, "repeatValidFrames": [132, 133], "selectedFrames": 143, "requestedFrames": 156, "repeatedInFullWorkflow": true, "saveReloadComparisonPassed": true }
   ],
   "limitations": [
     "Counts reflect internal COM validity, not independent ground-truth pose accuracy.",
