@@ -67,3 +67,24 @@ on SciPy and its correctness is checked against exhaustive small assignments.
   Comparison baseline: `video-robustness-2026-09-05T12-12-45-711Z.json`.
   Both are ignored private-workflow artifacts. Source media and frame images
   remain outside Git.
+
+## Deploy result
+
+- URL: [ClimbIQ](https://climbiq-detection-lab.vercel.app/)
+- Target: production
+- Status: ready; 0.28.2 verified
+- Code commit: `016ab16c61e906208fc3d15352ee6adb2b1753b1`
+- Framework: React / Vite
+- Hosted build duration: not measured; GitHub verification passed
+- Entry asset: `/assets/index-UE3G26Pc.js`
+
+Full production workflows passed original 8903 and 9199. The first retained
+Start 4.290 s and withheld Finish. The second retained Start 7.130 s, Finish
+17.480 s and 19 valid, unique displayed hold IDs with recorded normalized
+positions. This verifies workflow and regression behavior, not independent
+label accuracy. Provider runtime logs, drains and external monitoring were not
+inspected. Existing user edits in `src/styles.css` remain untouched and local.
+
+The screenshot-specific 8/9 assignment and 12.24 s timing discrepancy remain
+unverified until the corresponding video or identifying session export is
+available. No test result above should be presented as resolving that exact run.
