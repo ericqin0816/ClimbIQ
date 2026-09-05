@@ -1,11 +1,20 @@
 import { describe, expect, it } from "vitest";
-import { VIDEO_VARIATIONS, assessVideoVariation, buildVideoVariationArgs, parseMarkerTime, videoVariationName } from "./video-robustness.mjs";
+import { VIDEO_VARIATIONS, assessVideoVariation, benchmarkFailureMessage, buildVideoVariationArgs, parseMarkerTime, videoVariationName } from "./video-robustness.mjs";
 
 const label = rawTime => ({ status: "confirmed", independentOfDetector: true, reviewerId: "unit-test-fixture", method: "synthetic fixture", reviewedAt: "2026-09-05", rawTime });
 const trial = { start: { status: "accepted", rawTime: 7.13, labelReview: label(7.13) }, finish: { status: "accepted", rawTime: 17.48, labelReview: label(17.48) } };
 const outcome = (start, finish) => ({ start: { rawTime: start }, finish: { rawTime: finish } });
 
 describe("controlled video robustness assessment", () => {
+  it("propagates safety failures even when ordinary assertions are empty", () => {
+    expect(benchmarkFailureMessage({ passed: false, assertions: [{ errors: [] }], safetyAssertions: [{ failed: true, reason: "Known reset accepted" }] }, 1))
+      .toBe("Known reset accepted");
+  });
+  it("keeps a failed runner nonempty even without diagnostics", () => {
+    expect(benchmarkFailureMessage({ assertions: [] }, 1)).toContain("failed");
+    expect(benchmarkFailureMessage({ passed: false }, 0)).toContain("failed");
+    expect(benchmarkFailureMessage({ passed: true }, 0)).toBeUndefined();
+  });
   it("accounts for a known trim without changing the measured duration", () => {
     const result = assessVideoVariation(trial, VIDEO_VARIATIONS[5], outcome("5.130", "15.480"));
     expect(result.boundaries.start.status).toBe("consistent");

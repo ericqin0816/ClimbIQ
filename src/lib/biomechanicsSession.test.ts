@@ -5,6 +5,34 @@ import { compactBiomechanicsSession, sanitizeBiomechanicsSession } from "./biome
 import { buildWallCalibration } from "./wallCalibration";
 
 describe("compact biomechanics session", () => {
+  it("retains source-frame metadata across compact save/load", () => {
+    const calibration = buildWallCalibration([{ x: 0, y: 1 }, { x: 1, y: 1 }, { x: 1, y: 0 }, { x: 0, y: 0 }], 0, true);
+    const result = makeResult([1, 1.1].map(rawTime => Object.assign(makeFrame(rawTime, { x: 0.4, y: 0.5 }), {
+      decodedFrameRawTime: rawTime - 0.02, sourceFrameDurationSeconds: 1 / 30,
+    })));
+    const compact = compactBiomechanicsSession({ version: 1, calibration, settings: result.settings, result });
+    expect(compact.result?.frames[0]).toMatchObject({ decodedFrameRawTime: 0.98, sourceFrameDurationSeconds: 1 / 30 });
+    const restored = sanitizeBiomechanicsSession(JSON.parse(JSON.stringify(compact)));
+    expect(restored.result?.frames[1]).toMatchObject({ decodedFrameRawTime: 1.08, sourceFrameDurationSeconds: 1 / 30 });
+  });
+  it("does not turn missing coordinates into an origin-point measurement", () => {
+    const calibration = buildWallCalibration([{ x: 0, y: 1 }, { x: 1, y: 1 }, { x: 1, y: 0 }, { x: 0, y: 0 }], 0, true);
+    const result = makeResult([makeFrame(1, { x: 0.4, y: 0.5 })]);
+    const serialized = JSON.parse(JSON.stringify({ version: 1, calibration, settings: result.settings, result }));
+    serialized.result.frames[0].imageCom.x = null;
+    serialized.result.frames[0].landmarks[0].x = null;
+    const restored = sanitizeBiomechanicsSession(serialized);
+    expect(restored.result?.frames[0].valid).toBe(false);
+    expect(restored.result?.frames[0].imageCom).toBeUndefined();
+    expect(restored.result?.frames[0].landmarks.some(point => point.index === 11)).toBe(false);
+  });
+  it("does not interpret a truthy validity string as verified pose data", () => {
+    const calibration = buildWallCalibration([{ x: 0, y: 1 }, { x: 1, y: 1 }, { x: 1, y: 0 }, { x: 0, y: 0 }], 0, true);
+    const result = makeResult([makeFrame(1, { x: 0.4, y: 0.5 })]);
+    const serialized = JSON.parse(JSON.stringify({ version: 1, calibration, settings: result.settings, result }));
+    serialized.result.frames[0].valid = "false";
+    expect(sanitizeBiomechanicsSession(serialized).result?.frames[0].valid).toBe(false);
+  });
   it("preserves wrist evidence and the same Hold 10 contact time across save/load", () => {
     const calibration = buildWallCalibration([
       { x: 0, y: 1 },

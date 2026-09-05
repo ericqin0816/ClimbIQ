@@ -4,7 +4,7 @@ import { createHash } from "node:crypto";
 import { spawn } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { VIDEO_VARIATIONS, assessVideoVariation, buildVideoVariationArgs, videoVariationName } from "./lib/video-robustness.mjs";
+import { VIDEO_VARIATIONS, assessVideoVariation, benchmarkFailureMessage, buildVideoVariationArgs, videoVariationName } from "./lib/video-robustness.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const sourceDirectory = path.resolve(process.env.CLIMBIQ_VIDEO_DIR ?? path.join(root, "node_modules/.climbiq-private-videos"));
@@ -107,8 +107,9 @@ for (const sourceName of sourceNames) {
         entry.outcome = benchmark.outcomes[0];
         if (!entry.outcome) throw new Error("Workflow runner returned no outcome.");
         entry.assessment = assessVideoVariation(references.get(sourceName), variation, entry.outcome);
-        if (execution.code !== 0) entry.error = entry.outcome.workflow?.error ??
-          benchmark.assertions?.flatMap(assertion => assertion.errors).join("; ") ?? `Workflow runner exited ${execution.code}.`;
+        entry.safetyAssertions = benchmark.safetyAssertions;
+        const failureMessage = benchmarkFailureMessage(benchmark, execution.code);
+        if (failureMessage) entry.error = failureMessage;
         console.log(`${variation.id}: Start ${entry.assessment.boundaries.start.status}; Finish ${entry.assessment.boundaries.finish.status}`);
       }
     } catch (error) {

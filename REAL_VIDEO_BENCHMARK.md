@@ -2,6 +2,29 @@
 
 This benchmark records behavior on five private 1080 × 1920 phone recordings. The source videos stay outside the repository and are processed locally.
 
+## Current release snapshot: 0.26.0
+
+- Five-original full workflows pass: two Starts and one Finish are automatically
+  accepted; the other boundaries require review. These are acceptance counts,
+  not a correctness estimate.
+- The complete reference retains roughly 44–45/52 usable COM samples at 5 fps
+  and 19/20 registered hold silhouettes. Hold 10 remains an explicit-review
+  candidate; its cursor varies across runs and is not a ground-truth label.
+- Six edited public race crops remain a separate rejection-safety cohort.
+- Thirty controlled copies test resize, compression, exposure, frame rate,
+  missing audio, and trim behavior. They are derived from the same five climbs.
+- Native source-frame review and Previous/Next Frame passed 126 seek/pixel
+  checks across the five original clips plus two synthetic frame-rate clips.
+  Saved frame duration is a presentation interval, not an event-error bound.
+- Two concrete false-finish mechanisms were found: a red obstruction and a
+  timing-unit reset coinciding with a foreground person. Upper motion alone no
+  longer authorizes automatic Finish acceptance.
+- Independent event-accuracy labels: **zero qualifying records**. Accuracy and
+  accuracy confidence intervals remain unavailable.
+
+The detailed sections below preserve development history. Their old tracking
+counts and review cursors must not be quoted as current accuracy results.
+
 ## September 5 label audit — read before using historical figures
 
 The historical accuracy/precision figures below are withdrawn. Legacy
@@ -55,17 +78,17 @@ This is repeatability evidence on one clip, not a ground-truth contact label. Th
 - Ropes, hair, faces close to the phone, scoreboards, and post-climb timing resets can resemble finish evidence.
 - A missing finish must not make pose analysis include setup footage or descent.
 
-## Regression results
+## Historical regression cases, with corrected interpretation
 
-| Clip | Previous behavior | Current behavior |
+| Clip | Earlier behavior | Interpretation after the label audit |
 | --- | --- | --- |
-| `IMG_8903.MOV` | Plausible start, but no finish | Start launch confirmed; upper-wall fallback recovers a finish candidate around a 10.0 s climb |
+| `IMG_8903.MOV` | Plausible start, but no finish | The historical 14.290 s upper candidate was a disputed clock-digit change, not a recovered 10.0 s climb. Current Finish remains unaccepted. |
 | `IMG_9075.MOV` | Incorrect 14.900 s start was automatically accepted mid-climb | The 12 s start window excludes that later reset; an earlier 8.450 s cue remains review-only. The old 8.900 s manual reference lacks independent review provenance. |
 | `IMG_9076.MOV` | 24.820 s post-climb frame suggested as start | The late event is excluded; an earlier 2.790 s setup cue remains safely review-only |
 | `IMG_9077.MOV` | Incorrect 5.250 s start was automatically accepted while athletes were already underway | Start is blocked for review |
-| `IMG_9199.MOV` | Plausible 7.130 s start and 10.350 s total | Valid result remains stable; existing lane-light finish path still wins |
+| `IMG_9199.MOV` | Plausible 7.130 s start and 10.350 s total | These output observations remain stable; the lane-light finish path still wins. Independent correctness is not established. |
 
-## Current measured baseline
+## Archived September 2 measurements (not the current release)
 
 The September 2 evaluation reran every clip from a fresh page using the production workflow rather than calling detector helpers directly.
 
@@ -75,7 +98,7 @@ The same `IMG_9199.MOV` workflow was also rerun against the public production de
 | --- | --- |
 | Videos evaluated | 5 |
 | Starts automatically accepted | 2 |
-| Known false starts automatically accepted | 0 |
+| Previously identified start failures reaccepted | 0 in that regression run; not a labeled false-accept rate |
 | Reviewed automatic-start precision | Withdrawn; independent label provenance unavailable |
 | Starts conservatively sent to review | 3 |
 | Accepted-start clips with an automatic High finish | 1/2 |
@@ -98,7 +121,7 @@ For a defensible college/demo result, collect at least 30–50 unedited fixed-ca
 Six short 720p race crops from World Climbing's [Chamonix 2026 speed finals](https://www.youtube.com/watch?v=RvZXoTVxGBs) were also tested locally: three women's attempts and three men's attempts. These are kept in `benchmarks/public-broadcast-results.json` and summarized separately because a moving multi-camera broadcast is a different input class from a fixed phone recording.
 
 - All six start cues remained review-only. They are recorded as unverified rather than mislabeled as confirmed timing errors: broadcast edits and incomplete lane-local evidence make them unsafe automatic ground truth even when an underlying beep may be real.
-- No unsafe public start was automatically accepted. The full-frame audit measured 31.0%–79.1% structural change across four proposed cues and labeled them as camera cuts instead of treating the edit as athlete launch motion. One other cue had no reliable lane-local launch.
+- No public Start was automatically accepted. The full-frame audit measured 31.0%–79.1% structural change across four proposed cues and labeled them as camera cuts instead of treating the edit as athlete launch motion. One other cue had no reliable lane-local launch.
 - The remaining clip exposed a late audio/light cue: the climber was already launching, but the estimated movement timestamp followed the cue by only 0.033 s. The [World Climbing competition rule](https://images.ifsc-climbing.org/ifsc/image/private/t_q_good/prd/jaq7awz9jmqwpddwnbpr.pdf) defining sub-0.100 s reactions as false starts is now a conservative automatic-acceptance floor, so this candidate is review-only too.
 - As a downstream safety stress test, the unverified 8.817 s men’s cursor was manually continued without promoting it to ground truth. Neither the lower lane light nor the angled upper search verified a Finish, and pose analysis stayed paused; the app did not manufacture a total or scan the descent.
 - The women’s source-590 crop was also continued with its known 6.20 s winning time. Official time supplied a safe analysis boundary but did not create an accepted Finish when neither lower nor upper visual evidence verified one; approximate wall calibration then refused the broadcast framing and requested manual corners.
@@ -129,7 +152,7 @@ Automatic timestamps are intentionally precision-first:
 1. Start light/audio evidence is accepted only after lane-local motion confirms a new launch, the full frame remains continuous across the cue, and the visible-motion delay passes the 0.100 s review policy. This is not measured pad release or a false-start ruling.
 2. The original start-verified lower lane remains the athlete-identity anchor.
 3. Lower-sensor finish evidence is preferred when it is strong.
-4. Upper electronic evidence is accepted only with physical-top or official-time corroboration.
+4. Upper electronic evidence requires an agreeing entered official total for automatic acceptance. Nearby upper motion is review support only; a spectator can coincide with a timing-unit reset.
 5. Physical-only and ambiguous results are surfaced for exact-frame review.
 6. Pose analysis pauses when there is no usable finish boundary, preventing setup/descent contamination.
 7. Start search honors the selected absolute video-time window, and finish search stops 30 seconds after Start, preventing later attempts and timing resets from entering a single-race analysis.

@@ -2,6 +2,7 @@ import { ChangeEvent, CSSProperties, DragEvent, lazy, PointerEvent, Suspense, us
 import "./components/SessionWorkflow.css";
 import TimestampReviewPanel from "./components/TimestampReviewPanel";
 import { readDecodedVideoFrameTime, sourceFrameStepTarget } from "./lib/decodedVideoFrame";
+import { summarizeSourceSampleTiming } from "./lib/sourceSampleTiming";
 import { useVideoFramePresentation } from "./lib/useVideoFramePresentation";
 import { resolvePresentedFrameTime } from "./lib/videoFramePresentation";
 import {
@@ -90,7 +91,7 @@ const INITIAL_TIMESTAMPS: TimestampMarker[] = [
   marker("finishPad", "Finish Pad"),
 ];
 
-const APP_VERSION = "0.26.0";
+const APP_VERSION = "0.27.0";
 const SESSION_STORAGE_KEY = "climbiq.analysisSessions.v1";
 const AttemptComparisonPanel = lazy(() => import("./components/AttemptComparisonPanel"));
 const Hold10SecondPassPanel = lazy(() => import("./components/Hold10SecondPassPanel"));
@@ -2643,6 +2644,7 @@ function App() {
         finishPad: exportCandidates(finishResult?.candidates ?? [], getTimestamp(timestamps, "finishPad")),
       },
       splitCalculations: splits,
+      sourceFrameTimingAudit: effectiveBiomechanicsResult ? summarizeSourceSampleTiming(effectiveBiomechanicsResult.frames) : null,
       hold10PhaseAnalysis: {
         available: hold10PhaseSplits.available,
         startToHold10Seconds: hold10PhaseSplits.startToHold10Seconds ?? null,

@@ -37,6 +37,17 @@ export function parseMarkerTime(value) {
   return Number.isFinite(number) ? number : null;
 }
 
+/** Never let an empty legacy assertion list hide a failed safety check. */
+export function benchmarkFailureMessage(benchmark, exitCode) {
+  if (exitCode === 0 && benchmark?.passed !== false) return undefined;
+  const reasons = [
+    ...(benchmark?.outcomes ?? []).map(outcome => outcome.workflow?.error),
+    ...(benchmark?.assertions ?? []).flatMap(assertion => assertion.errors ?? []),
+    ...(benchmark?.safetyAssertions ?? []).filter(assertion => assertion.failed).map(assertion => assertion.reason),
+  ].filter(reason => typeof reason === "string" && reason.trim());
+  return reasons.length ? reasons.join("; ") : `Workflow runner failed (exit ${exitCode}, passed=${benchmark?.passed ?? "unavailable"}).`;
+}
+
 /**
  * Metamorphic checks compare a transformed copy with the original observation.
  * A safe refusal is an availability loss, never a falsely accurate measurement.

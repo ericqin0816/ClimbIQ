@@ -101,6 +101,14 @@ a wrong automatic acceptance.
 
 ## First failure found (September 5)
 
+Specific failure fingerprints are recorded in `known-video-failures.json` with
+SHA-256 media identity. The timing runner checks them whenever their clips are
+requested. Reaccepting the known bad finish fails the test even without an exact
+correct Finish label. Changed media or unreadable marker output cannot count as
+a successful refusal. A different accepted timestamp is explicitly unverified,
+not automatically declared correct. These cases complement, not replace, a
+future independent accuracy dataset.
+
 Darkening `IMG_8903.MOV` produced an accepted Finish at 9.290 s while the athlete
 was still climbing. A red-dominant obstruction passed the green-minus-blue
 test, and failed dense refinement left the coarse result at High confidence.

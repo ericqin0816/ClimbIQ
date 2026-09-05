@@ -134,6 +134,8 @@ The compact review workspace keeps the player and acceptance controls together o
 
 On browsers with `VideoFrame`, the player reads the current source-frame timestamp directly, including while paused or offscreen; compositor callbacks remain a fallback for older browsers. Previous/Next Frame uses that frame's boundary and duration instead of assuming 30 fps. When native frame duration is unavailable, the controls explicitly fall back to approximate 0.03 s cursor steps. Review details and the saved note include source-frame duration when available. This is a presentation interval, not an event-accuracy bound, and it does not change automatic detector timing.
 
+Pose samples also retain `decodedFrameRawTime` and `sourceFrameDurationSeconds` when available, separately from their sampling cursor. Compact save/load preserves valid metadata; dataset JSON includes a `sourceFrameTimingAudit`. Repeated seeks into the same source image cannot count as separate Hold 10 dwell observations. Legacy samples without native metadata retain their existing interpretation, and malformed imported coordinates/validity flags cannot become valid COM measurements through JavaScript coercion.
+
 ## Start Signal Detection
 
 Before fusion, visual cues are checked for camera cuts and context-poor patches along the bottom edge of landscape footage. Such cues remain inspectable but cannot supply automatic clock votes or shift a valid cue's accepted time. These safeguards do not make edited broadcast footage a validated input format.

@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "interpretation": "Specific reproduced failure fingerprints, not a complete labeled accuracy dataset. Tolerance identifies the old failure neighborhood, not an event-error bound. Media are private and remain outside Git.",
+  "cases": [
+    {
+      "id": "red-obstruction-is-not-finish",
+      "fileName": "IMG_8903--dark-720.mp4",
+      "sha256": "af873862084c3ae9ba29309ac918748b42af0137c20a6368b96e66a314029dfe",
+      "boundary": "finish",
+      "rejectedRawTime": 9.29,
+      "toleranceSeconds": 0.1,
+      "evidence": "A red-dominant obstruction was accepted as the lower sensor's green return while the athlete was still climbing.",
+      "isIndependentAccuracyLabel": false
+    },
+    {
+      "id": "spectator-and-timer-reset-are-not-finish",
+      "fileName": "IMG_9076--silent-720.mp4",
+      "sha256": "ba0c13e5a0a879a1529e5186f2f71bd18d1936fd24683ea6fd5eb16f4db4524a",
+      "boundary": "finish",
+      "rejectedRawTime": 29.717,
+      "toleranceSeconds": 0.1,
+      "evidence": "A late upper timing-unit reset was corroborated by a foreground person's apparent top-band movement. The timer was already stopped earlier in the clip.",
+      "isIndependentAccuracyLabel": false
+    }
+  ]
+}

@@ -9,29 +9,48 @@ ClimbIQ turns an ordinary speed-climbing video into reviewable race timing, Hold
 1. Open [climbiq-detection-lab.vercel.app](https://climbiq-detection-lab.vercel.app).
 2. Upload one unedited, fixed-camera attempt with the complete lane visible.
 3. Run full analysis and point out that the video stays on the device.
-4. Show the accepted Start, first movement, Finish, and total. Open any suggested marker to demonstrate exact-frame review rather than a black-box answer.
-5. Review Hold 10. Once its exact contact frame is accepted, show Start → Hold 10, Hold 10 → Finish, bottom/top race shares, and the slower-phase difference.
+4. Show accepted Start, first movement, Finish, and total, explaining that detector confidence is not a measured accuracy percentage. Open a suggested marker and demonstrate Previous/Next Frame.
+5. Inspect Hold 10 in the full video. Only accept a frame after checking the visible contact. Then show Start → Hold 10 and Hold 10 → Finish; these are not the same as COM wall-height halves.
 6. Open Performance insights to show the wall-projected COM path, tracking confidence, and the lower/middle/top route-section analysis.
 7. Download the JSON or Obsidian report to show that the result is portable and auditable.
 
-## Historical 0.23.0 result to discuss
+## Current complete-reference result to discuss
 
-On the complete private phone-video baseline `IMG_9199.MOV`, local and public-production runs matched exactly:
+On the complete private phone-video reference `IMG_9199.MOV`, repeated local and production tests retain these timing observations:
 
 - Start: 7.130 s
 - First movement: 7.230 s, or 0.100 s after Start
 - Finish: 17.480 s
 - Total: 10.350 s
-- COM: 42/52 usable frames at 5 fps
-- New local route recovery: 19/20 matched hold silhouettes, versus 8 with the original diagram
-- New local contact-review cursor: 11.440 s raw; no Hold 10 marker is automatically accepted
-- Accepting that cursor in a workflow test yields bottom 4.310 s and top 6.040 s
+- Current local COM: roughly 44–45/52 usable samples at 5 fps
+- Route recovery: 19/20 matched hold silhouettes, versus 8 with the original diagram
+- Hold 10: review required; the candidate cursor can vary between runs
+- A workflow test accepting source frame 11.470 s produces bottom 4.340 s and top 6.010 s
 
-The Hold 10 acceptance test checks the UI and arithmetic, not a new ground-truth label. Its detailed scan retains 26/26 selected athlete samples; tracking coverage is not proof of exact contact timing. The previously production-verified timing/COM values above are unchanged in the local 0.23.0 regression.
+The last line checks UI behavior and arithmetic, not contact correctness. Do not present that test's acceptance as a human label. A source-frame timestamp identifies an image; it does not prove when physical contact occurred between images.
 
 The five-video regression automatically accepted two Starts (40% coverage) and sent three to review. This is an observed acceptance rate, not accuracy. The old precision figures have been withdrawn: the legacy correctness flags have no auditable independent review provenance, and direct frame inspection disputes the old 14.290 s finish suggestion for `IMG_8903.MOV`. The summary now reports accuracy as unavailable until independently reviewed labels are supplied.
 
-Current overnight work adds decoded-frame timestamp provenance, faster pixel-only capture, and a wall-marker fix tested against ceiling highlights and uneven clock sizes. The complete reference retains 44–45/52 usable motion frames and 19 registered holds in current local tests. Its closer contact scan may be inconclusive; it must remain a review aid. Unaccepted finish suggestions no longer silently bound automatic COM analysis: accept the finish or supply an official total first.
+Current work adds native frame timestamps/durations, frame-rate-aware stepping, a compact phone/desktop review layout, faster pixel-only capture, and wall-marker checks against ceiling highlights and uneven clock sizes. The closer contact scan may be inconclusive. Unaccepted finish suggestions cannot silently bound automatic COM analysis: accept Finish or supply an official total first.
+
+## A stronger engineering story than an accuracy slogan
+
+Show one successful complete workflow and one honest refusal. Explain the tests
+that changed the implementation:
+
+- Thirty controlled copies exposed resize, compression, exposure, frame-rate,
+  audio and trim weaknesses. They are five source climbs, not thirty new people.
+- A red obstruction and a late timer reset produced false finishes. The reset
+  coincided with a foreground person, showing why two visual heuristics are not
+  necessarily independent evidence.
+- Native frame review passed 126 seek/pixel checks across five phone recordings
+  and two synthetic frame-rate clips, including repeated-frame hashes and
+  Previous/Next Frame round trips.
+- Saved/exported timing distinguishes automatic acceptance, manual entry and
+  frame review. None automatically becomes an independent accuracy label.
+- A stopped-timer prototype was withheld because compressed red holds could
+  imitate digits. Rejecting a promising but unreliable experiment is part of
+  the validation story.
 
 ## What makes the project technically interesting
 
@@ -40,7 +59,7 @@ Current overnight work adds decoded-frame timestamp provenance, faster pixel-onl
 - Angled footage does not assume that the lower start sensor and upper finish indicator share one screen x-coordinate.
 - Finish detection timestamps the first connected return-color flash, verifies its later settled state, and rejects neutral occlusion, detached old flashes, scoreboards, and timing resets.
 - Hold 10 uses hand-contact evidence. A COM halfway crossing is kept separate and cannot become an accepted Hold 10 marker.
-- Every accepted/suggested timestamp retains its evidence source, confidence, raw time, correction, and review note in the export.
+- Every accepted/suggested timestamp retains its evidence source, confidence, raw time, correction, and review note in the export. Native frame duration is not advertised as an event-error bound.
 
 ## Honest limitations
 

@@ -7,6 +7,7 @@ import type {
 } from "../types";
 import { applyTrajectoryKinematics, DEFAULT_BIOMECHANICS_SETTINGS } from "./biomechanics";
 import { validateWallCalibration } from "./wallCalibration";
+import { sanitizeSourceSampleTiming } from "./sourceSampleTiming";
 
 const HAND_LANDMARK_INDICES = new Set([15, 16, 17, 18, 19, 20, 21, 22]);
 
@@ -119,12 +120,12 @@ function sanitizeBiomechanicsFrame(value: unknown, minMassCoverage: number): Bio
   }
   const landmarks = Array.isArray(candidate.landmarks)
     ? candidate.landmarks.slice(0, 33).flatMap((landmark: any) => {
-        const index = Number(landmark?.index);
+        const index = finiteNumber(landmark?.index);
         const x = finiteNumber(landmark?.x);
         const y = finiteNumber(landmark?.y);
         const z = finiteNumber(landmark?.z);
         const visibility = finiteNumber(landmark?.visibility);
-        if (!Number.isInteger(index) || index < 0 || index > 32 || x === undefined || y === undefined || z === undefined ||
+        if (index === undefined || !Number.isInteger(index) || index < 0 || index > 32 || x === undefined || y === undefined || z === undefined ||
           visibility === undefined || x < -0.25 || x > 1.25 || y < -0.25 || y > 1.25 || visibility < 0 || visibility > 1) {
           return [];
         }
@@ -135,7 +136,7 @@ function sanitizeBiomechanicsFrame(value: unknown, minMassCoverage: number): Bio
   const wallCom = sanitizeWallPoint(candidate.wallCom);
   const massCoverage = boundedNumber(candidate.massCoverage, 0, 1, 0);
   const meanVisibility = boundedNumber(candidate.meanVisibility, 0, 1, 0);
-  const valid = Boolean(candidate.valid && imageCom && wallCom && massCoverage >= minMassCoverage);
+  const valid = Boolean(candidate.valid === true && imageCom && wallCom && massCoverage >= minMassCoverage);
   const poseSelected = typeof candidate.poseSelected === "boolean"
     ? candidate.poseSelected
     : landmarks.length > 0 || valid;
@@ -148,6 +149,7 @@ function sanitizeBiomechanicsFrame(value: unknown, minMassCoverage: number): Bio
   return {
     rawTime,
     climbTime,
+    ...sanitizeSourceSampleTiming(rawTime, candidate),
     poseDetected,
     poseSelected,
     poseCandidateCount,
@@ -192,7 +194,7 @@ function sanitizeBiomechanicsIdentityZone(value: any): NormalizedZone | undefine
 }
 
 function finiteNumber(value: unknown): number | undefined {
-  const number = typeof value === "number" ? value : Number(value);
+  const number = typeof value === "number" ? value : typeof value === "string" && value.trim() ? Number(value) : NaN;
   return Number.isFinite(number) ? number : undefined;
 }
 

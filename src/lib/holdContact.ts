@@ -8,6 +8,7 @@ import type {
 } from "../types";
 import { STANDARD_SPEED_HOLDS, type StandardSpeedHoldId } from "./standardSpeedRoute";
 import { projectImagePointToWall, validateWallCalibration } from "./wallCalibration";
+import { uniqueSourceFrameSamples } from "./sourceSampleTiming";
 
 export type ContactHand = "left" | "right";
 
@@ -161,7 +162,7 @@ const HAND_LANDMARK_INDEX: Record<ContactHand, { wrist: number; fingers: readonl
 const HAND_ORDER: readonly ContactHand[] = ["left", "right"];
 
 /**
- * Detects real hand contact with a known wall hold. It intentionally uses no
+ * Finds sustained hand-proximity candidates for a known wall hold. It uses no
  * COM height or route-halfway fallback: without sustained wrist evidence it
  * returns detected=false.
  */
@@ -186,10 +187,10 @@ export function detectHoldContact(
   if (options.observedRouteHolds && !route) {
     return unavailable("The registered hold neighborhood is invalid or does not match the target; rerun route registration.");
   }
-  const frames = [...result.frames]
+  const frames = uniqueSourceFrameSamples([...result.frames]
     .filter((frame) => Number.isFinite(frame.rawTime) &&
       frame.rawTime >= result.startRawTime - 1e-9 && frame.rawTime <= result.endRawTime + 1e-9)
-    .sort((left, right) => left.rawTime - right.rawTime);
+    .sort((left, right) => left.rawTime - right.rawTime));
   const episodes = HAND_ORDER.flatMap((hand) =>
     buildEpisodes(frames, hand, hold, validation.matrix!, resolved, route),
   );

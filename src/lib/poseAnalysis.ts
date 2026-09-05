@@ -11,6 +11,8 @@ import type {
 import { applyTrajectoryKinematics, computeImageCom, computeWallCom } from "./biomechanics";
 import { sampleFramesInRange, seekTo } from "./videoFrameSampler";
 import { validateWallCalibration } from "./wallCalibration";
+import { readDecodedVideoFrameTime } from "./decodedVideoFrame";
+import { summarizeSourceSampleTiming } from "./sourceSampleTiming";
 
 const MEDIAPIPE_WASM_RELATIVE_PATH = "mediapipe/wasm";
 const MODEL_RELATIVE_PATH = "models/pose_landmarker_full.task";
@@ -113,6 +115,7 @@ export async function analyzePoseVideo({
       await seekTo(video, requestedTime);
       checkCancelled(isCancelled, signal);
       const actualTime = video.currentTime;
+      const decodedFrame = readDecodedVideoFrameTime(video);
       const searchRegion = buildPoseSearchRegion(
         calibration,
         identityZone,
@@ -189,6 +192,8 @@ export async function analyzePoseVideo({
       frames.push({
         rawTime: roundMetric(actualTime),
         climbTime: roundMetric(actualTime - startRawTime),
+        decodedFrameRawTime: decodedFrame?.mediaTime,
+        sourceFrameDurationSeconds: decodedFrame?.durationSeconds,
         poseDetected: detectedLandmarks.length > 0,
         poseSelected: landmarks.length > 0,
         poseCandidateCount: detectedLandmarks.length,
@@ -217,6 +222,10 @@ export async function analyzePoseVideo({
   checkCancelled(isCancelled, signal);
   onProgress?.({ phase: "finalizing", processed: times.length, total: times.length });
   const kinematics = applyTrajectoryKinematics(frames, settings, calibration);
+  const sourceTiming = summarizeSourceSampleTiming(frames);
+  if (sourceTiming.repeatedNativeFrames) {
+    runWarnings.add(`${sourceTiming.repeatedNativeFrames} requested samples reused an already observed source frame. Repeated images cannot supply independent Hold 10 dwell samples.`);
+  }
   for (const warning of kinematics.warnings) {
     runWarnings.add(warning);
   }

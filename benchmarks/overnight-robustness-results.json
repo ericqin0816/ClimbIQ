@@ -1,8 +1,43 @@
 {
   "schemaVersion": 1,
   "collectedAt": "2026-09-05",
-  "scope": "Local overnight experiments based on ba2a468, leading to 0.24.0. Private images and media remain outside Git.",
-  "interpretation": "Workflow and source-consistency evidence, not independently labeled accuracy. The 30-copy batch preceded the final upper-clock hue guard and the stricter COM finish-boundary policy.",
+  "scope": "September 5 overnight experiments through 0.27.0. Private images and media remain outside Git.",
+  "interpretation": "Workflow and source-consistency evidence, not independently labeled accuracy. derivedVideoBatch is the historical pre-final-0.24.0 batch; later sections name their tested releases explicitly.",
+  "postResetGuardBatch": {
+    "testedAppVersion": "0.26.0",
+    "sourceReport": "video-robustness-2026-09-05T11-31-07-976Z.json",
+    "independentSourceClimbs": 5,
+    "derivedVariations": 30,
+    "workflowErrors": 0,
+    "sourceTimingRegressionsAtPoint1Seconds": 0,
+    "independentlyLabeledBoundaries": 0,
+    "unverifiedAcceptedBoundaries": 17,
+    "pairedChangesFrom0250": {
+      "unchangedSharedAcceptedTimes": true,
+      "newUnverifiedAcceptances": 0,
+      "withheldPreviouslyAcceptedBoundary": "IMG_9076--silent-720.mp4 Finish 29.717 s, a known late timing-unit reset"
+    }
+  },
+  "sourceFrameReviewAudit": {
+    "testedAppVersion": "0.26.0",
+    "originalPhoneClips": 5,
+    "syntheticFrameRateClips": 2,
+    "seekAndPixelChecks": 126,
+    "repeatedFrameSha256Matched": true,
+    "adjacentFrameRoundTripsPassed": true,
+    "interpretation": "Native source-frame identity and seek containment, not physical event accuracy. Synthetic clips include 15-fps and variable-frame-rate H.264."
+  },
+  "highDensitySourceTimingAudit": {
+    "testedAppVersion": "0.27.0",
+    "sourceReport": "video-robustness-2026-09-05T11-54-58-930Z.json",
+    "poseSampleFps": 15,
+    "cases": [
+      { "variation": "control-720", "usableCom": 129, "requested": 156, "nativeTimedSamples": 156, "uniqueNativeFrames": 156 },
+      { "variation": "compact-360", "usableCom": 87, "requested": 157, "nativeTimedSamples": 157, "uniqueNativeFrames": 157 },
+      { "variation": "low-fps-720", "usableCom": 113, "requested": 157, "nativeTimedSamples": 157, "uniqueNativeFrames": 157 }
+    ],
+    "interpretation": "Three derived copies of 9199, not independent climbs. Higher sample count is not proof of accurate contact, and compact-video tracking remains incomplete."
+  },
   "derivedVideoBatch": {
     "independentSourceClimbs": 5,
     "derivedVariations": 30,

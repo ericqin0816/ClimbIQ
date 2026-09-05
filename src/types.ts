@@ -283,6 +283,9 @@ export interface PoseLandmarkPoint extends NormalizedPoint {
 export interface BiomechanicsFrame {
   rawTime: number;
   climbTime: number;
+  /** Native source-frame PTS, kept separate from the requested sampling cursor. */
+  decodedFrameRawTime?: number;
+  sourceFrameDurationSeconds?: number;
   /** True when MediaPipe returned at least one pose before identity filtering. */
   poseDetected: boolean;
   /** True when a pose was safely associated with the climber for this frame. */

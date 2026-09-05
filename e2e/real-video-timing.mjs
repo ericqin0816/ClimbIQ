@@ -3,6 +3,9 @@ import path from "node:path";
 import { spawn } from "node:child_process";
 import { tmpdir } from "node:os";
 import { createProtocolClient } from "./cdp-client.mjs";
+import { createReadStream } from "node:fs";
+import { createHash } from "node:crypto";
+import { analysisFailureFromOutcome, evaluateKnownVideoFailure } from "../scripts/lib/known-video-failures.mjs";
 
 const defaultChromePath = process.platform === "darwin"
   ? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
@@ -205,8 +208,9 @@ async function runTiming(protocol, fileName) {
       summary: document.querySelector('.run-summary')?.innerText ?? '',
     };
   })()`);
-  let workflow;
-  if (fullWorkflow) {
+  const applicationFailure = analysisFailureFromOutcome(outcome);
+  let workflow = applicationFailure ? { error: applicationFailure } : undefined;
+  if (fullWorkflow && !applicationFailure) {
     try { workflow = await verifySavedWorkflow(protocol); }
     catch (error) {
       workflow = { error: String(error), diagnostic: await evaluate(`({
@@ -219,6 +223,19 @@ async function runTiming(protocol, fileName) {
     }
   }
   return { fileName, elapsedMs: Date.now() - started, cancelledAfterTiming, ...outcome, workflow };
+}
+
+async function captureDatasetExport(evaluate) {
+  return evaluate(`(() => {
+    const original = navigator.clipboard.writeText; let captured;
+    Object.defineProperty(navigator.clipboard, 'writeText', { configurable: true, value: async text => { captured = text; } });
+    try {
+      const button = [...document.querySelectorAll('button')].find(b => b.textContent.trim() === 'Copy JSON');
+      if (!button) throw new Error('Copy JSON control is missing.');
+      for (let parent = button.parentElement; parent; parent = parent.parentElement) if (parent.tagName === 'DETAILS') parent.open = true;
+      button.click(); return JSON.parse(captured);
+    } finally { Object.defineProperty(navigator.clipboard, 'writeText', { configurable: true, value: original }); }
+  })()`);
 }
 
 async function verifySavedWorkflow({ evaluate, send }) {
@@ -249,6 +266,11 @@ async function verifySavedWorkflow({ evaluate, send }) {
   }
   const hasFinish = saved.timestamps.some(marker => marker.id === "finishPad" && marker.rawTime !== null);
   const validFrames = saved.biomechanics?.result?.metrics?.validFrames ?? 0;
+  const savedNativeFrames = saved.biomechanics?.result?.frames?.filter(frame => Number.isFinite(frame.decodedFrameRawTime)).length ?? 0;
+  const sourceFrameTimingAudit = (await captureDatasetExport(evaluate)).sourceFrameTimingAudit;
+  if (savedNativeFrames && (sourceFrameTimingAudit?.nativeTimingFrames !== savedNativeFrames || sourceFrameTimingAudit?.isEventAccuracyBound !== false)) {
+    throw new Error('Dataset export lost native sampled-frame timing or mislabeled it as event accuracy.');
+  }
   if (!hasFinish && !(Number(saved.settings?.officialTotalTime) > 0) && validFrames > 0) {
     throw new Error("An unaccepted finish review cursor supplied COM frames without an official total.");
   }
@@ -320,6 +342,7 @@ async function verifySavedWorkflow({ evaluate, send }) {
     secondPass,
     secondPassRetryPassed,
     manualReviewWorkflow,
+    sourceFrameTimingAudit,
     validFrames, requestedFrames: saved.biomechanics?.result?.metrics?.requestedFrames ?? 0,
     sampleFps: saved.biomechanics?.result?.settings?.sampleFps,
     trackingDiagnostics: saved.biomechanics?.result ? {
@@ -328,6 +351,7 @@ async function verifySavedWorkflow({ evaluate, send }) {
       warnings: saved.biomechanics.result.warnings,
       frames: saved.biomechanics.result.frames.map(frame => ({
         rawTime: frame.rawTime, poseDetected: frame.poseDetected, poseSelected: frame.poseSelected,
+        decodedFrameRawTime: frame.decodedFrameRawTime, sourceFrameDurationSeconds: frame.sourceFrameDurationSeconds,
         valid: frame.valid, imageCom: frame.imageCom, warning: frame.warning,
       })),
     } : undefined,
@@ -336,6 +360,11 @@ async function verifySavedWorkflow({ evaluate, send }) {
 
 async function verifyHold10Review({ evaluate, send }, saved) {
   const savedLibrary = await evaluate(`localStorage.getItem('climbiq.analysisSessions.v1')`);
+  const expectedNativeFrames = saved.biomechanics?.result?.frames?.filter(frame => Number.isFinite(frame.decodedFrameRawTime)).length ?? 0;
+  const restoredTimingAudit = (await captureDatasetExport(evaluate)).sourceFrameTimingAudit;
+  if (expectedNativeFrames && restoredTimingAudit?.nativeTimingFrames !== expectedNativeFrames) {
+    throw new Error('Loading the saved analysis lost native source-frame timing metadata.');
+  }
   await evaluate(`document.querySelectorAll('.hold10-evidence-frames button')[1].click()`);
   await waitUntil(evaluate, `([...document.querySelectorAll('button')].some(b => b.textContent.trim().startsWith('Set Hold 10 at ') && !b.disabled))`, 10000, "Hold 10 frame acceptance control");
   let pendingSeekCancellationVerified;
@@ -413,17 +442,9 @@ async function verifyHold10Review({ evaluate, send }, saved) {
   if (await evaluate(`localStorage.getItem('climbiq.analysisSessions.v1')`) !== savedAfterReview) {
     throw new Error('An unsaved Start edit unexpectedly overwrote the saved library.');
   }
-  const exportedAcceptance = await evaluate(`(() => {
-    // This isolated test profile captures the public Copy JSON action without
-    // writing anything to the user's system clipboard.
-    const original = navigator.clipboard.writeText; let captured;
-    Object.defineProperty(navigator.clipboard, 'writeText', { configurable: true, value: async text => { captured = text; } });
-    try {
-      const button = [...document.querySelectorAll('button')].find(b => b.textContent.trim() === 'Copy JSON');
-      for (let parent = button.parentElement; parent; parent = parent.parentElement) if (parent.tagName === 'DETAILS') parent.open = true;
-      button.click(); return JSON.parse(captured).acceptedTimestamps;
-    } finally { Object.defineProperty(navigator.clipboard, 'writeText', { configurable: true, value: original }); }
-  })()`);
+  const editedDataset = await captureDatasetExport(evaluate);
+  const exportedAcceptance = editedDataset.acceptedTimestamps;
+  if (expectedNativeFrames && editedDataset.sourceFrameTimingAudit !== null) throw new Error('An edited Start retained stale source-frame audit evidence.');
   const editedStart = exportedAcceptance.find(marker => marker.markerId === 'startSignal');
   if (editedStart?.acceptanceMode !== 'manual-entry' || editedStart.userAccepted !== true ||
       exportedAcceptance.some(marker => marker.isGroundTruthLabel !== false)) {
@@ -431,12 +452,14 @@ async function verifyHold10Review({ evaluate, send }, saved) {
   }
   return { passed: true, isGroundTruthLabel: false, acceptedRawTime: accepted.rawTime,
     startToHold10Seconds: accepted.phases[0], hold10ToFinishSeconds: accepted.phases[1], staleEvidenceCleared: true,
-    frameTimeSource, savedReviewProvenance: true, pendingSeekCancellationVerified, acceptanceModesVerified: true };
+    frameTimeSource, savedReviewProvenance: true, pendingSeekCancellationVerified, acceptanceModesVerified: true,
+    nativeSourceFrameTimingPreserved: expectedNativeFrames > 0 };
 }
 
 async function main() {
   const expectations = JSON.parse(await readFile(new URL("../benchmarks/real-video-results.json", import.meta.url), "utf8"));
   const publicResearch = JSON.parse(await readFile(new URL("../benchmarks/public-broadcast-results.json", import.meta.url), "utf8"));
+  const knownFailures = JSON.parse(await readFile(new URL("../benchmarks/known-video-failures.json", import.meta.url), "utf8"));
   const privateTrials = expectations.trials ?? [];
   const expectedById = new Map([
     ...privateTrials.map((trial) => [trial.id, { trial, baselineStatus: "compared" }]),
@@ -464,7 +487,15 @@ async function main() {
       return validateOutcome(outcome, expected?.trial, expected?.baselineStatus);
     });
     const failures = assertions.flatMap((assertion) => assertion.errors.map((error) => `${assertion.fileName}: ${error}`));
-    console.log(JSON.stringify({ appUrl, app, videoDirectory, fullWorkflow, disableFrameCallback, disableVideoFrame, passed: failures.length === 0, assertions, outcomes }, null, 2));
+    const safetyAssertions = [];
+    for (const testCase of knownFailures.cases.filter(testCase => files.includes(testCase.fileName))) {
+      const hash = createHash("sha256");
+      for await (const chunk of createReadStream(path.join(videoDirectory, testCase.fileName))) hash.update(chunk);
+      const result = evaluateKnownVideoFailure(testCase, outcomes.find(outcome => outcome.fileName === testCase.fileName), hash.digest("hex"));
+      safetyAssertions.push(result);
+      if (result.failed) failures.push(`${testCase.fileName}: ${result.reason}`);
+    }
+    console.log(JSON.stringify({ appUrl, app, videoDirectory, fullWorkflow, disableFrameCallback, disableVideoFrame, passed: failures.length === 0, assertions, safetyAssertions, outcomes }, null, 2));
     if (failures.length) process.exitCode = 1;
   } finally {
     protocol.socket.close();

@@ -19,6 +19,12 @@ const hold10: WallPoint = { xMeters: 1.399, yMeters: 8.334 };
 const farLeft: WallPoint = { xMeters: 0.25, yMeters: 6 };
 
 describe("hold contact detection", () => {
+  it("does not manufacture dwell from repeated seeks into one source frame", () => {
+    const repeated = [1, 1.05, 1.1, 1.15].map(time => Object.assign(frame(time, farLeft, hold10), {
+      decodedFrameRawTime: 1, sourceFrameDurationSeconds: 0.2,
+    }));
+    expect(detectHoldContact(makeResult(repeated), calibration, hold10, { holdLabel: "Hold 10" }).detected).toBe(false);
+  });
   it("allows only a bounded, registered side-edge target for approximate contact review", () => {
     const approximate = { ...buildWallCalibration([
       { x: 0.25, y: 0.9 }, { x: 0.75, y: 0.9 }, { x: 0.75, y: 0.1 }, { x: 0.25, y: 0.1 },

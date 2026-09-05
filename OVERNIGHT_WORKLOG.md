@@ -316,3 +316,40 @@ before pushing verified checkpoints because the user also works from a Mac.
   frame-rate clips, that is 126 successful seek/pixel checks. Unit checks:
   458 tests in 46 files, plus typecheck/build. Live 0.25.1 also reproduced the
   corrected refusal of the silent 9076 reset; Finish remains unaccepted.
+
+## Sample provenance and import checks (0.27.0 candidate)
+
+- 0.26.0 (`cb81d58`) pushed. The completed 30-copy replay has zero workflow
+  errors and zero source timing drifts. Paired comparison against 0.25.0 has
+  one acceptance loss: the intentionally blocked silent-9076 reset at 29.717 s.
+  No other accepted boundary changed. Accuracy remains unavailable.
+- Native frame PTS/duration now travel with pose samples and survive compact
+  save/load. Export audits distinguish requested sampling positions from unique
+  source images. Hold 10 cannot manufacture dwell by counting several seeks
+  into the same decoded frame as independent observations.
+- Confirmed import bugs: null coordinates became zero via Number(null), and
+  the truthy string "false" made a pose frame valid. New failing tests reproduced
+  both; strict numeric/boolean validation now passes them without changing
+  ordinary numeric session data.
+- The original 9199 full 15-fps workflow passes at 129/156 usable COM samples.
+  All 156 have native timing metadata and unique source frames. Source intervals
+  range from 0.033333 to 0.035 s; maximum cursor/source offset is about 0.028667 s.
+  That is a frame-selection observation, not a measured detection error. Saved
+  metadata survives reload and clears from exports after a stale Start edit.
+- Known false-finish fingerprints now bind to exact media checksums and fail
+  when the old bad acceptance recurs. A runner bug could hide a safety failure
+  behind an empty ordinary-assertion list; failure propagation now covers both.
+- Current checks: 478 tests/48 files, typecheck/build passed. High-density
+  control/compact/15-fps-media comparisons and final failure replays are ongoing.
+- High-density 9199 variations completed: control 129/156 usable COM, compact
+  87/157, and 15-fps media 113/157. All sampled frames retained native timing;
+  this run had no repeated source frames. The duplicate-dwell guard is proven
+  by an explicit synthetic regression, not by claiming these clips duplicated.
+- Both checksummed known-failure clips passed full workflows and their specific
+  guard assertions. The test harness now also refuses to treat application
+  exceptions or unreadable status/marker UI as successful abstention.
+- Exploratory stereo audit found no large global channel cancellation in 8903,
+  9075 or 9076 (mix/individual energy ratios about 0.724/0.952/0.923). On 9076,
+  one individual channel proposes 2.860 s at High while the mix gives 2.790 s
+  at Medium. This is unverified diagnostic evidence; no channel-picking change
+  has been shipped or described as improved accuracy.
