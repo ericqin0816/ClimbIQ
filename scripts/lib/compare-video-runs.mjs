@@ -1,5 +1,17 @@
 import { parseMarkerTime } from "./video-robustness.mjs";
 
+export function parseComparisonArgs(args) {
+  const files = args.filter(arg => !arg.startsWith("--"));
+  const flags = args.filter(arg => arg.startsWith("--"));
+  if (files.length !== 2 || flags.length > 1 || flags.some(flag => !flag.startsWith("--tolerance="))) {
+    throw new Error("Usage: node scripts/compare-video-runs.mjs BEFORE.json AFTER.json [--tolerance=SECONDS]");
+  }
+  const value = flags[0]?.slice("--tolerance=".length);
+  const toleranceSeconds = value === undefined ? 0.1 : value.trim() ? Number(value) : NaN;
+  if (!Number.isFinite(toleranceSeconds) || toleranceSeconds < 0) throw new Error("Tolerance must be finite and non-negative.");
+  return { beforePath: files[0], afterPath: files[1], toleranceSeconds };
+}
+
 /** Compare identical test media, not historical human-correctness flags. */
 export function compareVideoRuns(before, after, toleranceSeconds = 0.1) {
   if (!Number.isFinite(toleranceSeconds) || toleranceSeconds < 0) throw new Error("Tolerance must be finite and non-negative.");

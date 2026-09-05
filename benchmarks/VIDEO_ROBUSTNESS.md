@@ -54,6 +54,14 @@ Compare two completed runs on identical checksummed media:
 npm run benchmark:compare -- test-results/BEFORE.json test-results/AFTER.json
 ```
 
+For a stricter same-media timing comparison, append `--tolerance=0.01` (10 ms),
+or use `--tolerance=0` to flag every nonzero stored timestamp change. The default
+remains 0.100 s for compatibility. Neither threshold establishes accuracy; a
+43 ms difference can now fail the stricter drift check even though it fits the
+older policy. The browser runner also records displayed hold IDs and normalized
+marker positions, and fails malformed or duplicate numbering. Those positions
+are observations, not independently verified hold labels.
+
 This separates changes between app versions from differences between an original
 and a transformed copy. Different/missing media, unfinished reports, duplicate
 cases, and workflow errors cannot silently count as successful pairs. Coverage

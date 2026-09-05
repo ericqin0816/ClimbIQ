@@ -7,6 +7,7 @@ import {
 } from "./standardSpeedRoute";
 import { projectImagePointToWall, validateWallCalibration } from "./wallCalibration";
 import { SPEED_ROUTE_BOLTS } from "./speedRouteBoltGrid";
+import { assignRouteMatches } from "./routeAssignment";
 
 export interface RouteAlignmentOptions {
   /** Research comparison only; bolt positions are not contact/silhouette centers. */
@@ -762,14 +763,14 @@ function refineHypothesis(
     if (!fitted || !isBoundedTransform(fitted, projected, options.maxCorrectionNormalized)) return undefined;
     transform = fitted;
   }
-  matches = assignOneToOne(transform, projected, candidates, options.matchRadiusNormalized);
+  matches = assignRouteMatches(projected.map(point => applyTransform(transform, point)), candidates, options.matchRadiusNormalized);
   if (matches.length < 4) return undefined;
 
   let model: "affine" | "projective" = "affine";
   if (matches.length >= 9) {
     const projective = fitProjective(projected, candidates, matches);
     if (projective && isBoundedTransform(projective, projected, options.maxCorrectionNormalized)) {
-      const projectiveMatches = assignOneToOne(projective, projected, candidates, options.matchRadiusNormalized);
+      const projectiveMatches = assignRouteMatches(projected.map(point => applyTransform(projective, point)), candidates, options.matchRadiusNormalized);
       const affineResidual = median(matches.map((match) => match.residual));
       const projectiveResidual = median(projectiveMatches.map((match) => match.residual));
       if (projectiveMatches.length >= matches.length && projectiveResidual <= affineResidual * 0.88) {

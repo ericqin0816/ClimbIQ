@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "interpretation": "User-provided feedback, not independently annotated start/finish frames. Unassigned references must not be used to tune or score a different recording.",
+  "reports": [
+    {
+      "id": "2026-09-05-screenshot-12-24",
+      "sourceFileName": null,
+      "sourceSha256": null,
+      "sourceStatus": "awaiting-matching-video",
+      "expectedTotalSeconds": 12.24,
+      "screenshotTotalSeconds": 12.283,
+      "screenshotSignedTotalErrorSeconds": 0.043,
+      "referenceSource": "user-reported total",
+      "startRawTime": null,
+      "finishRawTime": null,
+      "holdFeedback": "The marker displayed as 9 should be 8 on this run.",
+      "notes": "The screenshot camera view has not been matched to the five original Drive recordings. Do not subtract 43 ms globally or renumber Hold 9 across every run. A matching source recording or exported session is needed for exact reproduction."
+    }
+  ]
+}

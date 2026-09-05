@@ -207,8 +207,18 @@ async function runTiming(protocol, fileName) {
       finishSuggestion: finishSuggestion?.textContent.trim() ?? '',
       status: document.querySelector('.quick-analysis-box .status-message')?.textContent.trim() ?? '',
       summary: document.querySelector('.run-summary')?.innerText ?? '',
+      routeMarkers: [...document.querySelectorAll('.video-route-hold')].map(group => ({
+        holdId: Number(group.querySelector('text')?.textContent),
+        x: Number(group.querySelector('circle')?.getAttribute('cx')) / document.querySelector('video').videoWidth,
+        y: Number(group.querySelector('circle')?.getAttribute('cy')) / document.querySelector('video').videoHeight,
+      })),
     };
   })()`);
+  if (outcome.routeMarkers.some(marker => !Number.isInteger(marker.holdId) || marker.holdId < 1 || marker.holdId > 20 ||
+      !Number.isFinite(marker.x) || !Number.isFinite(marker.y)) ||
+      new Set(outcome.routeMarkers.map(marker => marker.holdId)).size !== outcome.routeMarkers.length) {
+    throw new Error(`${fileName}: displayed route markers have invalid or duplicate numbering.`);
+  }
   const applicationFailure = analysisFailureFromOutcome(outcome);
   let workflow = applicationFailure ? { error: applicationFailure } : undefined;
   if (fullWorkflow && !applicationFailure) {

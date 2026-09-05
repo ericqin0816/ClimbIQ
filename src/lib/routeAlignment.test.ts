@@ -21,6 +21,24 @@ const red: RGB = { r: 205, g: 45, b: 55 };
 const background: RGB = { r: 102, g: 105, b: 108 };
 
 describe("persistent visual route alignment", () => {
+  it("keeps neighboring identities when the closer greedy pairing would strand Hold 8", () => {
+    const from = projected[7], to = projected[8];
+    const delta = { x: to.x - from.x, y: to.y - from.y };
+    const eight = { x: from.x + delta.x * 0.52, y: from.y + delta.y * 0.52 };
+    const nine = { x: to.x + delta.x * 0.60, y: to.y + delta.y * 0.60 };
+    const frames = Array.from({ length: 3 }, () => {
+      const image = makeFrame(360, 720);
+      drawRoute(image, IDENTITY, new Set([8, 9]), pink, 4);
+      drawDisc(image, eight, 4, pink);
+      drawDisc(image, nine, 4, pink);
+      return image;
+    });
+    const result = alignStandardSpeedRouteVisually(frames, calibration, { matchRadiusNormalized: 0.04 });
+    expect(result.aligned, result.reason).toBe(true);
+    expect(result.holds[7].observedImage).toBeDefined();
+    expect(pointDistance(result.holds[7].observedImage!, eight)).toBeLessThan(0.006);
+    expect(pointDistance(result.holds[8].observedImage!, nine)).toBeLessThan(0.006);
+  });
   const gridAnchor = { id: "startBody" as const, label: "Selected athlete", x1: 0.68, x2: 0.86, y1: 0.8, y2: 0.98 };
   function gridFrames(missing = new Set<number>()) {
     return Array.from({ length: 3 }, () => {

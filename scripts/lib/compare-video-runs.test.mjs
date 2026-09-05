@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { compareVideoRuns } from "./compare-video-runs.mjs";
+import { compareVideoRuns, parseComparisonArgs } from "./compare-video-runs.mjs";
 
 const run = (start = "7.13s", finish = "17.48s") => ({ sourceName: "unit.mov", variationId: "control-720",
   media: { sha256: "a".repeat(64), sourceSha256: "b".repeat(64) }, app: { version: "test" },
@@ -7,6 +7,22 @@ const run = (start = "7.13s", finish = "17.48s") => ({ sourceName: "unit.mov", v
 const report = (...runs) => ({ finishedAt: "2026-09-05T10:00:00Z", fullWorkflow: true, runs });
 
 describe("paired video-run comparison", () => {
+  it("can expose a 43 ms output change with a stricter comparison policy", () => {
+    const result = compareVideoRuns(report(run()), report(run("7.13", "17.523")), 0.01);
+    expect(result.summary.timingDrifts).toBe(1);
+    expect(result.cases[0].boundaries.finish.deltaSeconds).toBe(0.043);
+    expect(result.summary.accuracy).toBeNull();
+  });
+  it("accepts an explicit CLI tolerance without silently weakening the default", () => {
+    expect(parseComparisonArgs(["before.json", "after.json"])).toEqual({ beforePath: "before.json", afterPath: "after.json", toleranceSeconds: 0.1 });
+    expect(parseComparisonArgs(["before.json", "after.json", "--tolerance=0.01"]).toleranceSeconds).toBe(0.01);
+    expect(parseComparisonArgs(["--tolerance=0", "before.json", "after.json"]).toleranceSeconds).toBe(0);
+  });
+  it("rejects invalid, empty or repeated CLI tolerances", () => {
+    for (const extra of [["--tolerance="], ["--tolerance=-1"], ["--tolerance=Infinity"], ["--tolerance=0.01", "--tolerance=1"], ["--unknown"]]) {
+      expect(() => parseComparisonArgs(["before.json", "after.json", ...extra])).toThrow();
+    }
+  });
   it("keeps identical unverified output separate from accuracy", () => {
     const result = compareVideoRuns(report(run()), report(run()));
     expect(result.summary).toMatchObject({ pairedCases: 1, timingDrifts: 0, accuracy: null });
