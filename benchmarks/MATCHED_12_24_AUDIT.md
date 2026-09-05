@@ -107,3 +107,26 @@ Hold 8 remains corrected, but timing correctly falls back to the old 12.283 s
 estimate. The 28 ms improvement is therefore verified for native-frame-capable
 Chrome, not claimed for every browser. Report:
 `test-results/no-native-frame-0.28.3.json`.
+
+## Deploy result
+
+- URL: [ClimbIQ](https://climbiq-detection-lab.vercel.app/)
+- Target: production
+- Status: ready; 0.28.3 verified
+- Code commit: `21230ec`
+- Framework: React / Vite
+- Hosted build duration: not measured; GitHub `verify` succeeded
+- Entry asset: `/assets/index-BAtexN4l.js`
+- Full production workflows passed the exact new recording and original 9199.
+  The new clip retains corrected Hold 8, 18 markers and 12.255 s; 9199 retains
+  19 markers, Start 7.130 s and Finish 17.472 s. Report:
+  `test-results/production-0.28.3.json`.
+- Provider runtime logs, drains and external monitoring were not inspected.
+- A separate 390 px mobile live replay visually confirms Hold 8 and 12.255 s
+  with no reported page errors, but retains only 35/62 usable COM frames and
+  correctly flags tracking as needing review. The cause of this coverage
+  variation is not established here; stable timing is not proof of stable COM.
+- The production build has a non-blocking entry-chunk size advisory (>500 kB).
+
+Refresh the website and rerun the video to obtain the new analysis. Existing
+saved sessions are not silently rewritten to the new detector output.
