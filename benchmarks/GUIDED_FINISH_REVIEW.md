@@ -1,4 +1,4 @@
-# Guided finish review — 0.28.0
+# Guided finish review — 0.28.x
 
 ## Delivered behavior
 
@@ -57,3 +57,17 @@ runner. Set `CLIMBIQ_E2E_DISABLE_VIDEO_FRAME=1` for the source-timestamp fallbac
 
 The production build emits a non-fatal main-bundle size warning (about 500 kB
 minified); the new review component and scanner have separate lazy chunks.
+
+## Production verification and layout follow-up
+
+The 0.28.0 production workflow passed marking, rescan, unchanged timing,
+close cancellation, save/reload, dataset export/re-import, manual provenance
+and replacement cleanup. GitHub verification passed for `19bc15d`.
+
+Production screenshot inspection then found that existing global button styles
+laid filmstrip labels out beside their images. The 0.28.1 follow-up explicitly
+stacks these controls and adds real-browser label-position assertions. Screenshot
+capture also waits for responsive layout and uses instant scrolling, preventing
+an in-progress smooth scroll from capturing a different section of the page.
+The user's unrelated local `src/styles.css` changes were not committed; live
+verification therefore checks the actual production styles independently.

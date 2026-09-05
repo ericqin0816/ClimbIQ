@@ -92,9 +92,12 @@ try {
   report.screenshots = [];
   for (const [layout, width, height] of [["desktop", 1280, 900], ["mobile", 390, 844]]) {
     await send("Emulation.setDeviceMetricsOverride", { width, height, deviceScaleFactor: 1, mobile: false });
-    await evaluate(layout === "desktop" ? "document.getElementById('video-review').scrollIntoView({block:'start'})"
-      : "document.querySelector('.finish-review-tools').scrollIntoView({block:'center'})");
+    await evaluate("new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))");
+    await evaluate(layout === "desktop" ? "document.getElementById('video-review').scrollIntoView({block:'start',behavior:'instant'})"
+      : "document.querySelector('.finish-review-tools').scrollIntoView({block:'center',behavior:'instant'})");
+    await evaluate("new Promise(resolve => requestAnimationFrame(resolve))");
     if (await evaluate("document.documentElement.scrollWidth > innerWidth + 1")) throw new Error(`${layout}: finish review overflows horizontally.`);
+    if (!(await evaluate("(() => { const b = document.querySelector('.finish-review-filmstrip button'); const img = b.querySelector('img').getBoundingClientRect(); const label = b.querySelector('span').getBoundingClientRect(); return label.top >= img.bottom - 1 && label.right <= b.getBoundingClientRect().right + 1; })()"))) throw new Error(`${layout}: filmstrip time labels must remain below images and inside their buttons.`);
     const screenshot = await send("Page.captureScreenshot", { format: "png" });
     const filename = path.resolve(`test-results/guided-finish-${report.version}-${disableNative ? 'fallback' : 'native'}-${layout}.png`);
     await writeFile(filename, Buffer.from(screenshot.data, "base64"));

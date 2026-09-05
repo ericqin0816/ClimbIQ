@@ -16,7 +16,7 @@
 .finish-pad-coordinates label { font-size: .7rem; min-width: 0; }
 .finish-pad-coordinates input { width: 100%; min-width: 0; padding: 6px; }
 .finish-review-filmstrip { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 4px; }
-.finish-review-filmstrip button { padding: 2px; overflow: hidden; }
-.finish-review-filmstrip img { display: block; width: 100%; height: 60px; object-fit: contain; background: #141719; }
+.video-review-card .finish-review-filmstrip button { display: flex; flex-direction: column; align-items: stretch; padding: 2px; overflow: hidden; }
+.finish-review-filmstrip img { display: block; flex-shrink: 0; width: 100%; height: 60px; object-fit: contain; background: #141719; }
 .finish-review-filmstrip span { display: block; font-size: .65rem; padding-top: 3px; }
 @media (max-width: 760px) { .finish-closeup img { height: 125px; } .finish-review-filmstrip img { height: 45px; } }
