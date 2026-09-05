@@ -383,3 +383,25 @@ before pushing verified checkpoints because the user also works from a Mac.
   before that stronger replay; no application behavior was mocked to pass it.
 - Full production 0.27.0 replay passed all five originals and six public crops,
   including native sample-metadata preservation and stale-export clearing.
+
+## Completed seven-hour run
+
+- Goal accounting exceeded seven hours (25,800 seconds at the completion
+  checkpoint), with implementation, real-browser experiments and verification.
+- Release 0.27.1 (`52451e0`) is pushed to main, GitHub verification is green,
+  and production serves `index-Dyb9ZWt9.js`. The final production 9199 full
+  workflow passed analysis, review, save/reload, comparison and stale-evidence
+  clearing. All 52 pose samples retained native frame timing; 45 were usable
+  COM samples. These counts are tracking coverage, not positional accuracy.
+- Production rerun cancellation preserved the previous accepted timestamps,
+  unsaved COM text and all three Hold 10 previews. Rapid video replacement and
+  invalid-file rejection passed too. Current unit suite: 483 tests in 49 files,
+  with typecheck and build passing.
+- The final 30-copy batch has zero workflow errors and no accepted-time drift
+  under its regression policy; 15 cases still need investigation. No independent
+  event labels were created. Difficult dark/angled clips can still require
+  manual review, and broadcast cuts are not a validated timing input.
+- Existing user edits in `src/styles.css` remain untouched and uncommitted.
+  Private recordings and frame previews remain outside Git. The next accuracy
+  milestone is independently reviewed start, finish and Hold 10 contact labels,
+  followed by evaluation on additional unseen climbs.

@@ -1,8 +1,31 @@
 {
   "schemaVersion": 1,
   "collectedAt": "2026-09-05",
-  "scope": "September 5 overnight experiments through 0.27.0. Private images and media remain outside Git.",
+  "scope": "September 5 overnight experiments through 0.27.1. Private images and media remain outside Git.",
   "interpretation": "Workflow and source-consistency evidence, not independently labeled accuracy. derivedVideoBatch is the historical pre-final-0.24.0 batch; later sections name their tested releases explicitly.",
+  "finalRegressionBatch": {
+    "testedAppVersion": "0.27.0",
+    "sourceReport": "video-robustness-2026-09-05T12-12-45-711Z.json",
+    "independentSourceClimbs": 5,
+    "derivedVariations": 30,
+    "workflowErrors": 0,
+    "sourceTimingRegressionsAtPoint1Seconds": 0,
+    "independentlyLabeledBoundaries": 0,
+    "needsInvestigation": 15,
+    "knownFalseFinishGuardsHeld": 2,
+    "interpretation": "No accepted-time drift under the regression policy; this does not establish accuracy or eliminate availability losses."
+  },
+  "finalProductionWorkflow": {
+    "testedAppVersion": "0.27.1",
+    "appUrl": "https://climbiq-detection-lab.vercel.app/",
+    "referenceSource": "IMG_9199.MOV",
+    "fullAnalysisReviewSaveReloadPassed": true,
+    "cancelledRerunPreservedPriorTimingAndUnsavedEvidence": true,
+    "rapidAndInvalidReplacementPassed": true,
+    "unitTests": 483,
+    "unitTestFiles": 49,
+    "interpretation": "The latest production replay verifies behavior and provenance, not independently labeled event accuracy."
+  },
   "postResetGuardBatch": {
     "testedAppVersion": "0.26.0",
     "sourceReport": "video-robustness-2026-09-05T11-31-07-976Z.json",
