@@ -1,0 +1,15 @@
+.hold10-second-pass { min-width: 0; overflow-wrap: anywhere; border: 1px solid var(--line); border-radius: 8px; padding: 16px; margin-top: 16px; background: var(--surface); }
+.hold10-second-pass h3 { margin: 0 0 4px; color: var(--ink); }
+.hold10-second-pass p { line-height: 1.5; }
+.hold10-second-pass small { color: var(--muted-text); line-height: 1.5; }
+.hold10-second-pass-heading { display: flex; justify-content: space-between; gap: 16px; align-items: start; }
+.hold10-second-pass-heading > span { border: 1px solid var(--line); border-radius: 5px; padding: 6px 10px; font-size: 0.78rem; white-space: nowrap; }
+.hold10-evidence-frames { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin: 14px 0; }
+.hold10-evidence-frames button { display: block; text-align: left; padding: 0; overflow: hidden; min-width: 0; }
+.hold10-evidence-frames img { display: block; width: 100%; aspect-ratio: 1; object-fit: contain; background: #101216; }
+.hold10-evidence-frames span { display: flex; justify-content: space-between; gap: 8px; padding: 10px; font-size: 0.82rem; }
+@media(max-width: 600px) { .hold10-second-pass-heading { flex-direction: column; gap: 8px; } .hold10-evidence-frames { grid-template-columns: 1fr; } }
+@media(max-width: 720px) {
+  .layout-grid:has(.hold10-second-pass) { grid-template-columns: minmax(0, 1fr); }
+  .layout-grid:has(.hold10-second-pass) > * { min-width: 0; }
+}

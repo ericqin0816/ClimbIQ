@@ -207,6 +207,14 @@ async function runTiming(protocol, fileName) {
 }
 
 async function verifySavedWorkflow({ evaluate, send }) {
+  const secondPass = await evaluate(`(() => {
+    const panel = document.querySelector('.hold10-second-pass');
+    const marker = [...document.querySelectorAll('tbody tr')].find(r => r.firstElementChild?.textContent.trim() === 'Hold 10');
+    const images = [...document.querySelectorAll('.hold10-evidence-frames img')];
+    return { available: Boolean(panel), text: panel?.innerText ?? '', previewCount: images.length,
+      previewsLoaded: images.length > 0 && images.every(i => i.complete && i.naturalWidth > 0),
+      acceptedHold10: marker?.querySelectorAll('td')[1]?.textContent.trim() ?? 'Not set' };
+  })()`);
   // This runner owns its temporary Chrome profile. Exercise the real save,
   // duplicate and reload controls without touching a user's browser sessions.
   await evaluate(`([...document.querySelectorAll('button')].find(b => b.textContent.trim() === 'Save Session')).click()`);
@@ -238,7 +246,33 @@ async function verifySavedWorkflow({ evaluate, send }) {
   if (hasFinish && (!restored.comparison.includes("Below threshold") || restored.gainLossClaims)) {
     throw new Error("Identical saved attempts did not compare as below threshold after reload.");
   }
+  let secondPassRetryPassed;
+  if (secondPass.available && saved.videoFileName) {
+    await uploadFile({ evaluate, send }, path.join(videoDirectory, saved.videoFileName));
+    await evaluate(`(() => {
+      const select = document.querySelector('.session-load-row select');
+      if (!select) throw new Error('Saved-session picker is missing.');
+      select.value = ${JSON.stringify(saved.id)};
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+    })()`);
+    const inspectReady = `([...document.querySelectorAll('button')].some(b => b.textContent.trim() === 'Inspect Hold 10 more closely' && !b.disabled))`;
+    await waitUntil(evaluate, inspectReady, 15000, "restored Hold 10 inspection control");
+    const priorTime = await evaluate(`document.querySelector('video').currentTime`);
+    await evaluate(`([...document.querySelectorAll('button')].find(b => b.textContent.trim() === 'Inspect Hold 10 more closely')).click()`);
+    await waitUntil(evaluate, `([...document.querySelectorAll('button')].some(b => b.textContent.trim() === 'Cancel closer scan'))`, 10000, "second-pass cancellation control");
+    await evaluate(`([...document.querySelectorAll('button')].find(b => b.textContent.trim() === 'Cancel closer scan')).click()`);
+    await waitUntil(evaluate, inspectReady, 15000, "cancelled second pass to release the video");
+    const afterCancel = await evaluate(`document.querySelector('video').currentTime`);
+    if (Math.abs(afterCancel - priorTime) > 0.01) throw new Error("Second-pass cancellation did not restore the video position.");
+    await evaluate(`([...document.querySelectorAll('button')].find(b => b.textContent.trim() === 'Inspect Hold 10 more closely')).click()`);
+    await waitUntil(evaluate, `document.querySelectorAll('.hold10-evidence-frames img').length === 3 && ![...document.querySelectorAll('button')].some(b => b.textContent.trim() === 'Cancel closer scan')`, 60000, "second-pass retry evidence");
+    const hold10AfterRetry = await evaluate(`([...document.querySelectorAll('tbody tr')].find(r => r.firstElementChild?.textContent.trim() === 'Hold 10'))?.querySelectorAll('td')[1]?.textContent.trim()`);
+    if (hold10AfterRetry !== 'Not set') throw new Error("Second-pass retry accepted an unreviewed Hold 10 marker.");
+    secondPassRetryPassed = true;
+  }
   return { savedAndReloaded: true, identicalComparisonPassed: hasFinish,
+    secondPass,
+    secondPassRetryPassed,
     validFrames, requestedFrames: saved.biomechanics?.result?.metrics?.requestedFrames ?? 0,
     sampleFps: saved.biomechanics?.result?.settings?.sampleFps,
     comparison: restored.comparison };
@@ -287,6 +321,13 @@ function validateOutcome(outcome, expected, baselineStatus = "unbaselined") {
     if (coverage < expected.com.fullWorkflowMinimumValidCoverage) {
       errors.push(`Full COM workflow retained ${(coverage * 100).toFixed(1)}% usable frames; expected at least ${(expected.com.fullWorkflowMinimumValidCoverage * 100).toFixed(1)}%.`);
     }
+  }
+  if (outcome.workflow && expected.hold10?.fullWorkflowRequiresSecondPass) {
+    const evidence = outcome.workflow.secondPass;
+    if (!evidence?.available || evidence.previewCount !== 3 || !evidence.previewsLoaded) {
+      errors.push("Full workflow did not produce three loaded Hold 10 second-pass previews.");
+    }
+    if (evidence?.acceptedHold10 !== 'Not set') errors.push("Second-pass evidence incorrectly accepted Hold 10 without frame review.");
   }
   const acceptedStart = parseTime(outcome.start?.rawTime);
   const reviewStart = parseFirstTime(outcome.reviewStart);

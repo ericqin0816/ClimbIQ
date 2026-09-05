@@ -30,6 +30,8 @@ export interface AnalyzePoseVideoOptions {
   settings: BiomechanicsSettings;
   calibration: WallCalibration;
   identityZone?: NormalizedZone;
+  /** A nearby, already selected athlete from a broader pass. */
+  trackingSeed?: { center: NormalizedPoint; rawTime: number };
   onProgress?: (progress: PoseAnalysisProgress) => void;
   isCancelled?: () => boolean;
   signal?: AbortSignal;
@@ -49,6 +51,7 @@ export async function analyzePoseVideo({
   settings,
   calibration,
   identityZone,
+  trackingSeed,
   onProgress,
   isCancelled,
   signal,
@@ -91,9 +94,10 @@ export async function analyzePoseVideo({
 
   const frames: BiomechanicsFrame[] = [];
   const runWarnings = new Set<string>();
-  let previousCenter: NormalizedPoint | undefined;
-  let previousCenterTime: number | undefined;
-  let highestTrackedY: number | undefined;
+  const seed = validatePoseTrackingSeed(trackingSeed, startRawTime, calibration);
+  let previousCenter: NormalizedPoint | undefined = seed?.center;
+  let previousCenterTime: number | undefined = seed?.rawTime;
+  let highestTrackedY: number | undefined = seed?.center.y;
   let missedFrames = 0;
   let lastInferenceTimestamp = -1;
   const cropCanvas = document.createElement("canvas");
@@ -240,6 +244,18 @@ export async function analyzePoseVideo({
     metrics: kinematics.metrics,
     warnings: Array.from(runWarnings),
   };
+}
+
+export function validatePoseTrackingSeed(
+  seed: AnalyzePoseVideoOptions["trackingSeed"],
+  startRawTime: number,
+  calibration: WallCalibration,
+): AnalyzePoseVideoOptions["trackingSeed"] {
+  if (!seed || !Number.isFinite(startRawTime) || !Number.isFinite(seed.rawTime) || seed.rawTime > startRawTime + 0.001 ||
+      startRawTime - seed.rawTime > 0.3 || !Number.isFinite(seed.center?.x) || !Number.isFinite(seed.center?.y) ||
+      seed.center.x < 0 || seed.center.x > 1 || seed.center.y < 0 || seed.center.y > 1 ||
+      !poseAnchorInsideLaneCorridor(seed.center, calibration)) return undefined;
+  return { center: { ...seed.center }, rawTime: seed.rawTime };
 }
 
 function validateAnalysisInput(

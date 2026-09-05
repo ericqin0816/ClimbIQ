@@ -42,6 +42,7 @@
       "finish": { "rawTime": 17.48, "status": "accepted", "source": "Finish light detection", "confidence": "High", "reviewedCorrect": true },
       "hold10": {
         "status": "review-candidate",
+        "fullWorkflowRequiresSecondPass": true,
         "rawTime": 11.515,
         "climbTime": 4.385,
         "source": "continuous-hand-height-crossing",

@@ -23,6 +23,8 @@ import { resolveOfficialFinishRawTime } from "./lib/officialTime";
 import { canAutomaticallyAcceptMovement } from "./lib/movementAcceptance";
 import { sanitizeStartLightCalibration, sanitizeVideoMetadata, sanitizeZoneMap } from "./lib/sessionEvidenceIntegrity";
 import { estimateHold10HeightPassage } from "./lib/hold10HeightEstimate";
+import type { Hold10SecondPassResult } from "./lib/hold10SecondPass";
+import type { Hold10TargetResolution } from "./lib/holdTarget";
 import { resolveHold10Target } from "./lib/holdTarget";
 import { analyzePoseVideo, PoseAnalysisCancelledError } from "./lib/poseAnalysis";
 import { analyzeRouteSplits } from "./lib/routeSplits";
@@ -47,6 +49,8 @@ import { inferAutomaticWallCalibration, validateWallCalibration } from "./lib/wa
 import type {
   Confidence,
   BiomechanicsSession,
+  BiomechanicsResult,
+  WallCalibration,
   DetectionCandidate,
   DetectionDebugReport,
   FirstMovementDetectionResult,
@@ -80,9 +84,10 @@ const INITIAL_TIMESTAMPS: TimestampMarker[] = [
   marker("finishPad", "Finish Pad"),
 ];
 
-const APP_VERSION = "0.21.1";
+const APP_VERSION = "0.22.0";
 const SESSION_STORAGE_KEY = "climbiq.analysisSessions.v1";
 const AttemptComparisonPanel = lazy(() => import("./components/AttemptComparisonPanel"));
+const Hold10SecondPassPanel = lazy(() => import("./components/Hold10SecondPassPanel"));
 const BiomechanicsPanel = lazy(async () => {
   const module = await import("./components/BiomechanicsPanel");
   return { default: module.BiomechanicsPanel };
@@ -156,6 +161,7 @@ interface TimestampReviewTarget {
   confidence?: Confidence;
   acceptLabel: string;
   onAccept: (rawTime: number) => void;
+  secondPassBasis?: Hold10SecondPassResult;
 }
 
 function App() {
@@ -240,10 +246,17 @@ function App() {
   const [startEvidenceStatus, setStartEvidenceStatus] = useState("");
   const [timestampReview, setTimestampReview] = useState<TimestampReviewTarget | null>(null);
   const [routeAlignment, setRouteAlignment] = useState<RouteAlignmentResult | null>(null);
+  const [hold10SecondPass, setHold10SecondPass] = useState<{
+    sourceResult: BiomechanicsResult; calibration: WallCalibration; targetKey: string; result: Hold10SecondPassResult;
+  } | null>(null);
+  const [secondPassRunning, setSecondPassRunning] = useState(false);
+  const [secondPassStatus, setSecondPassStatus] = useState("");
+  const secondPassAbortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     return () => {
       autoAnalysisAbortRef.current?.abort();
+      secondPassAbortRef.current?.abort();
       if (previousObjectUrl.current) {
         URL.revokeObjectURL(previousObjectUrl.current);
         previousObjectUrl.current = null;
@@ -432,6 +445,10 @@ function App() {
     [biomechanics.calibration, effectiveBiomechanicsResult, hold10Contact?.detected],
   );
 
+  const activeHold10SecondPass = hold10SecondPass && hold10SecondPass.sourceResult === effectiveBiomechanicsResult &&
+    hold10SecondPass.calibration === biomechanics.calibration && hold10SecondPass.targetKey === JSON.stringify(hold10Target)
+    ? hold10SecondPass.result : undefined;
+
   const startFinalRaw = startResult?.rawTime !== undefined ? Math.max(0, roundTime(startResult.rawTime + startSignalOffset)) : undefined;
   const movementFinalRaw = movementResult?.rawTime !== undefined ? Math.max(0, roundTime(movementResult.rawTime + firstMovementOffset)) : undefined;
   const movementFinalClimb =
@@ -457,7 +474,7 @@ function App() {
       : calibrationReady && ["calibrated", "blocked", "manual"].includes(resolvedStartProfile)
       ? "Calibrated light transition"
       : "Generic color-distance detection";
-  const videoAnalysisRunning = frameTestRunning || startRunning || movementRunning || movementPreviewRunning || finishRunning || biomechanicsRunning || autoAnalysisRunning;
+  const videoAnalysisRunning = frameTestRunning || startRunning || movementRunning || movementPreviewRunning || finishRunning || biomechanicsRunning || autoAnalysisRunning || secondPassRunning;
 
   const zoneStageStyle = useMemo((): CSSProperties => {
     const width = metadata?.videoWidth || 16;
@@ -585,6 +602,8 @@ function App() {
     }
 
     setVideoLoadError("");
+    setHold10SecondPass(null);
+    setSecondPassStatus("");
 
     if (previousObjectUrl.current) {
       URL.revokeObjectURL(previousObjectUrl.current);
@@ -687,6 +706,58 @@ function App() {
     jumpTo(target.suggestedRawTime);
     window.requestAnimationFrame(() => {
       document.getElementById("video-review")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+  }
+
+  async function calculateHold10SecondPass(video: HTMLVideoElement, broad: BiomechanicsResult,
+    calibration: WallCalibration, target: Hold10TargetResolution, signal?: AbortSignal,
+    onProgress?: (message: string) => void) {
+    try {
+      const { runHold10SecondPass } = await import("./lib/hold10SecondPass");
+      if (signal?.aborted) throw new PoseAnalysisCancelledError();
+      const result = await runHold10SecondPass({ video, broad, calibration, target, signal, onProgress });
+      if (signal?.aborted) throw new PoseAnalysisCancelledError();
+      if (result) {
+        setHold10SecondPass({ sourceResult: broad, calibration, targetKey: JSON.stringify(target), result });
+        setSecondPassStatus("");
+      } else {
+        setSecondPassStatus("A continuous Hold 10 candidate and nearby athlete track are needed for a closer scan.");
+      }
+    } catch (error) {
+      if (signal?.aborted || error instanceof PoseAnalysisCancelledError) throw error;
+      setSecondPassStatus(`The closer scan could not finish. Broad-pass timing was kept. ${error instanceof Error ? error.message : "Try again."}`);
+    }
+  }
+
+  async function refineCurrentHold10() {
+    if (videoAnalysisRunning || secondPassAbortRef.current || !videoRef.current || !effectiveBiomechanicsResult || !biomechanics.calibration) return;
+    const controller = new AbortController();
+    secondPassAbortRef.current = controller;
+    setSecondPassRunning(true);
+    setSecondPassStatus("Preparing a closer Hold 10 scan…");
+    try {
+      await runNamedVideoTask("Hold 10 second pass", () => calculateHold10SecondPass(videoRef.current!,
+        effectiveBiomechanicsResult, biomechanics.calibration!, hold10Target, controller.signal, setSecondPassStatus),
+        "Hold 10 inspection finished. Video position restored.");
+    } catch {
+      setSecondPassStatus(controller.signal.aborted ? "Closer scan cancelled. Existing timing was kept." : "Closer scan stopped.");
+    } finally {
+      secondPassAbortRef.current = null;
+      setSecondPassRunning(false);
+    }
+  }
+
+  function reviewRefinedHold10(rawTime: number) {
+    const evidence = activeHold10SecondPass?.evidence;
+    if (!evidence || videoAnalysisRunning) return;
+    reviewTimestamp({ label: evidence.kind === "contact-candidate" ? "Hold 10 contact candidate — second pass" : "Possible Hold 10 — second pass",
+      secondPassBasis: activeHold10SecondPass,
+      suggestedRawTime: rawTime, confidence: "Low", acceptLabel: "Set Hold 10",
+      onAccept: time => acceptTimestamp("hold10", time, "Manual", "Medium", {
+        detectedRawTime: evidence.candidateRawTime,
+        offsetApplied: roundTime(time - evidence.candidateRawTime),
+        note: `${evidence.reason} Broad cursor ${evidence.coarseRawTime.toFixed(3)}s; second-pass cursor ${evidence.candidateRawTime.toFixed(3)}s. Contact confirmed manually in the full video.`,
+      }),
     });
   }
 
@@ -1863,6 +1934,9 @@ function App() {
         settings: automaticSettings,
         result: poseResult,
       }));
+      await calculateHold10SecondPass(video, poseResult, analysisWallCalibration,
+        resolveHold10Target({ manualZone: zones.hold10, calibration: analysisWallCalibration, visualAlignment: locatedRoute }),
+        signal, setAutoAnalysisStatus);
       const selectedFrames = poseResult.metrics.selectedFrames ?? poseResult.metrics.detectedFrames;
       if (poseResult.metrics.validFrames > 0) {
         const finishReviewNote = automaticFinish && !automaticFinish.accepted
@@ -2468,6 +2542,7 @@ function App() {
         confidence: hold10PhaseSplits.confidence,
         reason: hold10PhaseSplits.reason,
       },
+      hold10SecondPassEvidence: activeHold10SecondPass?.evidence ?? null,
       detectionWarnings: buildDetectionWarnings(),
       automationAudit: {
         startEvidence: startEvidenceStatus || null,
@@ -3299,7 +3374,10 @@ function App() {
                   : `Route markers hidden: ${routeAlignment.reason}`}
             </p>
           )}
-          {timestampReview && (
+          {activeHold10SecondPass && <Suspense fallback={<p className="muted">Preparing Hold 10 evidence…</p>}>
+            <Hold10SecondPassPanel result={activeHold10SecondPass} disabled={videoAnalysisRunning} onReview={reviewRefinedHold10} />
+          </Suspense>}
+          {timestampReview && (!timestampReview.secondPassBasis || timestampReview.secondPassBasis === activeHold10SecondPass) && (
             <div className="timestamp-review" aria-live="polite">
               <div className="timestamp-review-heading">
                 <div>
@@ -3326,9 +3404,10 @@ function App() {
                 Pause on the exact visual moment. Use the frame buttons above, then accept the frame currently shown in the player.
               </p>
               <div className="button-row timestamp-review-actions">
-                <button onClick={() => jumpTo(timestampReview.suggestedRawTime)}>Return to suggestion</button>
+                <button disabled={videoAnalysisRunning} onClick={() => jumpTo(timestampReview.suggestedRawTime)}>Return to suggestion</button>
                 <button
                   className="primary"
+                  disabled={videoAnalysisRunning}
                   onClick={() => {
                     timestampReview.onAccept(currentTime);
                     setTimestampReview(null);
@@ -3841,6 +3920,7 @@ function App() {
                         {item.rawTime !== null && (
                           <>
                             <button
+                              disabled={videoAnalysisRunning}
                               onClick={() => reviewTimestamp({
                                 label: item.label,
                                 suggestedRawTime: item.rawTime!,
@@ -3855,12 +3935,13 @@ function App() {
                             >
                               Review
                             </button>
-                            <button onClick={() => clearTimestamp(item.id)}>Clear</button>
+                            <button disabled={videoAnalysisRunning} onClick={() => clearTimestamp(item.id)}>Clear</button>
                           </>
                         )}
-                        <button onClick={() => acceptManualTimestamp(item.id, currentTime)}>Set current</button>
+                        <button disabled={videoAnalysisRunning} onClick={() => acceptManualTimestamp(item.id, currentTime)}>Set current</button>
                         <input
                           aria-label={`${item.label} raw video time`}
+                          disabled={videoAnalysisRunning}
                           inputMode="decimal"
                           placeholder="Raw"
                           onBlur={(event) => setTimestampFromInput(item.id, event.target.value, "raw")}
@@ -3869,7 +3950,7 @@ function App() {
                           aria-label={`${item.label} climb time`}
                           inputMode="decimal"
                           placeholder="Climb"
-                          disabled={startSignalRaw === null}
+                          disabled={videoAnalysisRunning || startSignalRaw === null}
                           onBlur={(event) => setTimestampFromInput(item.id, event.target.value, "climb")}
                         />
                       </div>
@@ -3911,7 +3992,10 @@ function App() {
                       : "The generic diagram is used only as a search prior; ClimbIQ will not time contact from its unregistered position."
                     : hold10Target.reason}</small>
                 </div>
-                {acceptedHold10.rawTime === null && hold10Contact?.detected && hold10Contact.rawTime !== undefined && (
+                {acceptedHold10.rawTime === null && activeHold10SecondPass && (
+                  <button disabled={videoAnalysisRunning} onClick={() => reviewRefinedHold10(activeHold10SecondPass.evidence.candidateRawTime)}>Review close-up evidence</button>
+                )}
+                {acceptedHold10.rawTime === null && !activeHold10SecondPass && hold10Contact?.detected && hold10Contact.rawTime !== undefined && (
                   <button onClick={() => reviewTimestamp({
                     label: "Detected Hold 10 hand contact",
                     suggestedRawTime: hold10Contact.rawTime!,
@@ -3926,7 +4010,7 @@ function App() {
                     Review Hold 10
                   </button>
                 )}
-                {acceptedHold10.rawTime === null && !hold10Contact?.detected && hold10HeightEstimate?.detected && hold10HeightEstimate.rawTime !== undefined && (
+                {acceptedHold10.rawTime === null && !activeHold10SecondPass && !hold10Contact?.detected && hold10HeightEstimate?.detected && hold10HeightEstimate.rawTime !== undefined && (
                   <button onClick={() => reviewTimestamp({
                     label: "Possible Hold 10 height passage",
                     suggestedRawTime: hold10HeightEstimate.rawTime!,
@@ -3942,6 +4026,12 @@ function App() {
                   </button>
                 )}
               </div>
+              {!activeHold10SecondPass && (hold10Contact?.detected || hold10HeightEstimate?.detected) && (
+                <div className="button-row"><button disabled={videoAnalysisRunning || !hasLoadedVideo} onClick={refineCurrentHold10}>Inspect Hold 10 more closely</button>
+                  {secondPassRunning && <button onClick={() => secondPassAbortRef.current?.abort()}>Cancel closer scan</button>}
+                </div>
+              )}
+              {secondPassStatus && <p className="status-message" role="status">{secondPassStatus}</p>}
               {finishTrimmedBiomechanics?.cutoff.source === "top-completion" && (
                 <p className="status-message">
                   COM stopped at {finishTrimmedBiomechanics.cutoff.cutoffRawTime.toFixed(3)}s raw when the athlete completed the top. Post-finish descent is excluded from the path, speed, and splits.
@@ -4031,7 +4121,7 @@ function App() {
               session={biomechanics}
               displayResult={effectiveBiomechanicsResult}
               finishCutoff={finishTrimmedBiomechanics?.cutoff}
-              analysisBlocked={startRunning || movementRunning || movementPreviewRunning || frameTestRunning || autoAnalysisRunning}
+              analysisBlocked={startRunning || movementRunning || movementPreviewRunning || frameTestRunning || autoAnalysisRunning || secondPassRunning || finishRunning}
               onSessionChange={(nextSession) => {
                 if (nextSession.calibration !== biomechanics.calibration) {
                   setRouteAlignment(null);

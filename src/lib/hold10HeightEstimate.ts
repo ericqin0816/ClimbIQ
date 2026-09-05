@@ -42,7 +42,8 @@ export function estimateHold10HeightPassage(
     // poseSelected was added after the first saved-session format. Undefined
     // remains compatible when usable landmarks are present; explicit false is
     // still rejected.
-    .filter((frame) => frame.poseSelected !== false && frame.landmarks.length && Number.isFinite(frame.rawTime))
+    .filter((frame) => frame.poseSelected !== false && frame.landmarks.length && Number.isFinite(frame.rawTime) &&
+      frame.rawTime >= result.startRawTime && frame.rawTime <= result.endRawTime)
     .sort((left, right) => left.rawTime - right.rawTime);
 
   // Use the higher visible hand on each frame. At 5 fps the climber can move
@@ -62,9 +63,23 @@ export function estimateHold10HeightPassage(
     const current = observations[index];
     const gap = current.rawTime - previous.rawTime;
     if (gap <= 0 || gap > 0.25) continue;
-    if (previous.height > targetHeight - 0.18 || current.height < targetHeight) continue;
-    const confirmation = observations.slice(index, index + 3)
-      .filter((sample) => sample.rawTime - current.rawTime <= 0.3 && sample.height >= targetHeight - 0.12);
+    if (previous.height >= targetHeight || current.height < targetHeight) continue;
+    // At 15 fps the hand can rise less than 18 cm per sample. Require an
+    // observed approach across a continuous window, not one large frame jump.
+    let observedApproach = false;
+    for (let before = index - 1; before >= 0; before--) {
+      if (current.rawTime - observations[before].rawTime > 0.6 ||
+          observations[before + 1].rawTime - observations[before].rawTime > 0.25) break;
+      if (observations[before].height <= targetHeight - 0.18) { observedApproach = true; break; }
+    }
+    if (!observedApproach) continue;
+    const confirmation = [current];
+    for (let next = index + 1; next < observations.length && confirmation.length < 3; next++) {
+      const sample = observations[next];
+      if (sample.rawTime - current.rawTime > 0.3 ||
+          sample.rawTime - observations[next - 1].rawTime > 0.25 || sample.height < targetHeight - 0.12) break;
+      confirmation.push(sample);
+    }
     if (confirmation.length < 2) continue;
     const rise = current.height - previous.height;
     const amount = rise > 1e-6 ? (targetHeight - previous.height) / rise : 1;

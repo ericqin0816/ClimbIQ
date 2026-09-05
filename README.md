@@ -100,6 +100,16 @@ Center-of-mass results also calculate wall-height halves and lower/middle/top wa
 
 The contact-defined race phases are calculated separately: **Start → Hold 10** and **Hold 10 → Finish** appear only after an accepted Hold 10 contact lies strictly between the accepted Start and Finish. The result also reports the percentage of the race spent before and after Hold 10 and the slower phase's time difference. This prevents the 7.5 m COM crossing from being mislabeled as Hold 10. Exports include both phase times explicitly.
 
+## Automatic Second-Pass Hold 10 Inspection
+
+After the broad pose scan, ClimbIQ revisits a likely Hold 10 event in a window no longer than 2.2 seconds at 15 samples/s. The selected athlete's nearby torso position seeds the scan, avoiding a fresh search from the bottom of the wall. Gradual hand-height crossings are detected across a continuous approach window instead of requiring a large jump in one frame.
+
+**Hold 10 close-up** shows before/candidate/after views with a nearby tracked-hand ring and an identified-hold ring when a valid manual or visually registered target exists. The panel reports the broad cursor, refined cursor, shift, and adjacent tracked sample times. A height passage stays a height estimate; only an identified hold can support a contact candidate. Both require full-video review before setting Hold 10. Disagreement beyond 0.45 seconds or insufficient tracking keeps the original cursor and explains that refinement was inconclusive.
+
+Click a preview to open the full video at its cursor. No timestamp is accepted by clicking a preview. Changing the timing, athlete, wall calibration, target, or underlying analysis invalidates the evidence and any open second-pass review. Cancelling a closer scan restores the video position and keeps accepted timing.
+
+The three previews are temporary local images, excluded from exports and saved sessions. Dataset JSON includes `hold10SecondPassEvidence` while current; a reviewed marker preserves the provenance in its note. After a page reload, upload the matching video, load the saved analysis in **Session details & saved analyses**, and choose **Inspect Hold 10 more closely** to regenerate evidence. The separate full-climb COM trajectory remains unchanged by the short rescan. The full-workflow benchmark checks preview generation, no unreviewed acceptance, cancellation with video-position restoration, and regeneration after loading the saved analysis.
+
 ## Visually Registered Holds And Hold 10 Contact
 
 The supplied standardized-route diagram is used as a route-pattern prior, not as a final overlay. ClimbIQ samples several frames strictly between the accepted start and finish, segments persistent red/pink holds, and jointly registers the complete 20-hold pattern with one bounded affine or projective correction. Matched number markers are placed on the detected hold centroids; hidden holds use the jointly fitted route position. A stricter expanded search is allowed only when it has at least 12 unique matches and materially lower residual error. It affects hold markers and Hold 10 contact only, never COM calibration or metric speed.

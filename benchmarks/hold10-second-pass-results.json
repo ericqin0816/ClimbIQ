@@ -1,0 +1,43 @@
+{
+  "version": 1,
+  "capturedAt": "2026-09-05",
+  "clip": "IMG_9199.MOV",
+  "acceptedStartRawTime": 7.13,
+  "acceptedFinishRawTime": 17.48,
+  "reloadCancelAndRetryPassed": true,
+  "trials": [
+    {
+      "broadSampleFps": 5,
+      "broadCandidateRawTime": 11.515,
+      "secondPassSampleFps": 15,
+      "secondPassCandidateRawTime": 11.462,
+      "trackedSamples": 26,
+      "requestedSamples": 26,
+      "adjacentSampleRawTimes": [11.397, 11.463],
+      "previewCount": 3,
+      "kind": "height-passage",
+      "hold10AutomaticallyAccepted": false
+    },
+    {
+      "broadSampleFps": 15,
+      "broadCandidateRawTime": 11.470,
+      "secondPassSampleFps": 15,
+      "secondPassCandidateRawTime": 11.464,
+      "trackedSamples": 25,
+      "requestedSamples": 25,
+      "adjacentSampleRawTimes": [11.463, 11.530],
+      "previewCount": 3,
+      "kind": "height-passage",
+      "hold10AutomaticallyAccepted": false
+    }
+  ],
+  "interpretation": "The denser passes converged to nearby height-passage review cursors. This is consistency evidence on one recording, not ground-truth contact accuracy or millisecond precision. Hold 10 itself was not sufficiently registered. No automatic Hold 10 marker was created.",
+  "uiAcceptanceSmokeTest": {
+    "reviewCursorRawTime": 11.462,
+    "startToHold10Seconds": 4.332,
+    "hold10ToFinishSeconds": 6.018,
+    "totalSeconds": 10.350,
+    "isGroundTruthLabel": false,
+    "evidenceAndSplitsInvalidatedAfterStartEdit": true
+  }
+}

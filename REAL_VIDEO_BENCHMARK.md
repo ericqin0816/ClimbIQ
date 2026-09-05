@@ -22,6 +22,12 @@ Comparison now shares the main analysis's timing/athlete freshness check, valida
 
 ## What the clips exposed
 
+### Second-pass Hold 10 inspection
+
+The new short rescan on `IMG_9199.MOV` used 26/26 tracked samples at 15 fps after the 5 fps broad pass. Its height-passage cursor moved from 11.515 s to 11.462 s, bracketed by tracked samples at 11.397 and 11.463 s. Starting from a 15 fps broad pass instead produced a 11.464 s cursor with 25/25 tracked samples. Three close-ups loaded in both full-workflow tests; Hold 10 remained unset until explicit review. Numerical evidence is in [hold10-second-pass-results.json](benchmarks/hold10-second-pass-results.json).
+
+This is repeatability evidence on one clip, not a ground-truth contact label. The actual hold is still not sufficiently registered, so the result stays a height estimate. An acceptance UI smoke test produced 4.332 s bottom and 6.018 s top phases from the selected 11.462 s cursor; those arithmetic checks must not be presented as independently verified contact timing. Editing Start removed the second-pass evidence, active review, and dependent splits.
+
 - Angled cameras can separate the apparent bottom-sensor and top-indicator x positions.
 - A valid-looking beep/light event can occur after an athlete is already climbing.
 - Ropes, hair, faces close to the phone, scoreboards, and post-climb timing resets can resemble finish evidence.
