@@ -32,16 +32,14 @@ describe("biomechanics finish trimming", () => {
     });
   });
 
-  it("uses a review-level light finish instead of scanning through the descent", () => {
+  it("does not promote an unaccepted review cursor into a COM end boundary", () => {
     expect(resolveAutomaticPoseFinishBoundary({
       startRawTime: 9.4,
       videoDuration: 40,
       lightFinishRawTime: 21.64,
       lightFinishAccepted: false,
     })).toMatchObject({
-      ready: true,
-      endRawTime: 21.64,
-      source: "verified-light-suggestion",
+      ready: false,
     });
   });
 

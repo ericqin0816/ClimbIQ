@@ -1,3 +1,5 @@
+import { independentBoundaryLabel } from "./label-provenance.mjs";
+
 /** Variations preserve event time except for the explicitly recorded trim. */
 export const VIDEO_VARIATIONS = Object.freeze([
   { id: "control-720", description: "720p H.264 control transcode", filter: "scale=720:-2", crf: 18, trimSeconds: 0 },
@@ -47,8 +49,12 @@ export function assessVideoVariation(trial, variation, outcome, toleranceSeconds
     const observedTime = parseMarkerTime(outcome[boundary]?.rawTime);
     const referenceTime = Number.isFinite(reference?.rawTime)
       ? reference.rawTime - variation.trimSeconds : null;
-    const labeledTime = reference?.reviewedCorrect === true ? referenceTime
-      : Number.isFinite(reference?.manualRawTime) ? reference.manualRawTime - variation.trimSeconds : null;
+    const independentLabel = independentBoundaryLabel(reference);
+    const labeledTime = independentLabel ? independentLabel.rawTime - variation.trimSeconds : null;
+    const sourceDeltaSeconds = observedTime !== null && referenceTime !== null ? observedTime - referenceTime : null;
+    const sourceConsistency = reference?.status !== "accepted" || referenceTime === null ? "unbaselined"
+      : observedTime === null ? "availability-loss"
+        : Math.abs(sourceDeltaSeconds) <= toleranceSeconds + 1e-9 ? "consistent" : "source-timing-regression";
     const deltaSeconds = observedTime !== null && labeledTime !== null ? observedTime - labeledTime : null;
     const reviewText = boundary === "start" ? outcome.reviewStart : outcome.finishStatus;
     const reviewMatch = observedTime === null && typeof reviewText === "string"
@@ -65,7 +71,8 @@ export function assessVideoVariation(trial, variation, outcome, toleranceSeconds
     } else {
       status = reference?.status === "accepted" ? "consistent" : "new-labeled-acceptance";
     }
-    boundaries[boundary] = { status, observedTime, referenceTime, labeledTime, deltaSeconds, reviewTime, reviewDeltaSeconds };
+    boundaries[boundary] = { status, observedTime, referenceTime, labeledTime, deltaSeconds, reviewTime, reviewDeltaSeconds,
+      sourceConsistency, sourceDeltaSeconds, labelStatus: reference?.labelReview?.status ?? "unverified" };
   }
   const start = boundaries.start;
   const finish = boundaries.finish;
@@ -73,13 +80,32 @@ export function assessVideoVariation(trial, variation, outcome, toleranceSeconds
     ? finish.observedTime - start.observedTime : null;
   const referenceDuration = start.labeledTime !== null && finish.labeledTime !== null
     ? finish.labeledTime - start.labeledTime : null;
+  let analysis;
+  if (outcome.workflow && !outcome.workflow.error) {
+    const referenceCoverage = trial.com?.requestedFrames > 0 && trial.com?.usableFrames >= 3
+      ? trial.com.usableFrames / trial.com.requestedFrames : null;
+    const observedCoverage = outcome.workflow.requestedFrames > 0
+      ? outcome.workflow.validFrames / outcome.workflow.requestedFrames : 0;
+    analysis = {
+      referenceCoverage, observedCoverage,
+      trackingStatus: referenceCoverage === null ? "unbaselined"
+        : outcome.workflow.validFrames < 3 ? "availability-loss"
+          : observedCoverage < referenceCoverage - 0.2 ? "coverage-loss" : "retained",
+      hold10TargetStatus: trial.hold10?.fullWorkflowRequiresRegisteredHold
+        ? outcome.workflow.secondPass?.targetSource === "visual-alignment" ? "retained" : "availability-loss"
+        : "unbaselined",
+    };
+  }
   return {
     toleranceSeconds,
     boundaries,
     observedDuration,
+    analysis,
     durationDeltaSeconds: observedDuration !== null && referenceDuration !== null ? observedDuration - referenceDuration : null,
-    needsInvestigation: Object.values(boundaries).some(b => ["timing-regression", "unverified-acceptance", "availability-loss"].includes(b.status) ||
-      b.reviewDeltaSeconds !== null && Math.abs(b.reviewDeltaSeconds) > toleranceSeconds + 1e-9),
+    needsInvestigation: Object.values(boundaries).some(b => ["timing-regression", "unverified-acceptance", "availability-loss"].includes(b.status) || b.sourceConsistency === "source-timing-regression" ||
+      b.reviewDeltaSeconds !== null && Math.abs(b.reviewDeltaSeconds) > toleranceSeconds + 1e-9) ||
+      Boolean(analysis && (analysis.trackingStatus === "availability-loss" || analysis.trackingStatus === "coverage-loss" || analysis.hold10TargetStatus === "availability-loss")),
     safetyRegression: Object.values(boundaries).some(b => b.status === "timing-regression"),
+    sourceTimingRegression: Object.values(boundaries).some(b => b.sourceConsistency === "source-timing-regression"),
   };
 }

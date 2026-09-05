@@ -50,7 +50,7 @@ export interface TrimmedBiomechanicsFinishResult {
   removedFrames: number;
 }
 
-export type AutomaticPoseFinishSource = "accepted-light" | "official-time" | "verified-light-suggestion";
+export type AutomaticPoseFinishSource = "accepted-light" | "official-time";
 
 export interface AutomaticPoseFinishBoundary {
   ready: boolean;
@@ -69,8 +69,9 @@ export interface ResolveAutomaticPoseFinishOptions {
 
 /**
  * Resolves a finite climb-only pose boundary. It never falls back to the end
- * of the clip: without accepted, official, or verified light evidence, COM is
- * paused so the descent cannot become part of the climb.
+ * of the clip: without an accepted finish or an official total, COM is paused.
+ * A review cursor can be a physical top reach, not actual pad contact, and must
+ * not silently become an authoritative end boundary for downstream metrics.
  */
 export function resolveAutomaticPoseFinishBoundary({
   startRawTime,
@@ -107,14 +108,6 @@ export function resolveAutomaticPoseFinishBoundary({
       endRawTime: officialFinish,
       source: "official-time",
       reason: "Using the official total-time finish boundary.",
-    };
-  }
-  if (validLightFinish !== undefined) {
-    return {
-      ready: true,
-      endRawTime: validLightFinish,
-      source: "verified-light-suggestion",
-      reason: "Using the verified lane-light suggestion while its exact frame awaits review.",
     };
   }
   return {

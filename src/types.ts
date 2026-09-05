@@ -81,6 +81,8 @@ export interface StartSignalDebug {
   baselineRgb?: RGB;
   calibration?: StartLightCalibration;
   detectionMethod?: string;
+  /** Finish-only evidence classification; upper body reach is not pad contact. */
+  finishEvidenceKind?: "electronic-transition" | "physical-top-reach" | "upper-wall-presence";
   maxColorDistance: number;
   threshold: number;
   detectedCrossings: Array<{ time: number; colorDistance: number }>;

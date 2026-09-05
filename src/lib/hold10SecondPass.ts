@@ -50,7 +50,8 @@ export interface Hold10SecondPassResult {
 
 function broadCandidate(result: BiomechanicsResult, calibration: WallCalibration, target: Hold10TargetResolution) {
   const contact = target.source !== "standard-template"
-    ? detectHoldContact(result, calibration, target.wallTarget, { holdLabel: "Hold 10", observedRouteHolds: target.observedRouteHolds }) : undefined;
+    ? detectHoldContact(result, calibration, target.wallTarget, { holdLabel: "Hold 10", observedRouteHolds: target.observedRouteHolds,
+      allowApproximateEdgeProjection: target.allowApproximateEdgeProjection }) : undefined;
   return { candidate: contact?.detected ? contact : estimateHold10HeightPassage(result, calibration), contact };
 }
 

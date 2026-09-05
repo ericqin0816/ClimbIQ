@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { VIDEO_VARIATIONS, assessVideoVariation, buildVideoVariationArgs, parseMarkerTime, videoVariationName } from "./video-robustness.mjs";
 
-const trial = { start: { status: "accepted", rawTime: 7.13, reviewedCorrect: true }, finish: { status: "accepted", rawTime: 17.48, reviewedCorrect: true } };
+const label = rawTime => ({ status: "confirmed", independentOfDetector: true, reviewerId: "unit-test-fixture", method: "synthetic fixture", reviewedAt: "2026-09-05", rawTime });
+const trial = { start: { status: "accepted", rawTime: 7.13, labelReview: label(7.13) }, finish: { status: "accepted", rawTime: 17.48, labelReview: label(17.48) } };
 const outcome = (start, finish) => ({ start: { rawTime: start }, finish: { rawTime: finish } });
 
 describe("controlled video robustness assessment", () => {
@@ -33,9 +34,29 @@ describe("controlled video robustness assessment", () => {
     expect(result.needsInvestigation).toBe(true);
     expect(result.safetyRegression).toBe(false);
   });
+  it("reports withheld tracking separately from accepted timing consistency", () => {
+    const result = assessVideoVariation({ ...trial, com: { usableFrames: 42, requestedFrames: 52 }, hold10: { fullWorkflowRequiresRegisteredHold: true } }, VIDEO_VARIATIONS[0], {
+      ...outcome("7.130", "17.480"), workflow: { validFrames: 0, requestedFrames: 0, secondPass: { available: false } },
+    });
+    expect(result.boundaries.finish.status).toBe("consistent");
+    expect(result.analysis.trackingStatus).toBe("availability-loss");
+    expect(result.analysis.hold10TargetStatus).toBe("availability-loss");
+    expect(result.safetyRegression).toBe(false);
+    expect(result.needsInvestigation).toBe(true);
+  });
   it("uses a separately reviewed manual timestamp rather than a known wrong candidate", () => {
-    const result = assessVideoVariation({ start: { status: "review", rawTime: 8.45, reviewedCorrect: false, manualRawTime: 8.9 } }, VIDEO_VARIATIONS[0], outcome("8.90", "Not set"));
+    const result = assessVideoVariation({ start: { status: "review", rawTime: 8.45, labelReview: label(8.9) } }, VIDEO_VARIATIONS[0], outcome("8.90", "Not set"));
     expect(result.boundaries.start.status).toBe("new-labeled-acceptance");
+  });
+  it("keeps source consistency distinct from unverified absolute accuracy", () => {
+    const reference = { start: { status: "accepted", rawTime: 7.13, reviewedCorrect: true } };
+    const same = assessVideoVariation(reference, VIDEO_VARIATIONS[0], outcome("7.13", "Not set"));
+    expect(same.boundaries.start.sourceConsistency).toBe("consistent");
+    expect(same.boundaries.start.status).toBe("unverified-acceptance");
+    expect(same.boundaries.start.labeledTime).toBeNull();
+    const changed = assessVideoVariation(reference, VIDEO_VARIATIONS[0], outcome("8.13", "Not set"));
+    expect(changed.sourceTimingRegression).toBe(true);
+    expect(changed.safetyRegression).toBe(false);
   });
   it("does not accept malformed or annotated marker text", () => {
     for (const text of ["Not set", "", "7.1 wrong", "Infinity", "-1", undefined]) expect(parseMarkerTime(text)).toBeNull();

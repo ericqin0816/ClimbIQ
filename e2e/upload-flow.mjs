@@ -1,14 +1,18 @@
 import { spawn } from "node:child_process";
+import path from "node:path";
+import { tmpdir } from "node:os";
+import { createProtocolClient } from "./cdp-client.mjs";
 
-const chromePath = process.env.CLIMBIQ_CHROME ?? "C:/Program Files/Google/Chrome/Application/chrome.exe";
+const chromePath = process.env.CLIMBIQ_CHROME ?? (process.platform === "darwin"
+  ? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+  : process.platform === "win32" ? "C:/Program Files/Google/Chrome/Application/chrome.exe" : "/usr/bin/google-chrome");
 const sampleVideo = process.env.CLIMBIQ_E2E_VIDEO;
 const appUrl = process.env.CLIMBIQ_E2E_URL ?? "http://127.0.0.1:5173/";
 const port = 9333;
-const profile = `${process.env.TEMP ?? "C:/Windows/Temp"}/climbiq-e2e-${Date.now()}`;
+const profile = path.join(tmpdir(), `climbiq-e2e-${Date.now()}`);
 
 const chrome = spawn(chromePath, [
   "--headless=new",
-  "--disable-gpu",
   "--no-first-run",
   "--no-default-browser-check",
   `--remote-debugging-port=${port}`,
@@ -47,28 +51,16 @@ async function run() {
     socket.addEventListener("error", reject, { once: true });
   });
 
-  let nextId = 0;
-  const pending = new Map();
+  const { send } = createProtocolClient(socket);
   const runtimeErrors = [];
   socket.addEventListener("message", (event) => {
-    const message = JSON.parse(event.data);
-    if (message.id && pending.has(message.id)) {
-      const { resolve, reject } = pending.get(message.id);
-      pending.delete(message.id);
-      if (message.error) reject(new Error(message.error.message));
-      else resolve(message.result);
-      return;
-    }
+    let message;
+    try { message = JSON.parse(event.data); } catch { return; }
     if (message.method === "Runtime.exceptionThrown") {
       runtimeErrors.push(message.params.exceptionDetails.text);
     }
   });
 
-  const send = (method, params = {}) => new Promise((resolve, reject) => {
-    const id = ++nextId;
-    pending.set(id, { resolve, reject });
-    socket.send(JSON.stringify({ id, method, params }));
-  });
   const evaluate = async (expression, returnByValue = true) => {
     const response = await send("Runtime.evaluate", { expression, returnByValue, awaitPromise: true });
     if (response.exceptionDetails) throw new Error(response.exceptionDetails.text);
@@ -87,7 +79,7 @@ async function run() {
     await delay(100);
   }
 
-  await evaluate("document.querySelector('.upload-dropzone')?.scrollIntoView({ block: 'center' })");
+  await evaluate("document.querySelector('.upload-dropzone')?.scrollIntoView({ block: 'center', behavior: 'instant' })");
   await delay(100);
 
   const hitTargetIsInput = await evaluate(`(() => {
@@ -123,7 +115,7 @@ async function run() {
     await delay(100);
   }
 
-  if (snapshot.fileName !== "12.24.mov") throw new Error(`Wrong selected file state: ${snapshot.fileName}`);
+  if (snapshot.fileName !== path.basename(sampleVideo)) throw new Error(`Wrong selected file state: ${snapshot.fileName}`);
   if (snapshot.error) throw new Error(snapshot.error);
   if (!snapshot.videoMounted || !snapshot.videoSource.startsWith("blob:")) throw new Error("Video player did not mount with its local blob URL.");
   if (!snapshot.ready || !snapshot.runEnabled) throw new Error(`Video metadata never became ready: ${JSON.stringify(snapshot)}`);

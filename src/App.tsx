@@ -1,5 +1,7 @@
 import { ChangeEvent, CSSProperties, DragEvent, lazy, PointerEvent, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import "./components/SessionWorkflow.css";
+import { useVideoFramePresentation } from "./lib/useVideoFramePresentation";
+import { resolvePresentedFrameTime } from "./lib/videoFramePresentation";
 import {
   resolveAutomaticPoseFinishBoundary,
   trimBiomechanicsResultAtFinish,
@@ -38,7 +40,7 @@ import { fuseStartEvidence, type FusedStartDecision, type StartEvidence } from "
 import { assessAutomaticStartBodyAudit } from "./lib/startBodyAudit";
 import { deriveAutomaticStartBodyZone, resolveAnalysisBodyZone } from "./lib/startRegion";
 import { applyTimestampAcceptance, clearMarkerTimestamp, recalculateTimestampClimbs, sanitizeTimestampSequence } from "./lib/timestampIntegrity";
-import { captureFrame, clamp, hasUsableVideoMetadata, roundTime, sampleFrameAt, sampleZoneOpponentColor, seekTo } from "./lib/videoFrameSampler";
+import { captureFrame, captureVideoPixels, clamp, hasUsableVideoMetadata, roundTime, sampleFrameAt, sampleZoneOpponentColor, seekTo } from "./lib/videoFrameSampler";
 import { getVideoUiState } from "./lib/videoUiState";
 import {
   createSessionLibraryBackup,
@@ -85,7 +87,7 @@ const INITIAL_TIMESTAMPS: TimestampMarker[] = [
   marker("finishPad", "Finish Pad"),
 ];
 
-const APP_VERSION = "0.23.0";
+const APP_VERSION = "0.24.0";
 const SESSION_STORAGE_KEY = "climbiq.analysisSessions.v1";
 const AttemptComparisonPanel = lazy(() => import("./components/AttemptComparisonPanel"));
 const Hold10SecondPassPanel = lazy(() => import("./components/Hold10SecondPassPanel"));
@@ -161,7 +163,7 @@ interface TimestampReviewTarget {
   suggestedRawTime: number;
   confidence?: Confidence;
   acceptLabel: string;
-  onAccept: (rawTime: number) => void;
+  onAccept: (rawTime: number, frameTimeNote?: string) => void;
   secondPassBasis?: Hold10SecondPassResult;
 }
 
@@ -436,9 +438,10 @@ function App() {
 
   const hold10Contact = useMemo(
     () => effectiveBiomechanicsResult && hold10WallTarget
-      ? detectHoldContact(effectiveBiomechanicsResult, biomechanics.calibration, hold10WallTarget, { holdLabel: "Hold 10", observedRouteHolds: hold10Target.observedRouteHolds })
+      ? detectHoldContact(effectiveBiomechanicsResult, biomechanics.calibration, hold10WallTarget, { holdLabel: "Hold 10", observedRouteHolds: hold10Target.observedRouteHolds,
+        allowApproximateEdgeProjection: hold10Target.allowApproximateEdgeProjection })
       : null,
-    [biomechanics.calibration, effectiveBiomechanicsResult, hold10WallTarget, hold10Target.observedRouteHolds],
+    [biomechanics.calibration, effectiveBiomechanicsResult, hold10WallTarget, hold10Target.observedRouteHolds, hold10Target.allowApproximateEdgeProjection],
   );
   const hold10HeightEstimate = useMemo(
     () => effectiveBiomechanicsResult && !hold10Contact?.detected
@@ -477,6 +480,9 @@ function App() {
       ? "Calibrated light transition"
       : "Generic color-distance detection";
   const videoAnalysisRunning = frameTestRunning || startRunning || movementRunning || movementPreviewRunning || finishRunning || biomechanicsRunning || autoAnalysisRunning || secondPassRunning;
+  const framePresentation = useVideoFramePresentation(videoRef, videoUrl, Boolean(timestampReview) && !videoAnalysisRunning);
+  const decodedReviewTime = resolvePresentedFrameTime({ src: videoUrl ?? "", currentTime, seeking: !reviewFrameReady }, framePresentation);
+  const reviewAcceptanceTime = decodedReviewTime ?? currentTime;
 
   const zoneStageStyle = useMemo((): CSSProperties => {
     const width = metadata?.videoWidth || 16;
@@ -767,10 +773,10 @@ function App() {
     reviewTimestamp({ label: evidence.kind === "contact-candidate" ? "Hold 10 contact candidate — second pass" : "Possible Hold 10 — second pass",
       secondPassBasis: activeHold10SecondPass,
       suggestedRawTime: rawTime, confidence: "Low", acceptLabel: "Set Hold 10",
-      onAccept: time => acceptTimestamp("hold10", time, "Manual", "Medium", {
+      onAccept: (time, frameTimeNote) => acceptTimestamp("hold10", time, "Manual", "Medium", {
         detectedRawTime: evidence.candidateRawTime,
         offsetApplied: roundTime(time - evidence.candidateRawTime),
-        note: `${evidence.reason} Broad cursor ${evidence.coarseRawTime.toFixed(3)}s; second-pass cursor ${evidence.candidateRawTime.toFixed(3)}s. Contact confirmed manually in the full video.`,
+        note: `${evidence.reason} Broad cursor ${evidence.coarseRawTime.toFixed(3)}s; second-pass cursor ${evidence.candidateRawTime.toFixed(3)}s. Contact confirmed manually in the full video. ${frameTimeNote ?? ""}`,
       }),
     });
   }
@@ -1542,7 +1548,7 @@ function App() {
       }
       const time = clamp(startRawTime + duration * fraction, 0, Math.max(0, video.duration - 0.001));
       await seekTo(video, time);
-      frames.push(captureFrame(video).imageData);
+      frames.push(captureVideoPixels(video).imageData);
     }
     const { result } = alignStandardSpeedRouteWithFallback(frames, calibration, {
       startBodyZone: identityZoneOverride ?? zones.startBody,
@@ -1572,9 +1578,9 @@ function App() {
     const beforeTime = Math.max(0, acceptedStart - 0.18);
     const afterTime = Math.min(Math.max(0, video.duration - 0.001), acceptedStart + 0.18);
     await seekTo(video, beforeTime);
-    const before = captureFrame(video).imageData;
+    const before = captureVideoPixels(video).imageData;
     await seekTo(video, afterTime);
-    const after = captureFrame(video).imageData;
+    const after = captureVideoPixels(video).imageData;
     if (signal?.aborted) {
       throw new PoseAnalysisCancelledError();
     }
@@ -1848,12 +1854,12 @@ function App() {
         throw new PoseAnalysisCancelledError();
       }
       const calibrationFrameTime = video.currentTime;
-      const calibrationFrame = captureFrame(video).imageData;
+      const calibrationFrame = captureVideoPixels(video).imageData;
       await seekTo(video, Math.min(video.duration - 0.001, Math.max(0, poseFinishBoundary.endRawTime - 0.08)));
       if (signal?.aborted) {
         throw new PoseAnalysisCancelledError();
       }
-      const cameraStability = assessCameraStability(calibrationFrame, captureFrame(video).imageData);
+      const cameraStability = assessCameraStability(calibrationFrame, captureVideoPixels(video).imageData);
       if (cameraStability.assessable && !cameraStability.stable) {
         setBiomechanics((current) => current.calibration?.source === "automatic-approximate"
           ? { ...current, calibration: undefined, result: undefined }
@@ -2137,10 +2143,12 @@ function App() {
           accepted: true,
         };
       }
+      const reviewEvidenceLabel = upperFinish.result.debug.finishEvidenceKind === "physical-top-reach" ||
+        upperFinish.result.debug.finishEvidenceKind === "upper-wall-presence" ? "Upper-wall motion" : "Upper timing indicator";
       setFinishStatus(
         upperAgreesWithOfficial
-          ? `Upper timing indicator suggests ${upperFinish.result.rawTime.toFixed(3)}s and needs frame review. ${upperFinish.result.reason}`
-          : `Upper timing indicator suggests ${upperFinish.result.rawTime.toFixed(3)}s, but the official-time cross-check suggests ${expectedFinishTime!.toFixed(3)}s. Review before accepting.`,
+          ? `${reviewEvidenceLabel} suggests ${upperFinish.result.rawTime.toFixed(3)}s and needs frame review. ${upperFinish.result.reason}`
+          : `${reviewEvidenceLabel} suggests ${upperFinish.result.rawTime.toFixed(3)}s, but the official-time cross-check suggests ${expectedFinishTime!.toFixed(3)}s. Review before accepting.`,
       );
       return {
         rawTime: upperFinish.result.rawTime,
@@ -2151,6 +2159,11 @@ function App() {
       };
     }
 
+    if (!review.result.detected && upperFinish.result.candidates?.length) {
+      setFinishResult(upperFinish.result);
+      setFinishStatus(upperFinish.result.reason);
+      return null;
+    }
     setFinishResult(review.result);
     setFinishStatus(review.result.reason);
     if (
@@ -2177,7 +2190,7 @@ function App() {
     return null;
   }
 
-  async function acceptSuggestedStart(reviewedRawTime?: number) {
+  async function acceptSuggestedStart(reviewedRawTime?: number, frameTimeNote?: string) {
     const video = videoRef.current;
     if (suggestedStartRawTime === null) {
       return;
@@ -2196,7 +2209,7 @@ function App() {
     acceptTimestamp("startSignal", acceptedStart, source, confidence, {
       detectedRawTime: suggestedStartRawTime,
       offsetApplied: roundTime(acceptedStart - suggestedStartRawTime),
-      note: "Suggested by Quick Analyze and accepted after review.",
+      note: `Suggested by Quick Analyze and accepted after review. ${frameTimeNote ?? ""}`,
     });
     setSuggestedStartRawTime(null);
     if (!video) {
@@ -3094,7 +3107,7 @@ function App() {
             : "Waiting for a video";
 
   return (
-    <main className="app-shell" id="top">
+    <main className="app-shell" id="top" data-app-version={APP_VERSION}>
       <a className="skip-link" href="#upload">Skip to analysis</a>
       <header className="site-header">
         <a className="brand" href="#top" aria-label="ClimbIQ home">
@@ -3201,7 +3214,7 @@ function App() {
                     suggestedRawTime: Math.max(0, roundTime(suggestedStartRawTime + startSignalOffset)),
                     confidence: startResult?.confidence ?? "Medium",
                     acceptLabel: "Accept start",
-                    onAccept: (rawTime) => { void acceptSuggestedStart(rawTime); },
+                    onAccept: (rawTime, frameTimeNote) => { void acceptSuggestedStart(rawTime, frameTimeNote); },
                   })}
                   disabled={videoAnalysisRunning}
                 >
@@ -3418,30 +3431,40 @@ function App() {
                   <strong>{timestampReview.suggestedRawTime.toFixed(3)}s</strong>
                 </div>
                 <div>
-                  <span>Frame on screen</span>
-                  <strong>{currentTime.toFixed(3)}s</strong>
+                  <span>{decodedReviewTime !== undefined ? "Decoded frame" : "Cursor (approx.)"}</span>
+                  <strong>{reviewAcceptanceTime.toFixed(3)}s</strong>
                 </div>
                 <div>
                   <span>Adjustment</span>
-                  <strong>{formatSignedTime(currentTime - timestampReview.suggestedRawTime)}</strong>
+                  <strong>{formatSignedTime(reviewAcceptanceTime - timestampReview.suggestedRawTime)}</strong>
                 </div>
               </div>
               <p>
                 Pause on the exact visual moment. Use the frame buttons above, then accept the frame currently shown in the player.
               </p>
+              <p className="muted" data-frame-time-source={decodedReviewTime !== undefined ? "presentation" : framePresentation.status}>
+                {decodedReviewTime !== undefined
+                  ? `Using the browser's presented-frame timestamp. Seek cursor: ${currentTime.toFixed(3)}s. This does not establish contact accuracy beyond the video's frames.`
+                  : framePresentation.status === "pending"
+                    ? "Waiting for the browser's frame timestamp…"
+                    : "A frame timestamp is unavailable. Acceptance uses the paused video cursor, which may fall between source frames."}
+              </p>
               <div className="button-row timestamp-review-actions">
                 <button disabled={videoAnalysisRunning} onClick={() => jumpTo(timestampReview.suggestedRawTime)}>Return to suggestion</button>
                 <button
                   className="primary"
-                  disabled={videoAnalysisRunning || !reviewFrameReady}
+                  disabled={videoAnalysisRunning || !reviewFrameReady || framePresentation.status === "pending"}
                   onClick={() => {
                     const video = videoRef.current;
                     if (!video || !video.paused || video.seeking) return;
-                    timestampReview.onAccept(video.currentTime);
+                    const decodedTime = resolvePresentedFrameTime(video, framePresentation);
+                    timestampReview.onAccept(decodedTime ?? video.currentTime, decodedTime !== undefined
+                      ? `Used browser presented-frame timestamp ${decodedTime.toFixed(6)}s (cursor ${video.currentTime.toFixed(6)}s).`
+                      : `Frame timestamp unavailable; used paused cursor ${video.currentTime.toFixed(6)}s.`);
                     setTimestampReview(null);
                   }}
                 >
-                  {reviewFrameReady ? `${timestampReview.acceptLabel} at ${currentTime.toFixed(3)}s` : "Pause and wait for the frame"}
+                  {reviewFrameReady && framePresentation.status !== "pending" ? `${timestampReview.acceptLabel} at ${reviewAcceptanceTime.toFixed(3)}s` : "Pause and wait for the frame"}
                 </button>
                 <button onClick={() => setTimestampReview(null)}>Close review</button>
               </div>
@@ -3680,10 +3703,10 @@ function App() {
               suggestedRawTime: Math.max(0, roundTime(candidate.rawTime + startSignalOffset)),
               confidence: candidate.confidence,
               acceptLabel: "Accept start",
-              onAccept: (rawTime) => acceptTimestamp("startSignal", rawTime, startSourceForCandidate(candidate), candidate.confidence, {
+              onAccept: (rawTime, frameTimeNote) => acceptTimestamp("startSignal", rawTime, startSourceForCandidate(candidate), candidate.confidence, {
                 detectedRawTime: candidate.rawTime,
                 offsetApplied: roundTime(rawTime - candidate.rawTime),
-                note: `${candidate.reason} Reviewed against the video frame.`,
+                note: `${candidate.reason} Reviewed against the video frame. ${frameTimeNote ?? ""}`,
               }),
             })}
             getCandidateJumpTarget={(candidate) => Math.max(0, roundTime(candidate.rawTime + startSignalOffset))}
@@ -3692,10 +3715,10 @@ function App() {
               suggestedRawTime: Math.max(0, roundTime(startResult.rawTime + startSignalOffset)),
               confidence: startResult.confidence,
               acceptLabel: "Accept start",
-              onAccept: (rawTime) => acceptTimestamp("startSignal", rawTime, startSourceForResult(startResult), startResult.confidence, {
+              onAccept: (rawTime, frameTimeNote) => acceptTimestamp("startSignal", rawTime, startSourceForResult(startResult), startResult.confidence, {
                 detectedRawTime: startResult.rawTime!,
                 offsetApplied: roundTime(rawTime - startResult.rawTime!),
-                note: `${startResult.reason} Reviewed against the video frame.`,
+                note: `${startResult.reason} Reviewed against the video frame. ${frameTimeNote ?? ""}`,
               }),
             })}
             onJump={(delta = 0) => jumpTo(startFinalRaw !== undefined ? Math.max(0, roundTime(startFinalRaw + delta)) : undefined)}
@@ -3796,10 +3819,10 @@ function App() {
                 suggestedRawTime: Math.max(0, roundTime(candidate.rawTime + firstMovementOffset)),
                 confidence: candidate.confidence,
                 acceptLabel: `Accept ${movementDefinitionLabel(definition).toLowerCase()}`,
-                onAccept: (rawTime) => acceptTimestamp(definition === "committed" ? "committedLaunch" : "firstMovement", rawTime, "Body motion detection", candidate.confidence, {
+                onAccept: (rawTime, frameTimeNote) => acceptTimestamp(definition === "committed" ? "committedLaunch" : "firstMovement", rawTime, "Body motion detection", candidate.confidence, {
                   detectedRawTime: candidate.rawTime,
                   offsetApplied: roundTime(rawTime - candidate.rawTime),
-                  note: `${candidate.reason} Reviewed against the video frame.`,
+                  note: `${candidate.reason} Reviewed against the video frame. ${frameTimeNote ?? ""}`,
                 }),
               });
             }}
@@ -3812,10 +3835,10 @@ function App() {
               suggestedRawTime: Math.max(0, roundTime(movementResult.rawTime + firstMovementOffset)),
               confidence: movementResult.confidence,
               acceptLabel: `Accept ${movementDefinitionLabel(firstMovementDefinition).toLowerCase()}`,
-              onAccept: (rawTime) => acceptTimestamp(firstMovementDefinition === "committed" ? "committedLaunch" : "firstMovement", rawTime, "Body motion detection", movementResult.confidence, {
+              onAccept: (rawTime, frameTimeNote) => acceptTimestamp(firstMovementDefinition === "committed" ? "committedLaunch" : "firstMovement", rawTime, "Body motion detection", movementResult.confidence, {
                 detectedRawTime: movementResult.rawTime!,
                 offsetApplied: roundTime(rawTime - movementResult.rawTime!),
-                note: `${movementResult.reason} Reviewed against the video frame.`,
+                note: `${movementResult.reason} Reviewed against the video frame. ${frameTimeNote ?? ""}`,
               }),
             })}
             onJump={(delta = 0) => jumpTo(movementFinalRaw !== undefined ? Math.max(0, roundTime(movementFinalRaw + delta)) : undefined)}
@@ -3839,8 +3862,9 @@ function App() {
           </div>
           {finishStatus && <p className="status-line">{finishStatus}</p>}
           {finishResult?.detected && finishResult.rawTime !== undefined && startSignalRaw !== null && (
-            <div className="suggestion-card">
-              <h3>Detected lane-light finish</h3>
+            <div className="suggestion-card" data-finish-evidence>
+              <h3>{finishResult.debug.finishEvidenceKind === "physical-top-reach" || finishResult.debug.finishEvidenceKind === "upper-wall-presence"
+                ? "Upper-wall motion for review" : "Finish review candidate"}</h3>
               <p>Raw video time: {finishResult.rawTime.toFixed(3)}s</p>
               <p>Climb time: {(finishResult.rawTime - startSignalRaw).toFixed(3)}s</p>
               <p>Confidence: {finishResult.confidence}</p>
@@ -3853,10 +3877,10 @@ function App() {
                     suggestedRawTime: finishResult.rawTime!,
                     confidence: finishResult.confidence,
                     acceptLabel: "Accept finish",
-                    onAccept: (rawTime) => acceptTimestamp("finishPad", rawTime, "Finish light detection", finishResult.confidence, {
+                    onAccept: (rawTime, frameTimeNote) => acceptManualTimestamp("finishPad", rawTime, {
                       detectedRawTime: finishResult.rawTime,
                       offsetApplied: roundTime(rawTime - finishResult.rawTime!),
-                      note: `${finishResult.reason} Reviewed against the video frame.`,
+                      note: `${finishResult.reason} Reviewed against the video frame. ${frameTimeNote ?? ""}`,
                     }),
                   })}
                 >
@@ -3865,6 +3889,25 @@ function App() {
                 <button onClick={() => setFinishResult(null)}>Dismiss</button>
               </div>
             </div>
+          )}
+          {!finishResult?.detected && Boolean(finishResult?.candidates?.length) && startSignalRaw !== null && (
+            <details className="technical-details">
+              <summary>Inspect unverified color changes</summary>
+              <p className="muted">These are not verified finish events. Digits, clothing, and reflections can change color. Use the full video to locate actual pad contact.</p>
+              <div className="button-row">
+                {finishResult!.candidates!.slice(0, 5).map((candidate, index) => (
+                  <button key={`${candidate.rawTime}-${index}`} disabled={videoAnalysisRunning} onClick={() => reviewTimestamp({
+                    label: "Unverified color change — locate actual finish contact",
+                    suggestedRawTime: candidate.rawTime,
+                    confidence: "Low", acceptLabel: "Set manual finish",
+                    onAccept: (rawTime, frameTimeNote) => acceptManualTimestamp("finishPad", rawTime, {
+                      detectedRawTime: candidate.rawTime, offsetApplied: roundTime(rawTime - candidate.rawTime),
+                      note: `Manually reviewed from an unverified color-change cursor, not a verified light event. ${frameTimeNote ?? ""}`,
+                    }),
+                  })}>Inspect {candidate.rawTime.toFixed(3)}s</button>
+                ))}
+              </div>
+            </details>
           )}
           <hr />
           <label className="single-field">
@@ -3899,10 +3942,10 @@ function App() {
                     suggestedRawTime: finishSuggestion.rawTime,
                     confidence: "High",
                     acceptLabel: "Accept finish",
-                    onAccept: (rawTime) => acceptTimestamp("finishPad", rawTime, "Official total time", "High", {
+                    onAccept: (rawTime, frameTimeNote) => acceptTimestamp("finishPad", rawTime, "Official total time", "High", {
                       detectedRawTime: finishSuggestion.rawTime,
                       offsetApplied: roundTime(rawTime - finishSuggestion.rawTime),
-                      note: "Official-time finish reviewed against the video frame.",
+                      note: `Official-time finish reviewed against the video frame. ${frameTimeNote ?? ""}`,
                     }),
                   })}
                 >
@@ -3954,10 +3997,10 @@ function App() {
                                 suggestedRawTime: item.rawTime!,
                                 confidence: item.confidence,
                                 acceptLabel: "Update marker",
-                                onAccept: (rawTime) => acceptManualTimestamp(item.id, rawTime, {
+                                onAccept: (rawTime, frameTimeNote) => acceptManualTimestamp(item.id, rawTime, {
                                   detectedRawTime: item.rawTime ?? undefined,
                                   offsetApplied: item.rawTime === null ? undefined : roundTime(rawTime - item.rawTime),
-                                  note: "Accepted time reviewed and adjusted in the video player.",
+                                  note: `Accepted time reviewed and adjusted in the video player. ${frameTimeNote ?? ""}`,
                                 }),
                               })}
                             >
@@ -4031,10 +4074,10 @@ function App() {
                     suggestedRawTime: hold10Contact.rawTime!,
                     confidence: hold10Contact.confidence,
                     acceptLabel: "Set Hold 10",
-                    onAccept: (rawTime) => acceptTimestamp("hold10", rawTime, "Manual", "Medium", {
+                    onAccept: (rawTime, frameTimeNote) => acceptTimestamp("hold10", rawTime, "Manual", "Medium", {
                       detectedRawTime: hold10Contact.rawTime,
                       offsetApplied: roundTime(rawTime - hold10Contact.rawTime!),
-                      note: `${hold10Contact.reason} Reviewed against the exact video frame.`,
+                      note: `${hold10Contact.reason} Reviewed against the video frame. ${frameTimeNote ?? ""}`,
                     }),
                   })}>
                     Review Hold 10
@@ -4046,17 +4089,18 @@ function App() {
                     suggestedRawTime: hold10HeightEstimate.rawTime!,
                     confidence: "Low",
                     acceptLabel: "Set Hold 10",
-                    onAccept: (rawTime) => acceptTimestamp("hold10", rawTime, "Manual", "Medium", {
+                    onAccept: (rawTime, frameTimeNote) => acceptTimestamp("hold10", rawTime, "Manual", "Medium", {
                       detectedRawTime: hold10HeightEstimate.rawTime,
                       offsetApplied: roundTime(rawTime - hold10HeightEstimate.rawTime!),
-                      note: `${hold10HeightEstimate.reason} Confirmed manually against the exact contact frame.`,
+                      note: `${hold10HeightEstimate.reason} Confirmed manually against the contact frame. ${frameTimeNote ?? ""}`,
                     }),
                   })}>
                     Review possible Hold 10
                   </button>
                 )}
               </div>
-              {!activeHold10SecondPass && (hold10Contact?.detected || hold10HeightEstimate?.detected) && (
+              {!activeHold10SecondPass && (hold10Contact?.detected || hold10HeightEstimate?.detected ||
+                (hold10Target.source === "standard-template" && !routeAlignment && effectiveBiomechanicsResult.metrics.validFrames >= 3)) && (
                 <div className="button-row"><button disabled={videoAnalysisRunning || !hasLoadedVideo} onClick={refineCurrentHold10}>Inspect Hold 10 more closely</button>
                   {secondPassRunning && <button onClick={() => secondPassAbortRef.current?.abort()}>Cancel closer scan</button>}
                 </div>

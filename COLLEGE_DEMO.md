@@ -14,7 +14,7 @@ ClimbIQ turns an ordinary speed-climbing video into reviewable race timing, Hold
 6. Open Performance insights to show the wall-projected COM path, tracking confidence, and the lower/middle/top route-section analysis.
 7. Download the JSON or Obsidian report to show that the result is portable and auditable.
 
-## Measured result to discuss
+## Historical 0.23.0 result to discuss
 
 On the complete private phone-video baseline `IMG_9199.MOV`, local and public-production runs matched exactly:
 
@@ -29,7 +29,9 @@ On the complete private phone-video baseline `IMG_9199.MOV`, local and public-pr
 
 The Hold 10 acceptance test checks the UI and arithmetic, not a new ground-truth label. Its detailed scan retains 26/26 selected athlete samples; tracking coverage is not proof of exact contact timing. The previously production-verified timing/COM values above are unchanged in the local 0.23.0 regression.
 
-The complete five-video private regression automatically accepts two Starts (40% coverage), sends three to review, and has zero known false automatic Starts. Both accepted Starts were manually checked. That is a small regression set, not a population accuracy estimate: its 2/2 precision has a wide 95% Wilson interval of 34.2%–100%. One manually checked automatic Finish is correct, with the expected wider 20.7%–100% interval for 1/1.
+The five-video regression automatically accepted two Starts (40% coverage) and sent three to review. This is an observed acceptance rate, not accuracy. The old precision figures have been withdrawn: the legacy correctness flags have no auditable independent review provenance, and direct frame inspection disputes the old 14.290 s finish suggestion for `IMG_8903.MOV`. The summary now reports accuracy as unavailable until independently reviewed labels are supplied.
+
+Current overnight work adds decoded-frame timestamp provenance, faster pixel-only capture, and a wall-marker fix tested against ceiling highlights and uneven clock sizes. The complete reference retains 44–45/52 usable motion frames and 19 registered holds in current local tests. Its closer contact scan may be inconclusive; it must remain a review aid. Unaccepted finish suggestions no longer silently bound automatic COM analysis: accept the finish or supply an official total first.
 
 ## What makes the project technically interesting
 
@@ -46,7 +48,7 @@ The complete five-video private regression automatically accepts two Starts (40%
 - Automatic wall scale is approximate. Precise metre and m/s claims need four manually marked lane corners and a fixed camera.
 - The current private dataset is too small and related to claim general accuracy.
 - Route recovery now identifies Hold 10 on the complete reference, but both hand-contact proposals and the approximate wall scale still need review. One successful route fit cannot establish reliability across gyms or cameras.
-- Controlled resizing, exposure, compression, frame-rate and audio tests expose additional failures. A red obstruction caused a five-seconds-early finish and has been guarded against; some modified recordings still lose start availability or produce inaccurate review suggestions. Modified copies are not independent new climbs.
+- Controlled resizing, exposure, compression, frame-rate and audio tests expose additional failures. A red obstruction produced a false 9.290 s finish and has been guarded against; some modified recordings still lose start availability or produce inaccurate review suggestions. The old 14.290 s reference is itself disputed, so the exact error must not be scored against it. Modified copies are not independent new climbs.
 
 ## Next defensible study
 

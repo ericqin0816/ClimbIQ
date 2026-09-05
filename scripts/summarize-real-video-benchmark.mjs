@@ -1,4 +1,5 @@
 import { readFile } from "node:fs/promises";
+import { boundaryReviewOutcome } from "./lib/label-provenance.mjs";
 
 const path = new URL("../benchmarks/real-video-results.json", import.meta.url);
 const benchmark = JSON.parse(await readFile(path, "utf8"));
@@ -7,12 +8,14 @@ const publicBenchmark = JSON.parse(await readFile(publicPath, "utf8"));
 const trials = benchmark.trials ?? [];
 const acceptedStarts = trials.filter((trial) => trial.start?.status === "accepted");
 const reviewedStarts = trials.filter((trial) => trial.start?.status === "review");
-const knownFalseAcceptedStarts = acceptedStarts.filter((trial) => trial.start?.reviewedCorrect === false);
-const knownCorrectAcceptedStarts = acceptedStarts.filter((trial) => trial.start?.reviewedCorrect === true);
+const knownFalseAcceptedStarts = acceptedStarts.filter((trial) => boundaryReviewOutcome(trial.start) === "outside-tolerance");
+const knownCorrectAcceptedStarts = acceptedStarts.filter((trial) => boundaryReviewOutcome(trial.start) === "within-tolerance");
+const labeledAcceptedStarts = knownFalseAcceptedStarts.length + knownCorrectAcceptedStarts.length;
 const acceptedFinishes = trials.filter((trial) => trial.finish?.status === "accepted");
 const reviewFinishes = trials.filter((trial) => trial.finish?.status === "review");
-const knownFalseAcceptedFinishes = acceptedFinishes.filter((trial) => trial.finish?.reviewedCorrect === false);
-const knownCorrectAcceptedFinishes = acceptedFinishes.filter((trial) => trial.finish?.reviewedCorrect === true);
+const knownFalseAcceptedFinishes = acceptedFinishes.filter((trial) => boundaryReviewOutcome(trial.finish) === "outside-tolerance");
+const knownCorrectAcceptedFinishes = acceptedFinishes.filter((trial) => boundaryReviewOutcome(trial.finish) === "within-tolerance");
+const labeledAcceptedFinishes = knownFalseAcceptedFinishes.length + knownCorrectAcceptedFinishes.length;
 const comTrials = trials.filter((trial) => Number.isFinite(trial.com?.usableFrames) && Number.isFinite(trial.com?.requestedFrames));
 const usableFrames = comTrials.reduce((sum, trial) => sum + trial.com.usableFrames, 0);
 const requestedFrames = comTrials.reduce((sum, trial) => sum + trial.com.requestedFrames, 0);
@@ -22,6 +25,8 @@ const report = {
   benchmarkVersion: benchmark.version,
   capturedAt: benchmark.capturedAt,
   videos: trials.length,
+  interpretation: "Observed acceptance is not accuracy. Correct/false counts and intervals require independent label provenance and use a 0.100 s comparison policy. Zero labeled errors with zero labels is not evidence of correctness.",
+  independentLabelToleranceSeconds: 0.1,
   start: {
     accepted: acceptedStarts.length,
     review: reviewedStarts.length,
@@ -29,12 +34,13 @@ const report = {
     reviewRate: trials.length ? reviewedStarts.length / trials.length : null,
     knownCorrectAccepted: knownCorrectAcceptedStarts.length,
     knownFalseAccepted: knownFalseAcceptedStarts.length,
-    reviewedAcceptancePrecision: acceptedStarts.length
-      ? knownCorrectAcceptedStarts.length / acceptedStarts.length
+    unverifiedAccepted: acceptedStarts.length - labeledAcceptedStarts,
+    reviewedAcceptancePrecision: labeledAcceptedStarts
+      ? knownCorrectAcceptedStarts.length / labeledAcceptedStarts
       : null,
     reviewedAcceptancePrecisionWilson95: wilsonInterval(
       knownCorrectAcceptedStarts.length,
-      acceptedStarts.length,
+      labeledAcceptedStarts,
     ),
   },
   finish: {
@@ -45,13 +51,15 @@ const report = {
       : null,
     knownCorrectAccepted: knownCorrectAcceptedFinishes.length,
     knownFalseAccepted: knownFalseAcceptedFinishes.length,
+    unverifiedAccepted: acceptedFinishes.length - labeledAcceptedFinishes,
     reviewedAcceptancePrecisionWilson95: wilsonInterval(
       knownCorrectAcceptedFinishes.length,
-      acceptedFinishes.filter((trial) => trial.finish?.reviewedCorrect != null).length,
+      labeledAcceptedFinishes,
     ),
-    manuallyConfirmedCorrectReviewCandidates: reviewFinishes.filter((trial) => trial.finish?.reviewedCorrect === true).length,
-    manuallyConfirmedFalseReviewCandidates: reviewFinishes.filter((trial) => trial.finish?.reviewedCorrect === false).length,
-    unverifiedReviewCandidates: reviewFinishes.filter((trial) => trial.finish?.reviewedCorrect == null).length,
+    independentlyConfirmedCorrectReviewCandidates: reviewFinishes.filter((trial) => boundaryReviewOutcome(trial.finish) === "within-tolerance").length,
+    independentlyConfirmedFalseReviewCandidates: reviewFinishes.filter((trial) => boundaryReviewOutcome(trial.finish) === "outside-tolerance").length,
+    unverifiedReviewCandidates: reviewFinishes.filter((trial) => boundaryReviewOutcome(trial.finish) === "unverified").length,
+    disputedLegacyLabels: reviewFinishes.filter((trial) => trial.finish?.labelReview?.status === "disputed").length,
   },
   com: {
     evaluatedVideos: comTrials.length,

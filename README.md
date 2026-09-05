@@ -70,7 +70,7 @@ ClimbIQ now includes optional pose analysis, but pose never changes accepted tim
 
 ## Experimental Biomechanics
 
-Quick Analyze runs MediaPipe Pose Landmarker locally after it has an accepted, official, or verified review-level finish boundary. It never falls back to the full video when finish evidence is missing, so setup footage and the descent cannot silently become part of the climb. It automatically estimates the selected 3 m lane from the upper timing lights and wall-to-mat edge, follows the athlete through the climb range, and builds the center-of-mass path and speed charts. The automatic wall scale is explicitly labeled approximate.
+Quick Analyze runs MediaPipe Pose Landmarker locally after it has an accepted finish or official total. An unaccepted review cursor cannot silently become the end of a measured climb; review and accept Finish first. It never falls back to the full video when finish evidence is missing. It estimates the selected 3 m lane from separated upper timing-marker groups and the wall-to-mat edge, follows the athlete through the climb range, and builds the center-of-mass path and speed charts. Automatic wall scale is explicitly approximate.
 
 Before automatic wall calibration, ClimbIQ compares robust fixed-scene edges near the start and finish. Frame-wide translation that is materially better explained by a shifted image is treated as camera movement; timing remains available, but COM, metre-per-second output, route registration, and Hold 10 splits pause rather than using one invalid homography for a panned or tilted recording. Local athlete motion and exposure changes are trimmed out of this check.
 
@@ -161,7 +161,7 @@ Finish Pad climb time = Official total time
 
 The app labels light-detected and official-time-derived finishes separately.
 
-A High-confidence finish can be accepted automatically. A verified review-level finish can bound COM while its exact frame awaits review. If neither light evidence nor an official duration supplies a finish boundary, Quick Analyze pauses before pose analysis instead of scanning through the end of the clip.
+A High-confidence finish can be accepted automatically. Unaccepted light or physical-top suggestions remain review cursors, not COM boundaries. If neither an accepted finish nor an official duration supplies a boundary, Quick Analyze pauses before pose analysis.
 
 ## Run The Project
 
@@ -214,9 +214,11 @@ npm run benchmark:timing -- --full --fps=10 IMG_9199.MOV
 npm run benchmark:timing -- --full --fps=15 IMG_9199.MOV
 ```
 
-Unlike timing-only mode, `--full` does not cancel the pose stage. It requires at least three usable COM frames when Finish is accepted, checks saved timestamps survive reload, and verifies identical saved attempts cannot claim a gain or loss. It uses an isolated temporary browser profile. This checks workflow integrity; it does not independently label Hold 10 or establish accuracy on unseen footage.
+Unlike timing-only mode, `--full` does not cancel the pose stage. It checks saved timestamps survive reload and identical saved attempts cannot claim a gain or loss. Known reference clips have explicit coverage requirements; exploratory clips report legitimate tracking/calibration refusals separately. It also tests Hold 10 review, decoded-frame/fallback timestamp provenance, saving, and stale-evidence clearing. It uses an isolated temporary browser profile.
 
-The timing runner uses the real browser workflow, stops after timing when possible, compares accepted/review outcomes, raw times, evidence sources, and confidence labels with `benchmarks/real-video-results.json`, and exits nonzero if an expected Start or Finish policy regresses. Set `CLIMBIQ_VIDEO_DIR` for a different private directory, or use `npm run benchmark:timing -- clip1.mov clip2.mov` for a subset or a new exploratory clip. New clips are reported as `unbaselined`; they do not become required regression inputs until they are deliberately added to the benchmark JSON. Videos and frames are never written into the repository.
+Regression observations are not independent accuracy labels. The old 8903 finish reference is disputed after direct frame inspection. Benchmark summaries now require explicit independent review provenance before reporting accuracy; see [the label audit](REAL_VIDEO_BENCHMARK.md).
+
+The timing runner uses the real browser workflow, stops after timing when possible, compares accepted/review outcomes, raw times, evidence sources, and confidence labels with `benchmarks/real-video-results.json`, and exits nonzero if an expected Start or Finish policy regresses. Set `CLIMBIQ_VIDEO_DIR` for a different private directory, or use `npm run benchmark:timing -- clip1.mov clip2.mov` for a subset or a new exploratory clip. New clips are reported as `unbaselined`; they do not become required regression inputs until they are deliberately added to the benchmark JSON. Private videos and generated frames stay in ignored local directories and are never committed.
 
 `npm run benchmark:summary` also reports the separately labeled public broadcast stress test from `benchmarks/public-broadcast-results.json`, including moving-camera rejection reasons and whether review-only candidates have actually received manual ground-truth labels.
 

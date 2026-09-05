@@ -13,6 +13,27 @@ const fullFrameCalibration = buildWallCalibration([
 ], 0, true);
 
 describe("Hold 10 target resolution", () => {
+  it("retains a directly observed Hold 10 just beyond an approximate side edge without changing calibration", () => {
+    const calibration = { ...buildWallCalibration([
+      { x: 0.25, y: 0.9 }, { x: 0.75, y: 0.9 }, { x: 0.75, y: 0.1 }, { x: 0.25, y: 0.1 },
+    ], 0, true), source: "automatic-approximate" as const, confidence: "Low" as const };
+    const image = { x: 0.24, y: 0.5 };
+    const alignment = alignedRoute(image, { xMeters: -0.06, yMeters: 7.5 });
+    alignment.holds = ([9, 10, 11] as const).map(holdId => {
+      const point = holdId === 10 ? image : { x: 0.35, y: holdId === 9 ? 0.55 : 0.44 };
+      return { holdId, originalImage: point, image: point, observedImage: point };
+    });
+    const original = JSON.stringify(calibration);
+    const target = resolveHold10Target({ calibration, visualAlignment: alignment });
+    expect(target.source).toBe("visual-alignment");
+    expect(target.allowApproximateEdgeProjection).toBe(true);
+    expect(target.observedRouteHolds?.map(hold => hold.id)).toEqual([9, 10, 11]);
+    expect(target.reason).toContain("without changing COM or speed calibration");
+    expect(JSON.stringify(calibration)).toBe(original);
+    expect(resolveHold10Target({ calibration: { ...calibration, source: "manual" }, visualAlignment: alignment }).source).toBe("standard-template");
+    expect(resolveHold10Target({ calibration, visualAlignment: { ...alignment, hold10WallTarget: { xMeters: -0.16, yMeters: 7.5 } } }).source).toBe("standard-template");
+    expect(resolveHold10Target({ calibration, visualAlignment: { ...alignment, holds: alignment.holds.slice(1) } }).source).toBe("standard-template");
+  });
   it("projects only directly observed route neighbors into the current wall plane", () => {
     const alignment = alignedRoute({ x: 0.4, y: 0.5 }, { xMeters: 1.2, yMeters: 7.5 });
     alignment.holds = [

@@ -1,0 +1,43 @@
+{
+  "schemaVersion": 1,
+  "collectedAt": "2026-09-05",
+  "scope": "Local overnight experiments based on ba2a468, leading to 0.24.0. Private images and media remain outside Git.",
+  "interpretation": "Workflow and source-consistency evidence, not independently labeled accuracy. The 30-copy batch preceded the final upper-clock hue guard and the stricter COM finish-boundary policy.",
+  "derivedVideoBatch": {
+    "independentSourceClimbs": 5,
+    "derivedVariations": 30,
+    "workflowErrors": 0,
+    "sourceTimingRegressionsAtPoint1Seconds": 0,
+    "independentlyLabeledBoundaries": 0,
+    "unverifiedAcceptedBoundaries": 17,
+    "needsInvestigationAfterProvenanceAudit": 15,
+    "sourceReport": "video-robustness-2026-09-05T08-22-39-178Z.json"
+  },
+  "referenceTrackingVariations": [
+    { "source": "IMG_9199.MOV", "variation": "control-720", "production023UsableFrames": 0, "candidateUsableFrames": 44, "requestedFrames": 52, "hold10Target": "visual-alignment", "contactEvidence": "inconclusive" },
+    { "source": "IMG_9199.MOV", "variation": "compact-360", "candidateUsableFrames": 22, "requestedFrames": 53, "hold10Target": "unavailable" },
+    { "source": "IMG_9199.MOV", "variation": "dark-720", "production023UsableFrames": 0, "candidateUsableFrames": 0, "hold10Target": "unavailable", "reason": "Automatic wall calibration withheld" },
+    { "source": "IMG_9199.MOV", "variation": "low-fps-720", "candidateUsableFrames": 40, "requestedFrames": 53, "hold10Target": "unavailable" },
+    { "source": "IMG_9199.MOV", "variation": "silent-720", "candidateUsableFrames": 38, "requestedFrames": 53, "hold10Target": "unavailable" },
+    { "source": "IMG_9199.MOV", "variation": "trim-2s-720", "production023UsableFrames": 0, "candidateUsableFrames": 45, "requestedFrames": 52, "hold10Target": "visual-alignment", "contactEvidence": "inconclusive" }
+  ],
+  "captureMicrobenchmark": {
+    "width": 1080,
+    "height": 1920,
+    "pairedTrials": 5,
+    "pixelOnlyMs": [14.3, 8.9, 8.9, 8.5, 10.4],
+    "captureWithPngMs": [68, 57.2, 55.7, 64.2, 61.9],
+    "pixelArraysExactlyEqual": true,
+    "interpretation": "Same paused browser frame. This measures capture cost only, not whole-analysis speedup."
+  },
+  "referenceAudit": {
+    "source": "IMG_8903.MOV",
+    "disputedHistoricalFinishCursor": 14.29,
+    "upperDiscoveryZone": { "x1": 0.6, "x2": 0.6277777777777778, "y1": 0.05, "y2": 0.065625 },
+    "sampledBeforeRgb": [180, 162, 145],
+    "sampledAfterRgb": [220, 64, 63],
+    "finding": "The selected patch is on the red time display. A digit change was treated as an electronic finish-state change. Direct frame inspection shows the athlete still climbing at this cursor.",
+    "replacementExactFinishLabel": null,
+    "fix": "Require a distinct chromatic direction, not only brightness/saturation. Unaccepted review cursors cannot bound automatic COM."
+  }
+}

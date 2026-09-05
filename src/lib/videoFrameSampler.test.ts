@@ -1,10 +1,55 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   computeAverageRgb,
   computeDirectionalOpponentWeightedRgb,
   computeOpponentWeightedRgb,
   hasUsableVideoMetadata,
+  captureFrame,
+  captureVideoPixels,
+  seekTo,
 } from "./videoFrameSampler";
+
+afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); });
+
+describe("video seek readiness", () => {
+  it("does not treat a matching cursor as decoded while a seek is still active", async () => {
+    vi.useFakeTimers(); vi.stubGlobal("window", { setTimeout, clearTimeout });
+    const video = Object.assign(new EventTarget(), {
+      currentTime: 2, duration: 20, videoWidth: 720, videoHeight: 1280, readyState: 2, seeking: true,
+    }) as unknown as HTMLVideoElement;
+    let finished = false;
+    const pending = seekTo(video, 2).then(() => { finished = true; });
+    await Promise.resolve(); await Promise.resolve();
+    expect(finished).toBe(false);
+    video.dispatchEvent(new Event("seeked")); await pending;
+    expect(finished).toBe(true); expect(vi.getTimerCount()).toBe(0);
+  });
+  it("rejects invalid seek times before creating listeners or timers", async () => {
+    for (const time of [NaN, Infinity, -Infinity]) {
+      await expect(seekTo({} as HTMLVideoElement, time)).rejects.toThrow("must be finite");
+    }
+  });
+});
+
+describe("pixel-only frame capture", () => {
+  it("does not encode discarded PNGs for analysis callers", () => {
+    const pixels = tinySensorImage({ r: 48, g: 76, b: 49 });
+    const context = { drawImage: vi.fn(), getImageData: vi.fn(() => pixels) };
+    const canvas = { width: 0, height: 0, getContext: vi.fn(() => context), toDataURL: vi.fn(() => "data:image/png;base64,test") };
+    vi.stubGlobal("document", { createElement: vi.fn(() => canvas) });
+    const video = { videoWidth: 10, videoHeight: 10 } as HTMLVideoElement;
+    expect(captureVideoPixels(video).imageData).toBe(pixels);
+    expect(canvas.toDataURL).not.toHaveBeenCalled();
+    expect(captureFrame(video).dataUrl).toBe("data:image/png;base64,test");
+    expect(canvas.toDataURL).toHaveBeenCalledExactlyOnceWith("image/png");
+    expect(context.drawImage).toHaveBeenCalledWith(video, 0, 0, 10, 10);
+  });
+  it("retains the metadata and missing-canvas failures", () => {
+    expect(() => captureVideoPixels({ videoWidth: 0, videoHeight: 0 } as HTMLVideoElement)).toThrow("before video metadata");
+    vi.stubGlobal("document", { createElement: () => ({ getContext: () => null }) });
+    expect(() => captureVideoPixels({ videoWidth: 10, videoHeight: 10 } as HTMLVideoElement)).toThrow("Canvas 2D context");
+  });
+});
 
 describe("opponent-color zone sampling", () => {
   it("preserves a tiny green sensor that full-crop averaging nearly erases", () => {

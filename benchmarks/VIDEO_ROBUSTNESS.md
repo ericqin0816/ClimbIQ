@@ -57,9 +57,16 @@ are saved incrementally in ignored `test-results/`, including per-case failures.
 - **New labeled acceptance:** a previously reviewed boundary becomes accepted and
   agrees with its independently reviewed timestamp.
 
+Each boundary also reports `sourceConsistency`: matching an accepted source
+observation is useful even when its absolute accuracy remains unverified. A
+`source-timing-regression` flags transformed output drift without claiming the
+source was ground truth. Legacy correctness booleans and unexplained manual
+times never qualify as independent labels. Reports include their reference
+snapshot so later label revisions cannot silently change the interpretation.
+
 Both boundary shifts and total-duration shifts are reported. A correct total
 alone can hide equal errors in Start and Finish. Nonzero exit status signals a
-workflow error or a wrong accepted boundary; inspect availability losses and
+workflow error, source-timing drift, or disagreement with an independent label; inspect availability losses and
 unverified acceptances even when the runner exits successfully.
 Review suggestions are also compared when a separately reviewed reference
 exists. An inaccurate suggestion is flagged for investigation but not counted as
@@ -67,15 +74,18 @@ a wrong automatic acceptance.
 
 ## First failure found (September 5)
 
-Darkening `IMG_8903.MOV` produced an accepted Finish at 9.290 s instead of its
-reviewed 14.290 s reference. A red-dominant obstruction passed the green-minus-blue
+Darkening `IMG_8903.MOV` produced an accepted Finish at 9.290 s while the athlete
+was still climbing. A red-dominant obstruction passed the green-minus-blue
 test, and failed dense refinement left the coarse result at High confidence.
 The patch adds a normalized red-channel plausibility check and makes
 unconfirmed coarse results review-only. Original five-video full workflows
 continue to pass. Broader and post-patch measurements belong in the work log;
 these two source climbs are far too few for general accuracy claims.
 
-The twelve-copy post-patch run had no wrong accepted boundaries and no workflow
-errors. Five altered angled copies still needed start review. The dark angled
-copy now withholds Finish, but its upper-wall review suggestion is 18.290 s,
-four seconds late; this remains an open accuracy issue, not a correct detection.
+The twelve-copy post-patch run had no disagreements with its then-current
+references and no workflow errors. Five altered angled copies still needed
+start review. The dark copy now withholds Finish, but its upper review cursor
+is 18.290 s. A subsequent direct frame audit disputes the old 14.290 s reference
+itself, so neither the original “five seconds early” score nor a “four seconds
+late” score is valid ground-truth error. Both physical-top cursors remain
+unverified. Exact contact annotation is still pending.

@@ -19,6 +19,34 @@ const hold10: WallPoint = { xMeters: 1.399, yMeters: 8.334 };
 const farLeft: WallPoint = { xMeters: 0.25, yMeters: 6 };
 
 describe("hold contact detection", () => {
+  it("allows only a bounded, registered side-edge target for approximate contact review", () => {
+    const approximate = { ...buildWallCalibration([
+      { x: 0.25, y: 0.9 }, { x: 0.75, y: 0.9 }, { x: 0.75, y: 0.1 }, { x: 0.25, y: 0.1 },
+    ], 0, true), source: "automatic-approximate" as const, confidence: "Low" as const };
+    const target = { xMeters: -0.05, yMeters: 7.5 };
+    const observedRouteHolds = [
+      { id: 9 as const, wall: { xMeters: 0.8, yMeters: 7 } },
+      { id: 10 as const, wall: target },
+      { id: 11 as const, wall: { xMeters: 0.4, yMeters: 8.2 } },
+    ];
+    const result = makeResult([1, 1.1, 1.2, 1.3].map(time => {
+      const item = frame(time, farLeft, target);
+      item.landmarks = item.landmarks.map(point => ({ ...point, x: 0.25 + point.x * 0.5, y: 0.1 + point.y * 0.8 }));
+      return item;
+    }));
+    const originalCalibration = JSON.stringify(approximate);
+    const options = { holdLabel: "Hold 10", observedRouteHolds, allowApproximateEdgeProjection: true };
+    const contact = detectHoldContact(result, approximate, target, options);
+    expect(contact.detected).toBe(true);
+    expect(contact.confidence).toBe("Low");
+    expect(contact.reason).toContain("does not change COM or speed calibration");
+    expect(JSON.stringify(approximate)).toBe(originalCalibration);
+    expect(detectHoldContact(result, approximate, target, { ...options, allowApproximateEdgeProjection: false }).detected).toBe(false);
+    expect(detectHoldContact(result, { ...approximate, source: "manual" }, target, options).detected).toBe(false);
+    expect(detectHoldContact(result, approximate, { ...target, xMeters: -0.151 }, options).detected).toBe(false);
+    expect(detectHoldContact(result, approximate, target, { ...options, observedRouteHolds: observedRouteHolds.slice(1) }).detected).toBe(false);
+    expect(detectHoldContact(result, approximate, target, { ...options, observedRouteHolds: undefined }).detected).toBe(false);
+  });
   it("uses actual registered neighbors rather than translating the old diagram", () => {
     const result = makeResult([1, 1.1, 1.2, 1.3].map(time => frame(time, farLeft, offset(hold10, 0.23, 0))));
     const observedRouteHolds = [

@@ -42,10 +42,11 @@ export function hasUsableVideoMetadata(
 }
 
 export async function seekTo(video: HTMLVideoElement, time: number): Promise<void> {
+  if (!Number.isFinite(time)) throw new Error("Video seek time must be finite.");
   await waitForMetadata(video);
 
   const clampedTime = clamp(time, 0, Math.max(0, video.duration - 0.001));
-  if (Math.abs(video.currentTime - clampedTime) < SEEK_EPSILON_SECONDS && video.readyState >= 2) {
+  if (!video.seeking && Math.abs(video.currentTime - clampedTime) < SEEK_EPSILON_SECONDS && video.readyState >= 2) {
     return;
   }
 
@@ -87,11 +88,10 @@ export async function seekTo(video: HTMLVideoElement, time: number): Promise<voi
   });
 }
 
-export function captureFrame(video: HTMLVideoElement): {
+export function captureVideoPixels(video: HTMLVideoElement): {
   canvas: HTMLCanvasElement;
   context: CanvasRenderingContext2D;
   imageData: ImageData;
-  dataUrl: string;
 } {
   const width = video.videoWidth;
   const height = video.videoHeight;
@@ -116,14 +116,19 @@ export function captureFrame(video: HTMLVideoElement): {
     canvas,
     context,
     imageData,
-    dataUrl: canvas.toDataURL("image/png"),
   };
+}
+
+/** Encode an image only for callers that actually display or export it. */
+export function captureFrame(video: HTMLVideoElement): ReturnType<typeof captureVideoPixels> & { dataUrl: string } {
+  const pixels = captureVideoPixels(video);
+  return { ...pixels, dataUrl: pixels.canvas.toDataURL("image/png") };
 }
 
 export async function sampleFrameAt(video: HTMLVideoElement, time: number): Promise<FrameSample> {
   try {
     await seekTo(video, time);
-    const captured = captureFrame(video);
+    const captured = captureVideoPixels(video);
     return {
       requestedTime: time,
       actualTime: video.currentTime,

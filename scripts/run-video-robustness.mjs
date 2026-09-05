@@ -15,7 +15,7 @@ const ffmpeg = process.env.CLIMBIQ_FFMPEG ?? (process.platform === "win32" ? bun
 const args = process.argv.slice(2);
 const knownFlags = ["--generate-only", "--full"];
 for (const argument of args) {
-  if (argument.startsWith("--") && !knownFlags.includes(argument) && !argument.startsWith("--variants=")) {
+  if (argument.startsWith("--") && !knownFlags.includes(argument) && !argument.startsWith("--variants=") && !argument.startsWith("--fps=")) {
     throw new Error(`Unknown argument: ${argument}`);
   }
 }
@@ -27,6 +27,9 @@ if (!sourceNames.length) sourceNames.push("IMG_9199.MOV", "IMG_8903.MOV");
 for (const name of sourceNames) videoVariationName(name, variations[0]);
 const generatedOnly = args.includes("--generate-only");
 const fullWorkflow = args.includes("--full");
+const fpsArgument = args.find(arg => arg.startsWith("--fps="));
+const sampleFps = fpsArgument ? Number(fpsArgument.slice(6)) : undefined;
+if (sampleFps !== undefined && ![5, 10, 15].includes(sampleFps)) throw new Error("--fps must be 5, 10, or 15.");
 const expectations = JSON.parse(await readFile(path.join(root, "benchmarks/real-video-results.json"), "utf8"));
 const references = new Map(expectations.trials.map(trial => [trial.id, trial]));
 for (const name of sourceNames) if (!references.has(name)) throw new Error(`No source regression observation exists for ${name}.`);
@@ -36,7 +39,8 @@ const reportPath = path.join(root, "test-results", `video-robustness-${new Date(
 const report = {
   schemaVersion: 1, startedAt: new Date().toISOString(),
   interpretation: "Derived variations of existing climbs, not independent new labels. Tolerance is a regression policy, not a measured accuracy bound.",
-  fullWorkflow, generatedOnly, runs: [],
+  fullWorkflow, generatedOnly, sampleFps, appUrl: process.env.CLIMBIQ_E2E_URL ?? "http://127.0.0.1:5173/", runs: [],
+  referenceSnapshot: sourceNames.map(name => references.get(name)),
 };
 
 async function hashFile(filename) {
@@ -94,13 +98,17 @@ for (const sourceName of sourceNames) {
       entry.media = await prepare(sourceName, sourceSha256, variation);
       if (!generatedOnly) {
         console.log(`Testing ${entry.media.fileName}`);
-        const execution = await run(process.execPath, ["e2e/real-video-timing.mjs", ...(fullWorkflow ? ["--full"] : []), entry.media.fileName],
+        const execution = await run(process.execPath, ["e2e/real-video-timing.mjs", ...(fullWorkflow ? ["--full"] : []), ...(fpsArgument ? [fpsArgument] : []), entry.media.fileName],
           { ...process.env, CLIMBIQ_VIDEO_DIR: outputDirectory });
-        if (execution.code !== 0) throw new Error(`Workflow runner exited ${execution.code}: ${execution.stderr || execution.stdout}`);
-        const benchmark = JSON.parse(execution.stdout);
+        let benchmark;
+        try { benchmark = JSON.parse(execution.stdout); }
+        catch { throw new Error(`Workflow runner exited ${execution.code}: ${execution.stderr || execution.stdout}`); }
+        entry.app = benchmark.app;
         entry.outcome = benchmark.outcomes[0];
         if (!entry.outcome) throw new Error("Workflow runner returned no outcome.");
         entry.assessment = assessVideoVariation(references.get(sourceName), variation, entry.outcome);
+        if (execution.code !== 0) entry.error = entry.outcome.workflow?.error ??
+          benchmark.assertions?.flatMap(assertion => assertion.errors).join("; ") ?? `Workflow runner exited ${execution.code}.`;
         console.log(`${variation.id}: Start ${entry.assessment.boundaries.start.status}; Finish ${entry.assessment.boundaries.finish.status}`);
       }
     } catch (error) {
@@ -118,8 +126,9 @@ report.summary = {
   independentSourceClimbs: new Set(sourceNames).size,
   workflowErrors: report.runs.filter(r => r.error).length,
   timingRegressions: report.runs.filter(r => r.assessment?.safetyRegression).length,
+  sourceTimingRegressions: report.runs.filter(r => r.assessment?.sourceTimingRegression).length,
   needsInvestigation: report.runs.filter(r => r.assessment?.needsInvestigation).length,
 };
 await writeFile(reportPath, `${JSON.stringify(report, null, 2)}\n`);
 console.log(JSON.stringify(report.summary, null, 2));
-if (report.summary.workflowErrors || report.summary.timingRegressions) process.exitCode = 1;
+if (report.summary.workflowErrors || report.summary.timingRegressions || report.summary.sourceTimingRegressions) process.exitCode = 1;

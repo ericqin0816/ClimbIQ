@@ -1,15 +1,17 @@
 {
-  "version": 1,
+  "version": 2,
   "capturedAt": "2026-09-05",
-  "description": "Private-video regression observations. Videos are not stored in Git.",
+  "description": "Private-video regression observations, not independently labeled ground truth. Legacy reviewedCorrect flags are historical and must not be used for precision claims. Videos are not stored in Git.",
+  "labelPolicy": "Only confirmed labelReview records with an independent reviewer, method, date and raw time can score accuracy. Existing observations remain useful for source-consistency regression checks.",
   "trials": [
     {
       "id": "IMG_8903.MOV",
       "durationSeconds": 26.75,
       "start": { "rawTime": 4.29, "status": "accepted", "source": "Fused start detection", "confidence": "High", "reviewedCorrect": true, "firstMovementRawTime": 4.39, "firstMovementConfidence": "High", "reactionSeconds": 0.1 },
-      "finish": { "rawTime": 14.29, "status": "review", "confidence": "Medium", "reviewedCorrect": true },
+      "finish": { "rawTime": 14.29, "status": "review", "confidence": "Medium", "reviewedCorrect": true,
+        "labelReview": { "status": "disputed", "reason": "September 5 direct frame audit shows the athlete still below the finish at 14.290 s; a later stopped clock disagrees with the implied 10.000 s total. Preserve this as the old detector observation, not a correct finish label. Independent annotation is pending." } },
       "hold10": { "status": "unavailable" },
-      "com": { "status": "manual-calibration-required" }
+      "com": { "status": "finish-review-required", "note": "Unaccepted physical top motion must not bound automatic COM; review Finish or enter an official total first." }
     },
     {
       "id": "IMG_9075.MOV",

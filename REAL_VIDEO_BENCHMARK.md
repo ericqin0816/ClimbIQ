@@ -2,6 +2,28 @@
 
 This benchmark records behavior on five private 1080 × 1920 phone recordings. The source videos stay outside the repository and are processed locally.
 
+## September 5 label audit — read before using historical figures
+
+The historical accuracy/precision figures below are withdrawn. Legacy
+`reviewedCorrect` flags do not identify an independent reviewer, annotation
+method or review date. Direct frame inspection also disputes the 14.290 s
+finish reference for `IMG_8903.MOV`: the athlete is still below the finish at
+that cursor and the later stopped display disagrees with a 10.000 s climb.
+No replacement exact label has been asserted. The original timestamp remains
+an observed detector output, not a known-correct boundary.
+
+Benchmark version 2 separates source-consistency regression checks from
+independently labeled accuracy. Only a confirmed `labelReview` record containing
+an independent-review flag, reviewer identifier, method, date and raw time can
+score accuracy. The present private corpus has no qualifying labels, so its
+accuracy and confidence intervals are reported as unavailable. Matching outputs
+on resized copies can still demonstrate consistency, but not correctness.
+
+Unaccepted physical-top or light-review cursors no longer supply an automatic
+COM end boundary. An accepted Finish or official total is required. This avoids
+turning a disputed review suggestion into apparently measured race splits.
+The older measurements that follow are retained as development history.
+
 ## September 5: recovery cadence and complete workflow verification
 
 The September 2 measurements below are retained as the baseline. A controlled experiment on `IMG_9199.MOV` traced the sampling-rate collapse to a recovery schedule driven by raw frame counts: higher sampling rates advanced the search faster in wall-clock time. Search steps now use a common 5 Hz cadence while inference retains the requested rate. The 5 fps schedule is unchanged.
@@ -12,7 +34,7 @@ The September 2 measurements below are retained as the baseline. A controlled ex
 | 10 fps | 45/104 (43.3%) | 85/104 (81.7%) |
 | 15 fps | 0/156 (0%) | 132–133/156 (84.6–85.3%) across repeats |
 
-Both corrected high-rate results were reproduced through Run full analysis → Save Session → Duplicate Session → page reload → comparison. Start remained 7.130 s, Finish 17.480 s, and total 10.350 s. The new `--full` runner fails if accepted timing has no usable COM, saved timestamps change, or identical attempts claim a gain/loss. This reference recording additionally requires at least 65% usable COM coverage in full mode.
+Both corrected high-rate results were reproduced through Run full analysis → Save Session → Duplicate Session → page reload → comparison. Start remained 7.130 s, Finish 17.480 s, and total 10.350 s. The `--full` runner checks saved timestamps and identical-attempt comparisons. The reference recording requires at least 65% usable COM coverage; exploratory recordings may legitimately withhold COM when camera or calibration checks fail.
 
 A separate hypothesis—replacing stateful video inference with independent image inference on moving crops—was tested and rejected. It produced 0/52, 20/104, and 0/156 usable frames at 5/10/15 fps. The production model remains in VIDEO mode. Machine-readable results are in [tracking-recovery-results.json](benchmarks/tracking-recovery-results.json).
 
@@ -38,7 +60,7 @@ This is repeatability evidence on one clip, not a ground-truth contact label. Th
 | Clip | Previous behavior | Current behavior |
 | --- | --- | --- |
 | `IMG_8903.MOV` | Plausible start, but no finish | Start launch confirmed; upper-wall fallback recovers a finish candidate around a 10.0 s climb |
-| `IMG_9075.MOV` | Incorrect 14.900 s start was automatically accepted mid-climb | The 12 s start window excludes that later reset; an earlier 8.450 s cue remains review-only, while the reviewed exact start is 8.900 s |
+| `IMG_9075.MOV` | Incorrect 14.900 s start was automatically accepted mid-climb | The 12 s start window excludes that later reset; an earlier 8.450 s cue remains review-only. The old 8.900 s manual reference lacks independent review provenance. |
 | `IMG_9076.MOV` | 24.820 s post-climb frame suggested as start | The late event is excluded; an earlier 2.790 s setup cue remains safely review-only |
 | `IMG_9077.MOV` | Incorrect 5.250 s start was automatically accepted while athletes were already underway | Start is blocked for review |
 | `IMG_9199.MOV` | Plausible 7.130 s start and 10.350 s total | Valid result remains stable; existing lane-light finish path still wins |
@@ -54,18 +76,18 @@ The same `IMG_9199.MOV` workflow was also rerun against the public production de
 | Videos evaluated | 5 |
 | Starts automatically accepted | 2 |
 | Known false starts automatically accepted | 0 |
-| Reviewed automatic-start precision | 2/2 in this sample; 95% Wilson interval 34.2%–100% |
+| Reviewed automatic-start precision | Withdrawn; independent label provenance unavailable |
 | Starts conservatively sent to review | 3 |
 | Accepted-start clips with an automatic High finish | 1/2 |
 | Accepted-start clips with a bounded review finish | 1/2 |
-| Reviewed automatic-finish precision | 1/1 in this sample; 95% Wilson interval 20.7%–100% |
+| Reviewed automatic-finish precision | Withdrawn; independent label provenance unavailable |
 | 5 fps complete COM run | 42/52 usable frames (80.8%) |
 | Repeated 10 fps COM runs | 43–45/104 usable frames (41.3–43.3%) |
 | 15 fps complete COM run | 0/156 usable frames (0%) |
 | Automatic Hold 10 contacts on the complete COM run | 0 |
 | Review-level Hold 10 height candidates | 1 (11.515 s raw / 4.385 s after start) |
 
-This is a precision-first regression sample, not a population accuracy claim. Five related phone recordings are not enough to estimate general accuracy. The next useful dataset should contain labeled start, Hold 10 contact, and finish frames from different phones, gyms, lanes, lighting conditions, and camera angles.
+This is a conservative regression sample, not an accuracy estimate. Five related phone recordings with undocumented label provenance cannot estimate general accuracy. The next useful dataset should contain independently labeled start, Hold 10 contact, and finish frames from different phones, gyms, lanes, lighting conditions, and camera angles.
 
 ### Next accuracy study
 
@@ -104,7 +126,7 @@ With the improved 5 fps track, the review-only hand-height fallback found a cont
 
 Automatic timestamps are intentionally precision-first:
 
-1. Start light/audio evidence defines the exact clock only after lane-local motion confirms a new launch, the full frame remains continuous across the cue, and the measured reaction is at least the 0.100 s valid-race floor.
+1. Start light/audio evidence is accepted only after lane-local motion confirms a new launch, the full frame remains continuous across the cue, and the visible-motion delay passes the 0.100 s review policy. This is not measured pad release or a false-start ruling.
 2. The original start-verified lower lane remains the athlete-identity anchor.
 3. Lower-sensor finish evidence is preferred when it is strong.
 4. Upper electronic evidence is accepted only with physical-top or official-time corroboration.

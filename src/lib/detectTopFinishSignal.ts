@@ -118,7 +118,7 @@ export async function detectTopFinishSignal({
     const refineFrames = await captureFrames(video, refineTimes, signal, (done, total) => onProgress?.("refine", done, total));
     const refinedPresenceDiscovery = analyzeTopContactFrames([physicalReference, ...refineFrames], laneHintX);
     const refinedPresence = refinedPresenceDiscovery.candidates.find((candidate) =>
-      candidate.kind === "Unverified top presence" || candidate.kind === "Physical top contact",
+      candidate.kind === "Unverified top presence" || candidate.kind === "Physical top reach",
     );
     const selectedPresence = refinedPresence ?? topPresence;
     return {
@@ -193,18 +193,18 @@ export function requireUpperFinishCorroboration(
     result.rawTime !== undefined && Math.abs(contactDiscovery.rawTime - result.rawTime) <= 1.2;
   const officiallyCorroborated = expectedFinishTime !== undefined && result.rawTime !== undefined &&
     Math.abs(expectedFinishTime - result.rawTime) <= 0.45;
-  if (result.confidence !== "High" || physicallyCorroborated || officiallyCorroborated) {
+  if (!result.detected || physicallyCorroborated || officiallyCorroborated) {
     return result;
   }
 
-  const reviewReason = `${result.reason} The upper electronic change was not independently corroborated by physical top contact or an official total, so it requires frame review.`;
+  const reviewReason = "An upper color change was not independently corroborated by nearby top motion or an official total. No finish time was established; unverified color-change candidates remain available for inspection.";
   return {
     ...result,
-    confidence: "Medium",
+    detected: false,
+    rawTime: undefined,
+    confidence: "Low",
     reason: reviewReason,
-    candidates: result.candidates?.map((candidate, index) => index === 0
-      ? { ...candidate, confidence: "Medium", reason: reviewReason }
-      : candidate),
+    candidates: result.candidates?.map(candidate => ({ ...candidate, confidence: "Low", kind: "Unverified upper color change", reason: reviewReason })),
     debug: {
       ...result.debug,
       selectedCandidateReason: reviewReason,
@@ -302,7 +302,7 @@ export function analyzeTopFinishFrames(
           const lightRatio = targetLum / Math.max(1, baselineLum);
           const targetLooksElectronic = lightRatio >= 0.55 && lightRatio <= 3.2 &&
             Math.max(target.r, target.g, target.b) >= 45 &&
-            (chroma(target) >= 8 || chroma(baseline) >= 8);
+            hasDistinctIndicatorHue(baseline, target);
           if (!targetLooksElectronic) continue;
 
           const xNorm = x / width;
@@ -381,7 +381,7 @@ export function analyzeTopFinishFrames(
 }
 
 /**
- * Finds physical top contact without pose inference. Static-wall pixels from
+ * Finds a physical top-reach review cursor without pose inference, not pad contact. Static-wall pixels from
  * the early climb form a background reference. The athlete must enter the
  * selected lane's upper band, reach a clear vertical minimum, and then move
  * downward. Broad foreground occlusions are rejected before this trajectory is
@@ -534,7 +534,7 @@ export function analyzeTopContactFrames(
     confidence,
     reason: "The selected athlete reached the topmost observed position and then began a sustained descent.",
     score: roundTime((0.18 - selected.topY) * 500 + descentAmount * 300 + selected.area * 100),
-    kind: "Physical top contact",
+    kind: "Physical top reach",
     method: "Perspective-aware top reach with downward-reversal verification",
     persistenceFrames: movingObservations.filter((observation) => Math.abs(observation.topY - selected!.topY) <= 0.02).length,
   };
@@ -542,7 +542,7 @@ export function analyzeTopContactFrames(
     found: true,
     rawTime: candidate.rawTime,
     confidence,
-    reason: "Finish was estimated from the athlete's top reach and verified by the subsequent descent.",
+    reason: "An upper-wall reach was followed by descent. This locates a review window, not verified finish-pad contact.",
     score: candidate.score,
     zone: contactZone,
     candidates: [candidate],
@@ -634,6 +634,9 @@ export function analyzeTopFinishColorSamples(
   }
   const source = calibration.beforeStartRGB;
   const target = calibration.afterStartRGB;
+  if (!hasDistinctIndicatorHue(source, target)) {
+    return emptyResult("The upper patch changed brightness or saturation without a distinct indicator hue; scoreboard digits and reflections cannot verify Finish.");
+  }
   const vector = { r: target.r - source.r, g: target.g - source.g, b: target.b - source.b };
   const magnitudeSquared = vector.r ** 2 + vector.g ** 2 + vector.b ** 2;
   if (magnitudeSquared < 25) return emptyResult("The upper-indicator states were too similar to refine finish timing.");
@@ -690,6 +693,22 @@ export function analyzeTopFinishColorSamples(
   if (!candidates.length) return emptyResult("The discovered upper indicator did not produce a frame-level persistent finish transition.");
   const selected = [...candidates].sort((left, right) => left.rawTime - right.rawTime)[0];
   return resultFromCandidates(selected, candidates, samples, calibration, frameInterval);
+}
+
+/** Brightening an existing red clock digit is not a finish-state transition. */
+export function hasDistinctIndicatorHue(before: RGB, after: RGB): boolean {
+  const values = [before.r, before.g, before.b, after.r, after.g, after.b];
+  if (values.some(value => !Number.isFinite(value) || value < 0 || value > 255) ||
+      chroma(before) < 8 || chroma(after) < 8) return false;
+  const beforeMean = (before.r + before.g + before.b) / 3;
+  const afterMean = (after.r + after.g + after.b) / 3;
+  const a = [before.r - beforeMean, before.g - beforeMean, before.b - beforeMean];
+  const b = [after.r - afterMean, after.g - afterMean, after.b - afterMean];
+  const cosine = a.reduce((sum, value, index) => sum + value * b[index], 0) /
+    (Math.hypot(...a) * Math.hypot(...b));
+  // A conservative chromatic-direction gate, not an accuracy bound. Removing
+  // the gray component makes both brightness and saturation changes invariant.
+  return Number.isFinite(cosine) && cosine <= 0.75;
 }
 
 function resultFromCandidates(
@@ -771,14 +790,15 @@ function topContactToResult(discovery: TopFinishDiscovery, refinedFrameCount: nu
     detected: true,
     rawTime: discovery.rawTime,
     confidence: discovery.confidence,
-    reason: `Finish estimated at ${discovery.rawTime.toFixed(3)}s from physical top reach with downward-reversal verification.`,
+    reason: `Top-reach review cursor at ${discovery.rawTime.toFixed(3)}s with subsequent downward motion. This is not verified finish-pad contact; the athlete can keep reaching or rise on the rope after finishing.`,
     threshold: 0,
     candidates: discovery.candidates,
     debug: {
       zoneExists: true,
       normalizedZone: discovery.zone,
       framesSampled: refinedFrameCount,
-      detectionMethod: "Perspective-aware physical top contact and descent verification",
+      detectionMethod: "Perspective-aware physical top reach and descent review",
+      finishEvidenceKind: "physical-top-reach",
       maxColorDistance: 0,
       threshold: 0,
       detectedCrossings: [{ time: discovery.rawTime, colorDistance: selected?.score ?? 0 }],
@@ -813,6 +833,7 @@ function topPresenceToResult(
       normalizedZone: zone,
       framesSampled: refinedFrameCount,
       detectionMethod: "Perspective-aware physical top presence with late-reset rejection",
+      finishEvidenceKind: "upper-wall-presence",
       maxColorDistance: 0,
       threshold: 0,
       detectedCrossings: [{ time: candidate.rawTime, colorDistance: candidate.score }],

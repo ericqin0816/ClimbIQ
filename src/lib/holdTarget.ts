@@ -7,7 +7,7 @@ import type {
 import { getStandardSpeedHold, projectWallPointToImage } from "./standardSpeedRoute";
 import { projectImagePointToWall, validateWallCalibration } from "./wallCalibration";
 import type { RouteAlignmentResult } from "./routeAlignment";
-import type { ObservedRouteHold } from "./holdContact";
+import { withinContactProjectionBounds, type ObservedRouteHold } from "./holdContact";
 
 export type Hold10TargetFallbackReason =
   | "not-provided"
@@ -25,6 +25,8 @@ interface Hold10TargetBase {
   reason: string;
   /** Direct visible centers only; never fitted guesses for hidden holds. */
   observedRouteHolds?: readonly ObservedRouteHold[];
+  /** A small registered side-edge correction used only for contact review, never COM metrics. */
+  allowApproximateEdgeProjection?: boolean;
 }
 
 export interface ManualHold10Target extends Hold10TargetBase {
@@ -135,28 +137,35 @@ function alignedOrTemplateTarget(
 ): Hold10TargetResolution {
   const imagePoint = visualAlignment?.hold10Image;
   const wallTarget = visualAlignment?.hold10WallTarget;
+  const edgeProjection = Boolean(visualAlignment?.aligned && calibration?.source === "automatic-approximate" &&
+    wallTarget && !insideCalibratedWall(wallTarget, calibration) &&
+    withinContactProjectionBounds(wallTarget, calibration, true) &&
+    [9, 10, 11].every(id => visualAlignment.holds.some(hold => hold.holdId === id && hold.observedImage && insideNormalizedFrame(hold.observedImage))));
   if (visualAlignment?.aligned && imagePoint && wallTarget &&
-      insideNormalizedFrame(imagePoint) && calibration && insideCalibratedWall(wallTarget, calibration)) {
+      insideNormalizedFrame(imagePoint) && calibration && withinContactProjectionBounds(wallTarget, calibration, edgeProjection)) {
+    const observedRouteHolds = observedRouteNeighborhood(visualAlignment, calibration, edgeProjection);
+    if (edgeProjection && !observedRouteHolds?.some(hold => hold.id === 10)) return templateTarget(fallbackReason, templateReason, calibration);
     return {
       holdId: 10,
       source: "visual-alignment",
       imagePoint: { ...imagePoint },
       wallTarget: { ...wallTarget },
-      observedRouteHolds: observedRouteNeighborhood(visualAlignment, calibration),
-      reason: `Using Hold 10 from the visually registered route. ${visualAlignment.reason}`,
+      observedRouteHolds,
+      allowApproximateEdgeProjection: edgeProjection || undefined,
+      reason: `Using Hold 10 from the visually registered route. ${edgeProjection ? "The visible hold sits just outside an approximate side edge; contact review allows a bounded 5% lane-width extrapolation without changing COM or speed calibration. " : ""}${visualAlignment.reason}`,
     };
   }
   return templateTarget(fallbackReason, templateReason, calibration);
 }
 
-function observedRouteNeighborhood(alignment: RouteAlignmentResult, calibration: WallCalibration): ObservedRouteHold[] | undefined {
+function observedRouteNeighborhood(alignment: RouteAlignmentResult, calibration: WallCalibration, allowApproximateEdgeProjection = false): ObservedRouteHold[] | undefined {
   const validation = validateWallCalibration(calibration);
   if (!validation.valid || !validation.matrix) return undefined;
   const observed = alignment.holds.flatMap(hold => {
     if (!hold.observedImage || !insideNormalizedFrame(hold.observedImage)) return [];
     try {
       const wall = projectImagePointToWall(hold.observedImage, validation.matrix!);
-      return insideCalibratedWall(wall, calibration) ? [{ id: hold.holdId, wall }] : [];
+      return withinContactProjectionBounds(wall, calibration, allowApproximateEdgeProjection) ? [{ id: hold.holdId, wall }] : [];
     } catch { return []; }
   });
   return observed.length >= 3 && observed.some(hold => hold.id === 10) ? observed : undefined;

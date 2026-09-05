@@ -447,14 +447,33 @@ function detectUpperTimingLights(
       continue;
     }
     xs.sort((left, right) => left - right);
-    // A trimmed center stops one large red hold near an edge from pulling the
-    // inferred two-lane wall away from the actual timing-light row.
-    const trim = Math.floor(xs.length * 0.12);
-    const centered = xs.slice(trim, Math.max(trim + 1, xs.length - trim));
+    // The two-lane estimate needs horizontally separated upper markers.
+    // A saturated ceiling-light fringe can contain dozens of colored pixels
+    // in one tiny patch, especially after resizing. Pixel count alone then
+    // puts the wall top on the ceiling and can even select the opposite lane.
+    // Use robust endpoints so a few distant noise pixels cannot supply the
+    // missing second marker. 0.15 is half the minimum inferred full top width.
+    if (xs[Math.floor(xs.length * 0.9)] - xs[Math.floor(xs.length * 0.1)] < 0.15) {
+      continue;
+    }
+    const groups: number[][] = [];
+    for (const x of xs) {
+      const previous = groups[groups.length - 1];
+      if (!previous || x - previous[previous.length - 1] > 0.025) groups.push([x]);
+      else previous.push(x);
+    }
+    const supported = groups.sort((a, b) => b.length - a.length)
+      .filter(group => group.length >= Math.max(6, groups[0].length * 0.1));
+    if (supported.length < 2) continue;
+    const centers = supported.map(group => group.reduce((sum, x) => sum + x, 0) / group.length).sort((a, b) => a - b);
+    if (centers[centers.length - 1] - centers[0] < 0.15) continue;
+    // Use the midpoint of supported marker groups, not colored-pixel mass.
+    // A clock and indicator can form separate groups in each lane; weighting
+    // by pixel count pulls the divider toward the brighter/larger clock.
     return {
       y: bins[index].y,
-      centerX: centered.reduce((sum, value) => sum + value, 0) / centered.length,
-      support: xs.length,
+      centerX: (centers[0] + centers[centers.length - 1]) / 2,
+      support: supported.reduce((sum, group) => sum + group.length, 0),
     };
   }
   return { y: 0.1, centerX: 0.5, support: 0 };

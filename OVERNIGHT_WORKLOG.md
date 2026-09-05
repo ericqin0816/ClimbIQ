@@ -119,3 +119,96 @@ before pushing verified checkpoints because the user also works from a Mac.
    responsiveness; investigate route-aided calibration only with strong evidence.
 6. Continue broader robustness and cross-device workflow tests. At this point
    only about one hour of the requested seven-hour work goal has elapsed.
+
+## Second-hour testing and current work
+
+- Checkpoint `ba2a468` (0.23.0) pushed; GitHub CI succeeded and the live complete
+  9199 workflow passed. It contains route registration and save/review usability.
+- Same 9199 source at 5/10/15 pose fps retained 42/52, 87/104, 133/156 usable
+  frames. Registered Hold 10 review cursors were 11.440, 11.415, 11.439 s.
+  These are within-recording consistency checks, not independent accuracy labels.
+- New uncommitted browser frame observer distinguishes decoded media PTS from
+  the seek cursor. Native 9199 review accepted 11.437 instead of cursor 11.440;
+  older-browser fallback accepted 11.440 and saved an explicit fallback note.
+  Browser-native frames can arrive before `seeked`; pending presentation is
+  retained until the seek settles. Nine unit tests cover cleanup, races, source
+  replacement, missing API, and malformed metadata.
+- Pixel-only capture avoids encoding an unused PNG. Five paired 1080x1920
+  measurements gave median 8.9 ms vs 61.9 ms with PNG, with exactly equal RGBA
+  arrays. This is a capture microbenchmark, not an end-to-end speedup claim.
+- Full test suite passed 409 tests/41 files before current calibration work.
+  Real keyboard input fixed a synthetic focus/blur runner race. Native frame
+  readiness also requires atomic ready-check/click in the test driver.
+- Production full transformed 9199 workflows showed real tracking losses:
+  control, dark and trim copies retained timing but no usable COM. New reports
+  distinguish tracking/target availability losses from save/reload errors.
+  The failure is a saturated ceiling fringe accepted as an upper timing marker,
+  followed by the wrong lane. Two-group spatial validation and group-center
+  balancing are being tested, NOT yet released. Original tracking rises to
+  44/52, but contact/reload dependencies need verification before pushing.
+- A correctly registered Hold 10 may project 0.053 m beyond an approximate
+  side edge. Current experiment permits contact review only within a 5% lane-
+  width margin, with directly observed Holds 9/10/11. Manual calibration remains
+  strict, COM geometry never changes, and no contact is auto-accepted. New tests
+  verify the cap, missing-neighbor refusal and calibration immutability.
+- Actual current work duration is about 2 hours 15 minutes, NOT seven hours.
+  Next: finish full original/transformed regression checks; investigate 9076's
+  unverified acceptance and 8903's wrong dark upper-finish review; cancellation,
+  comparison, export/import and broader public-video checks remain worthwhile.
+
+## Label audit and 0.24.0 checkpoint preparation
+
+- Full 30-variation batch completed with zero workflow errors. Reassessment
+  under explicit label provenance gives zero source-consistency timing drifts,
+  zero independently labeled boundaries, and 17 unverified accepted boundaries.
+  Do NOT call this zero false accepts or 100% accuracy. Numerical capture and
+  tracking results are in `benchmarks/overnight-robustness-results.json`.
+- Critical discovery: original 8903's old 14.290 s “correct” finish is a red
+  scoreboard-digit change. Direct helper inspection selected x=0.600–0.628,
+  y=0.050–0.066, RGB (180,162,145) to (220,64,63). The athlete is still climbing
+  at that time. Label is disputed; no replacement exact label has been invented.
+- Hue-direction validation rejects that clock change, but the next-best upper
+  color candidate was also unverified. Uncorroborated upper color changes now
+  have no primary finish timestamp; they remain explicitly unverified candidates.
+  Physical top reach is labeled as motion review, not pad-contact measurement.
+- A related safety flaw let any returned review cursor bound automatic COM.
+  Automatic COM now requires an accepted finish or official total. The brief
+  new 47-frame 8903 result was cut at a disputed cursor and MUST NOT be described
+  as improved complete-climb tracking. That path now pauses for finish review.
+- Legacy correctness flags/manual times have no independent-review provenance.
+  Accuracy and Wilson intervals are now unavailable until confirmed labelReview
+  records supply reviewer ID, method, date, raw time and independence. Old output
+  times remain regression observations; label status cannot silently turn them
+  into ground truth. College/demo precision claims were withdrawn accordingly.
+- Upload smoke test no longer hardcodes `12.24.mov` or Windows-only paths.
+  Instant scrolling avoids a smooth-scroll hit-test race. Keeping normal browser
+  GPU support is necessary for this Chrome installation's HEVC/MOV decoding.
+  Arbitrary-name MOV upload and same-file retry now pass.
+- Version 0.24.0 candidate: 421 unit tests/42 files, typecheck/build passed.
+  Full five-original workflow passed before the final uncorroborated-upper guard;
+  focused original 8903/9199 replay is now running. Start/Finish acceptance on
+  9199 remains 7.130/17.480, with 44–45/52 COM and 19 route matches. Contact scan
+  can be inconclusive; native-frame review or explicit cursor fallback is saved.
+- Wall-marker correction restores control/trim 9199 COM from 0 to 44/45 frames.
+  Darkened 9199 still refuses calibration; compact/low-fps/silent copies retain
+  some COM but may lack a continuous Hold 10 candidate. These remain open issues.
+- Around 2 hours 50 minutes of the seven-hour goal have elapsed. Continue toward
+  the actual target (~08:04 America/Chicago); do not mark this checkpoint as the
+  full seven-hour completion.
+
+- Final public replay caught a real review-cursor regression: 1745 changed from
+  1.017 to 0.250 s with continuous native frame callbacks enabled. Production
+  still gave 1.017, and disabling the callback API locally restored it. Native
+  frame observation is now mounted ONLY during manual review and suspended
+  during every analysis task. Focused public/private replay is checking this
+  isolation before the checkpoint can be pushed. No public start was accepted.
+- Desktop/mobile review screens checked at 1280x900 and 390x844: no horizontal
+  overflow or browser runtime errors. However the review panel is separated
+  from the video by close-ups, and scrolling can hide the video (which also
+  suppresses native presentation callbacks). Improving this review layout is
+  a concrete next step after the checkpoint.
+- Callback isolation passed the focused 1745/9199 replay: the public cursor is
+  restored to 1.017 s, remains unaccepted, and 9199 retains its complete workflow.
+  The other five public crops passed in the preceding full replay. Final
+  no-frame-callback 9199 test also passed with an explicit saved fallback note.
+  Final checkpoint checks: 421 tests/42 files, typecheck and production build.

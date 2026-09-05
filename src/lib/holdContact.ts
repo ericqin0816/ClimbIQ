@@ -76,6 +76,8 @@ export interface HoldContactDetectionResult {
 export interface HoldContactDetectionOptions {
   /** Actual registered hold centers, replacing the translated diagram neighborhood. */
   observedRouteHolds?: readonly ObservedRouteHold[];
+  /** Contact review only: allow a directly registered target just beyond an approximate side edge. */
+  allowApproximateEdgeProjection?: boolean;
   holdLabel?: string;
   proximityRadiusMeters?: number;
   confirmationRadiusMeters?: number;
@@ -173,13 +175,14 @@ export function detectHoldContact(
   if (!calibration || !validation.valid || !validation.matrix) {
     return unavailable(validation.error ?? "A valid wall calibration is required for hand-contact timing.");
   }
-  if (!isFiniteWallPoint(hold) || hold.xMeters < 0 || hold.xMeters > calibration.widthMeters ||
-      hold.yMeters < 0 || hold.yMeters > calibration.heightMeters) {
+  const edgeProjection = options.allowApproximateEdgeProjection === true &&
+    calibration.source === "automatic-approximate" && Boolean(options.observedRouteHolds);
+  if (!withinContactProjectionBounds(hold, calibration, edgeProjection)) {
     return unavailable("The target hold is outside the calibrated wall.");
   }
 
   const resolved = resolveOptions(result, calibration, options);
-  const route = resolveRouteContext(hold, resolved.holdLabel, calibration, options.observedRouteHolds);
+  const route = resolveRouteContext(hold, resolved.holdLabel, calibration, options.observedRouteHolds, edgeProjection);
   if (options.observedRouteHolds && !route) {
     return unavailable("The registered hold neighborhood is invalid or does not match the target; rerun route registration.");
   }
@@ -231,9 +234,9 @@ export function detectHoldContact(
 
   const onsetRawTime = accepted.onsetRawTime ?? firstObservation(accepted).rawTime;
   const confidence = contactConfidence(accepted, result, calibration);
-  const routeReason = route
+  const routeReason = (edgeProjection ? " Contact review uses a small side-edge extrapolation of the approximate wall; it does not change COM or speed calibration." : "") + (route
     ? ` Hold ${route.targetHoldId} was the nearest ${route.observed ? "registered hold" : "numbered-hold match"} for ${(accepted.targetNearestFraction * 100).toFixed(0)}% of confirmation samples.`
-    : "";
+    : "");
   return {
     detected: true,
     rawTime: onsetRawTime,
@@ -553,6 +556,7 @@ function resolveRouteContext(
   label: string,
   calibration: WallCalibration,
   observedHolds?: readonly ObservedRouteHold[],
+  allowApproximateEdgeProjection = false,
 ): RouteContext | undefined {
   if (calibration.widthMeters < 2.4 || calibration.widthMeters > 3.6 ||
       calibration.heightMeters < 12 || calibration.heightMeters > 18) {
@@ -569,8 +573,8 @@ function resolveRouteContext(
     const observedTarget = observedHolds.find(entry => entry.id === id);
     if (observedHolds.length < 3 || ids.size !== observedHolds.length || !observedTarget ||
         observedHolds.some(entry => !Number.isInteger(entry.id) || entry.id < 1 || entry.id > 20 ||
-          !isFiniteWallPoint(entry.wall) || entry.wall.xMeters < 0 || entry.wall.xMeters > calibration.widthMeters ||
-          entry.wall.yMeters < 0 || entry.wall.yMeters > calibration.heightMeters) ||
+          !withinContactProjectionBounds(entry.wall, calibration, allowApproximateEdgeProjection)) ||
+        (allowApproximateEdgeProjection && ![9, 10, 11].every(id => ids.has(id as StandardSpeedHoldId))) ||
         Math.hypot(observedTarget.wall.xMeters - hold.xMeters, observedTarget.wall.yMeters - hold.yMeters) > 0.02) {
       return undefined;
     }
@@ -586,6 +590,14 @@ function resolveRouteContext(
     } })),
     observed: false,
   };
+}
+
+/** A contact-only tolerance, never used to expand COM or physical wall geometry. */
+export function withinContactProjectionBounds(point: WallPoint, calibration: WallCalibration, allowApproximateEdgeProjection = false): boolean {
+  const margin = allowApproximateEdgeProjection && calibration.source === "automatic-approximate"
+    ? calibration.widthMeters * 0.05 : 0;
+  return isFiniteWallPoint(point) && point.xMeters >= -margin && point.xMeters <= calibration.widthMeters + margin &&
+    point.yMeters >= 0 && point.yMeters <= calibration.heightMeters;
 }
 
 function matchNumberedHold(

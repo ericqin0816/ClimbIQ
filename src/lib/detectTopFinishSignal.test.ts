@@ -5,6 +5,7 @@ import {
   analyzeTopFinishFrames,
   analyzeTopContactFrames,
   requireUpperFinishCorroboration,
+  hasDistinctIndicatorHue,
   type TopFinishColorSample,
   type TopFinishFrame,
 } from "./detectTopFinishSignal";
@@ -13,6 +14,16 @@ const darkRed: RGB = { r: 88, g: 24, b: 23 };
 const brightGreen: RGB = { r: 34, g: 142, b: 48 };
 
 describe("perspective-aware upper finish indicator", () => {
+  it("rejects stopped red digits and brightness-only changes as finish indicators", () => {
+    expect(hasDistinctIndicatorHue({ r: 180, g: 162, b: 145 }, { r: 220, g: 64, b: 63 })).toBe(false);
+    expect(hasDistinctIndicatorHue(darkRed, { r: 176, g: 48, b: 46 })).toBe(false);
+    expect(hasDistinctIndicatorHue({ r: 60, g: 60, b: 60 }, brightGreen)).toBe(false);
+    expect(hasDistinctIndicatorHue(darkRed, brightGreen)).toBe(true);
+    expect(hasDistinctIndicatorHue({ r: 48, g: 76, b: 49 }, { r: 48, g: 49, b: 77 })).toBe(true);
+    expect(hasDistinctIndicatorHue({ r: NaN, g: 0, b: 0 }, brightGreen)).toBe(false);
+    const frames = makeFrames([...repeat(darkRed, 8), ...repeat({ r: 176, g: 48, b: 46 }, 12)], { x: 12, y: 2 });
+    expect(analyzeTopFinishFrames(frames, 0.82).found).toBe(false);
+  });
   it("finds a persistent tiny top light even when the upper lane shifts inward", () => {
     const frames = makeFrames([
       ...repeat(darkRed, 8),
@@ -91,7 +102,7 @@ describe("perspective-aware upper finish indicator", () => {
     expect(result.found).toBe(true);
     expect(result.rawTime).toBeCloseTo(1, 3);
     expect(result.confidence).toBe("Medium");
-    expect(result.candidates[0].kind).toBe("Physical top contact");
+    expect(result.candidates[0].kind).toBe("Physical top reach");
   });
 
   it("does not call an upper-wall appearance a finish without downward reversal", () => {
@@ -111,11 +122,15 @@ describe("perspective-aware upper finish indicator", () => {
     expect(result.reason).toContain("continuous, occlusion-free");
   });
 
-  it("downgrades an isolated high-confidence upper light to frame review", () => {
+  it("withholds an isolated upper color change instead of claiming a finish time", () => {
     const result = requireUpperFinishCorroboration(finishResult(14.29), { found: false });
-    expect(result.confidence).toBe("Medium");
+    expect(result.confidence).toBe("Low");
+    expect(result.detected).toBe(false);
+    expect(result.rawTime).toBeUndefined();
     expect(result.reason).toContain("not independently corroborated");
-    expect(result.candidates?.[0].confidence).toBe("Medium");
+    expect(result.candidates?.[0].confidence).toBe("Low");
+    expect(result.candidates?.[0].rawTime).toBe(14.29);
+    expect(requireUpperFinishCorroboration({ ...finishResult(14.29), confidence: "Medium" }, { found: false }).detected).toBe(false);
   });
 
   it("keeps a high upper light when physical top contact agrees", () => {
@@ -130,7 +145,7 @@ describe("perspective-aware upper finish indicator", () => {
 
   it("does not let a much earlier physical event corroborate a late timer reset", () => {
     const result = requireUpperFinishCorroboration(finishResult(20), { found: true, rawTime: 14.2 });
-    expect(result.confidence).toBe("Medium");
+    expect(result.confidence).toBe("Low");
   });
 });
 
