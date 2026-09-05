@@ -1,0 +1,30 @@
+{
+  "version": 1,
+  "capturedAt": "2026-09-05",
+  "clip": "IMG_9199.MOV",
+  "startRawTime": 7.13,
+  "finishRawTime": 17.48,
+  "method": "Same local recording, automatic wall calibration, athlete, accepted time range, and CPU model. Recovery correction repeated through the normal full app workflow.",
+  "baselineVideoMode": [
+    { "sampleFps": 5, "validFrames": 42, "requestedFrames": 52 },
+    { "sampleFps": 10, "validFrames": 45, "requestedFrames": 104 },
+    { "sampleFps": 15, "validFrames": 0, "requestedFrames": 156 }
+  ],
+  "rejectedIndependentImageMode": [
+    { "sampleFps": 5, "validFrames": 0, "requestedFrames": 52 },
+    { "sampleFps": 10, "validFrames": 20, "requestedFrames": 104 },
+    { "sampleFps": 15, "validFrames": 0, "requestedFrames": 156 }
+  ],
+  "recoveryCadenceCorrection": [
+    { "sampleFps": 5, "validFrames": 42, "selectedFrames": 44, "requestedFrames": 52, "repeatedInFullWorkflow": true, "saveReloadComparisonPassed": true },
+    { "sampleFps": 10, "validFrames": 85, "selectedFrames": 96, "requestedFrames": 104, "repeatedInFullWorkflow": true, "saveReloadComparisonPassed": true },
+    { "sampleFps": 15, "validFrames": 132, "selectedFrames": 143, "requestedFrames": 156, "repeatedInFullWorkflow": true, "saveReloadComparisonPassed": true }
+  ],
+  "limitations": [
+    "Counts reflect internal COM validity, not independent ground-truth pose accuracy.",
+    "One recording; broader camera and athlete validation is still required.",
+    "Automatic geometry remains approximate and the app continues to label this recording Needs review.",
+    "Hold 10 still lacks sufficient route registration and was not accepted automatically.",
+    "The existing 5 fps default is unchanged. Unit coverage verifies its recovery schedule is preserved."
+  ]
+}

@@ -113,8 +113,8 @@ export async function analyzePoseVideo({
         calibration,
         identityZone,
         previousCenter,
-        index,
-        missedFrames,
+        poseRecoveryStep(index, settings.sampleFps),
+        poseRecoveryStep(missedFrames, settings.sampleFps),
       );
       renderPoseCrop(video, searchRegion, cropCanvas, cropContext);
       lastInferenceTimestamp = nextPoseInferenceTimestamp(requestedTime, lastInferenceTimestamp);
@@ -572,9 +572,22 @@ function renderPoseCrop(
 }
 
 /**
- * Keeps the athlete large enough for the on-device detector. A speed climber is
- * only about one ninth of the full 15 m wall height, so whole-frame inference
- * can reduce the person to just a few detector pixels.
+ * Recovery was tuned at 5 fps. Express its counters in the same elapsed-time
+ * units at every supported sample rate so 15 fps cannot sweep past the athlete
+ * three times as fast after a missed detection. Inference still runs at the
+ * requested sample rate; only the search schedule uses this common cadence.
+ */
+export function poseRecoveryStep(frameCount: number, sampleFps: number): number {
+  if (!Number.isFinite(frameCount) || frameCount < 0 || !Number.isFinite(sampleFps) || sampleFps <= 0) {
+    return 0;
+  }
+  return Math.floor(frameCount * 5 / sampleFps + 1e-9);
+}
+
+/**
+ * Keeps the athlete large enough for the on-device detector; whole-frame
+ * inference can reduce a climber on a 15 m wall to only a few detector pixels.
+ * sampleIndex and missedFrames are recovery steps at a shared 5 Hz cadence.
  */
 export function buildPoseSearchRegion(
   calibration: WallCalibration,

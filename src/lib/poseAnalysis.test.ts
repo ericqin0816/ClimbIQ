@@ -11,6 +11,7 @@ import {
   mapPoseLandmarksFromRegion,
   nextPoseInferenceTimestamp,
   poseLaneCorridorAtY,
+  poseRecoveryStep,
   selectTrackedPose,
 } from "./poseAnalysis";
 
@@ -54,6 +55,24 @@ const dividerAnchoredLeftLaneCalibration: WallCalibration = {
 };
 
 describe("pose sampling", () => {
+  it("keeps recovery search regions consistent at the same elapsed time across sample rates", () => {
+    for (const previousCenter of [undefined, { x: 0.5, y: 0.4 }]) {
+      for (const elapsed of [0, 0.2, 0.4, 0.8, 1.2, 2, 3]) {
+        const regions = [5, 10, 15].map(fps => buildPoseSearchRegion(
+          calibration, startBodyZone, previousCenter,
+          poseRecoveryStep(Math.round(elapsed * fps), fps),
+          poseRecoveryStep(Math.round(elapsed * fps), fps),
+        ));
+        expect(regions[1]).toEqual(regions[0]);
+        expect(regions[2]).toEqual(regions[0]);
+      }
+    }
+  });
+
+  it("preserves every existing 5 fps recovery step", () => {
+    for (let count = 0; count < 100; count++) expect(poseRecoveryStep(count, 5)).toBe(count);
+  });
+
   it("never samples after the requested end time", () => {
     const times = buildPoseSampleTimes(0, 0.19, 10);
     expect(Math.max(...times)).toBeLessThanOrEqual(0.19 + 1e-7);

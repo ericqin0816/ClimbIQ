@@ -74,7 +74,7 @@ const INITIAL_TIMESTAMPS: TimestampMarker[] = [
   marker("finishPad", "Finish Pad"),
 ];
 
-const APP_VERSION = "0.20.0";
+const APP_VERSION = "0.20.1";
 const SESSION_STORAGE_KEY = "climbiq.analysisSessions.v1";
 const AttemptComparisonPanel = lazy(() => import("./components/AttemptComparisonPanel"));
 const BiomechanicsPanel = lazy(async () => {
@@ -223,6 +223,7 @@ function App() {
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [sessionStatus, setSessionStatus] = useState("");
   const [exportStatus, setExportStatus] = useState("");
+  const [importStatus, setImportStatus] = useState("");
   const [obsidianFolderName, setObsidianFolderName] = useState("");
   const [biomechanics, setBiomechanics] = useState<BiomechanicsSession>(createDefaultBiomechanicsSession());
   const [biomechanicsRunning, setBiomechanicsRunning] = useState(false);
@@ -2844,6 +2845,7 @@ function App() {
           safeVideoMetadata?.duration,
         ),
         settings: sanitizeAnalysisSessionSettings(parsedSession.settings),
+        biomechanics: sanitizeBiomechanicsSession(parsedSession.biomechanics),
         timestamps: sanitizeTimestampSequence(
           mergeTimestampDefaults(parsedSession.timestamps),
           safeVideoMetadata?.duration,
@@ -2858,8 +2860,10 @@ function App() {
       applySession(session);
       setSessionStatus(`Session imported. Reload the matching local video file if you want to review frames.`);
       setExportStatus(`Imported "${session.name}".`);
+      setImportStatus(`Imported "${session.name}". Saved attempts can be compared without their videos.`);
     } catch (error) {
       setSessionStatus(error instanceof Error ? error.message : "Session import failed.");
+      setImportStatus(error instanceof Error ? error.message : "Session import failed.");
     } finally {
       event.target.value = "";
     }
@@ -3018,6 +3022,13 @@ function App() {
           <Suspense fallback={<p className="muted">Preparing saved attempt comparison…</p>}>
             <AttemptComparisonPanel sessions={savedSessions} />
           </Suspense>
+          <div className="button-row">
+            <label className="file-button">
+              Import Session JSON
+              <input type="file" accept="application/json,.json" onChange={importSession} disabled={videoAnalysisRunning} />
+            </label>
+          </div>
+          {importStatus && <p className="status-message" role="status">{importStatus}</p>}
         </Card>
 
         {hasSelectedVideo && (
@@ -3926,10 +3937,6 @@ function App() {
           <div className="button-row">
             <button className="primary" onClick={downloadMarkdown}>Download report</button>
             <button onClick={downloadDatasetJson}>Download data</button>
-            <label className="file-button">
-              Import Session JSON
-              <input type="file" accept="application/json,.json" onChange={importSession} disabled={videoAnalysisRunning} />
-            </label>
           </div>
           {exportStatus && <p className="status-message">{exportStatus}</p>}
           <details className="help-details">
@@ -5065,6 +5072,7 @@ function readSavedSessions(): SavedAnalysisSession[] {
             videoMetadata?.duration,
           ),
           settings: sanitizeAnalysisSessionSettings(session.settings),
+          biomechanics: sanitizeBiomechanicsSession(session.biomechanics),
           timestamps: sanitizeTimestampSequence(
             mergeTimestampDefaults(session.timestamps),
             videoMetadata?.duration,

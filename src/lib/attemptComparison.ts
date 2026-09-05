@@ -1,5 +1,8 @@
 import type { Confidence, SavedAnalysisSession, TimestampMarker } from "../types";
 import { analyzeRouteSplits } from "./routeSplits";
+import { isBiomechanicsResultFresh } from "./biomechanicsFreshness";
+import { sanitizeTimestampSequence } from "./timestampIntegrity";
+import { validateWallCalibration } from "./wallCalibration";
 
 export type AttemptMetricId =
   | "total"
@@ -16,6 +19,8 @@ export interface AttemptMetric {
   valueSeconds: number;
   confidence: Confidence;
   evidence: "Accepted timing" | "Reviewed Hold 10" | "COM wall estimate";
+  /** Conservative display policy, not a measured error bound or confidence interval. */
+  comparisonFloorSeconds: number;
 }
 
 export interface AttemptSummary {
@@ -26,6 +31,7 @@ export interface AttemptSummary {
   metrics: AttemptMetric[];
   trackingCoverage?: number;
   trackingQuality?: string;
+  trackingNote?: string;
 }
 
 export interface AttemptComparisonRow {
@@ -34,7 +40,8 @@ export interface AttemptComparisonRow {
   baseline?: AttemptMetric;
   candidate?: AttemptMetric;
   deltaSeconds?: number;
-  outcome: "gained" | "lost" | "matched" | "unavailable" | "review";
+  comparisonFloorSeconds?: number;
+  outcome: "gained" | "lost" | "similar" | "unavailable" | "review";
   explanation: string;
 }
 
@@ -75,10 +82,11 @@ const CONFIDENCE_RANK: Record<Confidence, number> = {
 
 export function summarizeAttempt(session: SavedAnalysisSession): AttemptSummary {
   const metrics: AttemptMetric[] = [];
-  const start = validMarker(session.timestamps, "startSignal");
-  const movement = validMarker(session.timestamps, "firstMovement");
-  const hold10 = validMarker(session.timestamps, "hold10");
-  const finish = validMarker(session.timestamps, "finishPad");
+  const timestamps = sanitizeTimestampSequence(session.timestamps, session.videoMetadata?.duration);
+  const start = validMarker(timestamps, "startSignal");
+  const movement = validMarker(timestamps, "firstMovement");
+  const hold10 = validMarker(timestamps, "hold10");
+  const finish = validMarker(timestamps, "finishPad");
 
   if (start && finish && finish.rawTime! > start.rawTime!) {
     metrics.push(metric(
@@ -86,6 +94,7 @@ export function summarizeAttempt(session: SavedAnalysisSession): AttemptSummary 
       finish.rawTime! - start.rawTime!,
       minimumConfidence(start.confidence, finish.confidence),
       "Accepted timing",
+      timingComparisonFloor(start, finish),
     ));
   }
 
@@ -96,6 +105,7 @@ export function summarizeAttempt(session: SavedAnalysisSession): AttemptSummary 
       movement.rawTime! - start.rawTime!,
       minimumConfidence(start.confidence, movement.confidence),
       "Accepted timing",
+      timingComparisonFloor(start, movement),
     ));
   }
 
@@ -103,24 +113,36 @@ export function summarizeAttempt(session: SavedAnalysisSession): AttemptSummary 
       hold10.rawTime! > start.rawTime! && hold10.rawTime! < finish.rawTime!) {
     const phaseConfidence = minimumConfidence(start.confidence, hold10.confidence, finish.confidence);
     metrics.push(
-      metric("bottom-phase", hold10.rawTime! - start.rawTime!, phaseConfidence, "Reviewed Hold 10"),
-      metric("top-phase", finish.rawTime! - hold10.rawTime!, phaseConfidence, "Reviewed Hold 10"),
+      metric("bottom-phase", hold10.rawTime! - start.rawTime!, phaseConfidence, "Reviewed Hold 10", timingComparisonFloor(start, hold10)),
+      metric("top-phase", finish.rawTime! - hold10.rawTime!, phaseConfidence, "Reviewed Hold 10", timingComparisonFloor(hold10, finish)),
     );
   }
 
   const biomechanics = session.biomechanics;
-  const result = biomechanics?.result;
-  if (start && finish && result &&
-      Math.abs(result.startRawTime - start.rawTime!) <= 0.051 &&
-      Math.abs(result.endRawTime - finish.rawTime!) <= 0.101) {
-    const route = analyzeRouteSplits(result, 15, biomechanics.calibration?.confidence ?? "High");
+  const storedResult = biomechanics?.result;
+  const result = validateWallCalibration(biomechanics?.calibration).valid &&
+    isBiomechanicsResultFresh(storedResult, {
+      startRawTime: start?.rawTime,
+      endRawTime: finish?.rawTime,
+      identityZone: session.zones.startBody,
+    }) && Array.isArray(storedResult.frames) && storedResult.metrics &&
+    Number.isFinite(storedResult.metrics.validCoverage)
+    ? storedResult : undefined;
+  if (start && finish && result) {
+    // Align the permitted millisecond rounding tolerance to accepted boundaries
+    // so all three section durations share exactly the same clock as the total.
+    const route = analyzeRouteSplits({ ...result, startRawTime: start.rawTime!, endRawTime: finish.rawTime! },
+      biomechanics!.calibration!.heightMeters, biomechanics!.calibration!.confidence ?? "Low");
+    const sampleFps = result.settings?.sampleFps;
+    const samplingFloor = Number.isFinite(sampleFps) && sampleFps > 0 ? 2 / sampleFps : 0.4;
     for (const section of route.sections) {
       if (!section.available || section.sectionTimeSeconds === undefined) continue;
       metrics.push(metric(
         `${section.id}-third` as AttemptMetricId,
         section.sectionTimeSeconds,
-        minimumConfidence(route.confidence, section.confidence),
+        minimumConfidence(route.confidence, section.confidence, start.confidence, finish.confidence),
         "COM wall estimate",
+        Math.max(0.1, samplingFloor, timingComparisonFloor(start, finish)),
       ));
     }
   }
@@ -133,6 +155,9 @@ export function summarizeAttempt(session: SavedAnalysisSession): AttemptSummary 
     metrics,
     trackingCoverage: finiteFraction(result?.metrics.trackingCoverage),
     trackingQuality: result?.metrics.quality,
+    trackingNote: storedResult && !result
+      ? "Saved tracking does not match the accepted timing, athlete, or valid wall calibration. Run COM analysis again."
+      : undefined,
   };
 }
 
@@ -151,17 +176,23 @@ export function compareAttempts(
     candidate.name,
   ));
   const comparable = rows.filter((row) => row.deltaSeconds !== undefined);
-  const detailed = comparable.filter((row) => row.id !== "total");
-  const strongest = maxByAbsoluteDelta(detailed.length ? detailed : comparable);
+  const total = comparable.find((row) => row.id === "total");
+  // Contact phases partition the race. Prefer these over overlapping COM thirds
+  // when available; never add gains from both partitions together.
+  const phases = comparable.filter((row) => row.id === "bottom-phase" || row.id === "top-phase");
+  const detailed = phases.length ? phases : comparable.filter((row) => row.id !== "total");
+  const strongest = maxByAbsoluteDelta(detailed.filter((row) => row.outcome === "gained" || row.outcome === "lost"));
+  const insights = [total, strongest].filter((row): row is AttemptComparisonRow => Boolean(row))
+    .map((row) => insightForRow(row, candidate.name));
 
   return {
     baseline,
     candidate,
     rows,
     comparableMetricCount: comparable.length,
-    primaryInsight: strongest
-      ? insightForRow(strongest, candidate.name)
-      : "Save accepted timing in both attempts to calculate a trustworthy comparison.",
+    primaryInsight: insights.length ? insights.join(" ")
+      : comparable.length ? "The available differences are below the comparison thresholds. No gain or loss is established."
+      : "No comparable timing meets the evidence requirements in both saved attempts.",
   };
 }
 
@@ -199,8 +230,9 @@ function compareMetric(
   }
 
   const deltaSeconds = round(candidate.valueSeconds - baseline.valueSeconds);
-  const outcome = Math.abs(deltaSeconds) <= 0.005
-    ? "matched"
+  const comparisonFloorSeconds = Math.max(baseline.comparisonFloorSeconds, candidate.comparisonFloorSeconds);
+  const outcome = Math.abs(deltaSeconds) <= comparisonFloorSeconds + 1e-9
+    ? "similar"
     : deltaSeconds < 0
       ? "gained"
       : "lost";
@@ -210,9 +242,10 @@ function compareMetric(
     baseline,
     candidate,
     deltaSeconds,
+    comparisonFloorSeconds,
     outcome,
-    explanation: outcome === "matched"
-      ? "Attempts matched within 0.005 seconds."
+    explanation: outcome === "similar"
+      ? `Difference is within the ${comparisonFloorSeconds.toFixed(3)}s comparison threshold; no gain or loss is established. This is a conservative display rule, not a measured accuracy bound.`
       : `${candidateName} ${outcome} ${Math.abs(deltaSeconds).toFixed(3)} seconds here.`,
   };
 }
@@ -222,6 +255,7 @@ function metric(
   valueSeconds: number,
   confidence: Confidence,
   evidence: AttemptMetric["evidence"],
+  comparisonFloorSeconds: number,
 ): AttemptMetric {
   return {
     id,
@@ -229,6 +263,7 @@ function metric(
     valueSeconds: round(valueSeconds),
     confidence,
     evidence,
+    comparisonFloorSeconds,
   };
 }
 
@@ -237,15 +272,22 @@ function validMarker(
   id: TimestampMarker["id"],
 ): TimestampMarker | undefined {
   const marker = markers?.find((item) => item.id === id);
-  return marker && typeof marker.rawTime === "number" && Number.isFinite(marker.rawTime) && marker.rawTime >= 0
+  return marker && marker.source !== "Not set" && typeof marker.rawTime === "number" && Number.isFinite(marker.rawTime) && marker.rawTime >= 0
     ? marker
     : undefined;
 }
 
 function minimumConfidence(...values: Confidence[]): Confidence {
   return values.reduce((lowest, value) =>
-    CONFIDENCE_RANK[value] < CONFIDENCE_RANK[lowest] ? value : lowest,
+    !(value in CONFIDENCE_RANK) ? "None" : CONFIDENCE_RANK[value] < CONFIDENCE_RANK[lowest] ? value : lowest,
   "High");
+}
+
+function timingComparisonFloor(...markers: TimestampMarker[]): number {
+  // Source video frame intervals and detector timing error are not yet stored.
+  // Do not infer millisecond accuracy from decimal places or confidence labels.
+  return markers.some((marker) => marker.source === "Body motion detection" || marker.source === "Motion-based estimate")
+    ? 0.2 : 0.1;
 }
 
 function finiteFraction(value: number | undefined): number | undefined {
@@ -266,8 +308,8 @@ function maxByAbsoluteDelta(rows: AttemptComparisonRow[]): AttemptComparisonRow 
 }
 
 function insightForRow(row: AttemptComparisonRow, candidateName: string): string {
-  if (row.deltaSeconds === undefined || row.outcome === "matched") {
-    return `${candidateName} most closely matched the baseline in ${row.label.toLowerCase()}.`;
+  if (row.deltaSeconds === undefined || row.outcome === "similar") {
+    return `The overall difference is within the ${row.comparisonFloorSeconds?.toFixed(3)}s comparison threshold; no overall gain or loss is established.`;
   }
   return row.id === "total"
     ? `${candidateName} was ${Math.abs(row.deltaSeconds).toFixed(3)}s ${row.outcome === "gained" ? "faster" : "slower"} overall.`

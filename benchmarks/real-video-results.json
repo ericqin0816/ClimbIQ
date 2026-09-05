@@ -56,6 +56,7 @@
       },
       "com": {
         "status": "needs-review",
+        "fullWorkflowMinimumValidCoverage": 0.65,
         "usableFrames": 42,
         "requestedFrames": 52,
         "repeatUsableFramesAt10Fps": [45, 43, 45, 45],

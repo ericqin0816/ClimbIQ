@@ -30,7 +30,11 @@ This repository focuses on the analysis engine and local attempt comparison. Ath
 
 Save at least two timed sessions, then open **Attempt comparison**. Choose the older run as the baseline and the newer run as the candidate. ClimbIQ compares only measurements available in both sessions: total time, first movement, reviewed Start → Hold 10 and Hold 10 → Finish phases, and medium/high-confidence COM wall thirds. A negative time means the newer attempt was faster.
 
-Low-confidence values remain visible for review but never receive a gained/lost claim. The panel also reports each attempt's tracking quality, keeps unavailable rows out of the interface, works without reloading either source video, and automatically summarizes the largest trustworthy detailed change.
+Low-confidence values remain visible for review but never receive a gained/lost claim. The headline reports the overall result first, then the largest qualifying contact-phase change (or other available detailed split). Contact phases and COM wall thirds overlap and must not be added together. Attempts default to race-date order; choosing the other selected attempt swaps the comparison direction.
+
+Small differences are displayed as **Below threshold**, not proof of improvement or equality. Until per-marker timing error and source frame intervals are measured and stored, comparison uses conservative display rules: at least 0.100 s for accepted timing, 0.200 s when body-motion estimates define a boundary, and two pose sample intervals for COM sections (0.400 s at 5 fps). These thresholds are policy choices, not validated accuracy bounds or confidence intervals. Both endpoints' confidence limits the section confidence.
+
+Saved COM timing and athlete identity must pass the same freshness check as the main analysis and have valid wall calibration. Corrected or mismatched results withhold both wall splits and the old tracking-quality badge until reanalysis. Session imports and reloads sanitize stored biomechanics before comparison. The panel works without reopening either video.
 
 ## Built With
 
@@ -186,6 +190,16 @@ Keep private test clips outside Git in `node_modules/.climbiq-private-videos/`, 
 npm run benchmark:timing
 npm run benchmark:summary
 ```
+
+For a complete analysis → COM → save → duplicate → reload → comparison check on the complete reference recording, run:
+
+```bash
+npm run benchmark:timing -- --full IMG_9199.MOV
+npm run benchmark:timing -- --full --fps=10 IMG_9199.MOV
+npm run benchmark:timing -- --full --fps=15 IMG_9199.MOV
+```
+
+Unlike timing-only mode, `--full` does not cancel the pose stage. It requires at least three usable COM frames when Finish is accepted, checks saved timestamps survive reload, and verifies identical saved attempts cannot claim a gain or loss. It uses an isolated temporary browser profile. This checks workflow integrity; it does not independently label Hold 10 or establish accuracy on unseen footage.
 
 The timing runner uses the real browser workflow, stops after timing when possible, compares accepted/review outcomes, raw times, evidence sources, and confidence labels with `benchmarks/real-video-results.json`, and exits nonzero if an expected Start or Finish policy regresses. Set `CLIMBIQ_VIDEO_DIR` for a different private directory, or use `npm run benchmark:timing -- clip1.mov clip2.mov` for a subset or a new exploratory clip. New clips are reported as `unbaselined`; they do not become required regression inputs until they are deliberately added to the benchmark JSON. Videos and frames are never written into the repository.
 

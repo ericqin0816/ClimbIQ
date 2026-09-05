@@ -2,6 +2,24 @@
 
 This benchmark records behavior on five private 1080 × 1920 phone recordings. The source videos stay outside the repository and are processed locally.
 
+## September 5: recovery cadence and complete workflow verification
+
+The September 2 measurements below are retained as the baseline. A controlled experiment on `IMG_9199.MOV` traced the sampling-rate collapse to a recovery schedule driven by raw frame counts: higher sampling rates advanced the search faster in wall-clock time. Search steps now use a common 5 Hz cadence while inference retains the requested rate. The 5 fps schedule is unchanged.
+
+| Sample rate | Previous usable COM | Corrected recovery usable COM |
+| --- | ---: | ---: |
+| 5 fps | 42/52 (80.8%) | 42/52 (80.8%), unchanged |
+| 10 fps | 45/104 (43.3%) | 85/104 (81.7%) |
+| 15 fps | 0/156 (0%) | 132/156 (84.6%) |
+
+Both corrected high-rate results were reproduced through Run full analysis → Save Session → Duplicate Session → page reload → comparison. Start remained 7.130 s, Finish 17.480 s, and total 10.350 s. The new `--full` runner fails if accepted timing has no usable COM, saved timestamps change, or identical attempts claim a gain/loss. This reference recording additionally requires at least 65% usable COM coverage in full mode.
+
+A separate hypothesis—replacing stateful video inference with independent image inference on moving crops—was tested and rejected. It produced 0/52, 20/104, and 0/156 usable frames at 5/10/15 fps. The production model remains in VIDEO mode. Machine-readable results are in [tracking-recovery-results.json](benchmarks/tracking-recovery-results.json).
+
+These gains measure internally usable tracking coverage on one recording. They do not establish hand-contact accuracy, correct identity at every frame, or calibrated metre/m/s accuracy. The app still labels this run Needs review, and route registration still does not accept Hold 10 automatically.
+
+Comparison now shares the main analysis's timing/athlete freshness check, validates calibration, withholds stale tracking badges, and leads with the overall result. Small differences use explicit conservative display thresholds rather than the previous 5 ms cutoff; these are not measured error bounds. Regression tests also cover JSON save/reload, corrected timing, direction reversal, legacy Hold 10 proposals, and invariance to raw-time origin shifts. Time-shift tests operate on session data, not re-encoded videos.
+
 ## What the clips exposed
 
 - Angled cameras can separate the apparent bottom-sensor and top-indicator x positions.

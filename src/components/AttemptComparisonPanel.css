@@ -107,6 +107,8 @@
 
 .comparison-delta {
   font-weight: 700;
+  display: grid;
+  gap: 0.2rem;
 }
 
 .comparison-row.gained .comparison-delta {

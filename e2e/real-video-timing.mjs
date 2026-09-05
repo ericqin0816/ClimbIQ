@@ -11,7 +11,11 @@ const defaultChromePath = process.platform === "darwin"
 const chromePath = process.env.CLIMBIQ_CHROME ?? defaultChromePath;
 const appUrl = process.env.CLIMBIQ_E2E_URL ?? "http://127.0.0.1:5173/";
 const videoDirectory = path.resolve(process.env.CLIMBIQ_VIDEO_DIR ?? "node_modules/.climbiq-private-videos");
-const commandLineFiles = process.argv.slice(2).map((value) => value.trim()).filter(Boolean);
+const fullWorkflow = process.argv.includes("--full");
+const fpsArgument = process.argv.find(value => value.startsWith("--fps="));
+const poseFps = fpsArgument ? Number(fpsArgument.slice(6)) : undefined;
+if (poseFps !== undefined && ![5, 10, 15].includes(poseFps)) throw new Error("--fps must be 5, 10, or 15.");
+const commandLineFiles = process.argv.slice(2).filter((value) => value !== "--full" && !value.startsWith("--fps=")).map((value) => value.trim()).filter(Boolean);
 const environmentFiles = process.env.CLIMBIQ_BENCHMARK_FILES?.split(",").map((value) => value.trim()).filter(Boolean);
 const requestedFiles = commandLineFiles.length ? commandLineFiles : environmentFiles;
 const port = 9334;
@@ -120,6 +124,14 @@ async function uploadFile(protocol, filePath) {
 async function runTiming(protocol, fileName) {
   const { evaluate } = protocol;
   await uploadFile(protocol, path.join(videoDirectory, fileName));
+  if (poseFps !== undefined) {
+    await evaluate(`(() => {
+      const select = [...document.querySelectorAll('select')].find(s => [...s.options].some(o => o.textContent.includes('5 fps')));
+      if (!select) throw new Error('Pose sampling control was not found.');
+      select.value = ${JSON.stringify(String(poseFps))};
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+    })()`);
+  }
   await evaluate(`([...document.querySelectorAll('button')].find((button) => button.textContent.includes('Run full analysis'))).click()`);
   await waitUntil(
     evaluate,
@@ -129,7 +141,8 @@ async function runTiming(protocol, fileName) {
   );
   const started = Date.now();
   let cancelledAfterTiming = false;
-  while (Date.now() - started < 95000) {
+  let completed = false;
+  while (Date.now() - started < (fullWorkflow ? 300000 : 95000)) {
     const state = await evaluate(`(() => {
       const buttons = [...document.querySelectorAll('button')];
       const run = buttons.find((button) => button.textContent.includes('Run full analysis') || button.textContent.includes('Analyzing climb'));
@@ -146,13 +159,17 @@ async function runTiming(protocol, fileName) {
     })()`);
     // This runner measures timing only. Once an accepted finish exists, stop
     // the expensive pose stage while preserving accepted marker state.
-    if (!cancelledAfterTiming && state.finishAccepted && state.cancelVisible) {
+    if (!fullWorkflow && !cancelledAfterTiming && state.finishAccepted && state.cancelVisible) {
       await evaluate(`([...document.querySelectorAll('button')].find((button) => button.textContent.trim() === 'Cancel'))?.click()`);
       cancelledAfterTiming = true;
     }
-    if (state.done || (state.reviewStart && !state.cancelVisible)) break;
+    if (state.done || (state.reviewStart && !state.cancelVisible)) {
+      completed = true;
+      break;
+    }
     await delay(350);
   }
+  if (!completed) throw new Error(`${fileName}: analysis did not finish within the workflow timeout.`);
 
   const outcome = await evaluate(`(() => {
     const marker = (name) => {
@@ -179,7 +196,45 @@ async function runTiming(protocol, fileName) {
       summary: document.querySelector('.run-summary')?.innerText ?? '',
     };
   })()`);
-  return { fileName, elapsedMs: Date.now() - started, cancelledAfterTiming, ...outcome };
+  const workflow = fullWorkflow ? await verifySavedWorkflow(protocol) : undefined;
+  return { fileName, elapsedMs: Date.now() - started, cancelledAfterTiming, ...outcome, workflow };
+}
+
+async function verifySavedWorkflow({ evaluate, send }) {
+  // This runner owns its temporary Chrome profile. Exercise the real save,
+  // duplicate and reload controls without touching a user's browser sessions.
+  await evaluate(`([...document.querySelectorAll('button')].find(b => b.textContent.trim() === 'Save Session')).click()`);
+  const saved = await evaluate(`JSON.parse(localStorage.getItem('climbiq.analysisSessions.v1') ?? '[]')[0]`);
+  if (!saved) throw new Error("Full workflow failed to save the analysis.");
+  const hasFinish = saved.timestamps.some(marker => marker.id === "finishPad" && marker.rawTime !== null);
+  const validFrames = saved.biomechanics?.result?.metrics?.validFrames ?? 0;
+  if (hasFinish && poseFps !== undefined && saved.biomechanics?.result?.settings?.sampleFps !== poseFps) {
+    throw new Error("Full workflow did not use the requested pose sample rate.");
+  }
+  if (hasFinish && validFrames < 3) throw new Error("Full workflow produced accepted timing but fewer than three usable COM frames.");
+  await evaluate(`([...document.querySelectorAll('button')].find(b => b.textContent.trim() === 'Duplicate Session')).click()`);
+  await send("Page.reload");
+  await waitUntil(evaluate, `document.readyState === 'complete' && Boolean(document.querySelector('.comparison-card'))`, 15000, "saved workflow reload");
+  if (hasFinish) {
+    await waitUntil(evaluate, `Boolean(document.querySelector('.comparison-details'))`, 10000, "reloaded comparison");
+    await evaluate(`document.querySelector('.comparison-details').open = true`);
+  }
+  const restored = await evaluate(`(() => {
+    const sessions = JSON.parse(localStorage.getItem('climbiq.analysisSessions.v1') ?? '[]');
+    return { sessions, comparison: document.querySelector('.comparison-content')?.innerText ?? '',
+      gainLossClaims: document.querySelectorAll('.comparison-row.gained, .comparison-row.lost').length };
+  })()`);
+  const original = restored.sessions.find(session => session.id === saved.id);
+  if (!original || JSON.stringify(original.timestamps) !== JSON.stringify(saved.timestamps)) {
+    throw new Error("Full workflow changed accepted timestamps after save/reload.");
+  }
+  if (hasFinish && (!restored.comparison.includes("Below threshold") || restored.gainLossClaims)) {
+    throw new Error("Identical saved attempts did not compare as below threshold after reload.");
+  }
+  return { savedAndReloaded: true, identicalComparisonPassed: hasFinish,
+    validFrames, requestedFrames: saved.biomechanics?.result?.metrics?.requestedFrames ?? 0,
+    sampleFps: saved.biomechanics?.result?.settings?.sampleFps,
+    comparison: restored.comparison };
 }
 
 async function main() {
@@ -210,7 +265,7 @@ async function main() {
       return validateOutcome(outcome, expected?.trial, expected?.baselineStatus);
     });
     const failures = assertions.flatMap((assertion) => assertion.errors.map((error) => `${assertion.fileName}: ${error}`));
-    console.log(JSON.stringify({ appUrl, videoDirectory, passed: failures.length === 0, assertions, outcomes }, null, 2));
+    console.log(JSON.stringify({ appUrl, videoDirectory, fullWorkflow, passed: failures.length === 0, assertions, outcomes }, null, 2));
     if (failures.length) process.exitCode = 1;
   } finally {
     protocol.socket.close();
@@ -220,6 +275,12 @@ async function main() {
 function validateOutcome(outcome, expected, baselineStatus = "unbaselined") {
   const errors = [];
   if (!expected) return { fileName: outcome.fileName, baselineStatus: "unbaselined", errors };
+  if (outcome.workflow && Number.isFinite(expected.com?.fullWorkflowMinimumValidCoverage)) {
+    const coverage = outcome.workflow.requestedFrames > 0 ? outcome.workflow.validFrames / outcome.workflow.requestedFrames : 0;
+    if (coverage < expected.com.fullWorkflowMinimumValidCoverage) {
+      errors.push(`Full COM workflow retained ${(coverage * 100).toFixed(1)}% usable frames; expected at least ${(expected.com.fullWorkflowMinimumValidCoverage * 100).toFixed(1)}%.`);
+    }
+  }
   const acceptedStart = parseTime(outcome.start?.rawTime);
   const reviewStart = parseFirstTime(outcome.reviewStart);
   if (expected.start?.status === "accepted") {
