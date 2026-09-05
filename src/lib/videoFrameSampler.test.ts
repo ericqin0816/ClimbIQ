@@ -8,9 +8,51 @@ import {
   captureVideoPixels,
   seekTo,
   sampleFramesInRange,
+  normalizedZoneToPixelRect,
+  sampleZoneAverageColor,
 } from "./videoFrameSampler";
 
 afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); });
+
+describe("normalized sampling rectangles", () => {
+  const zone = { id: "finishLight" as const, label: "Tiny indicator", x1: 0.6, y1: 0.15, x2: 0.65, y2: 0.2 };
+  it("does not grow an exact one-pixel crop through floating-point rounding", () => {
+    expect(normalizedZoneToPixelRect(zone, 20, 20, "cover")).toEqual({ x: 12, y: 3, width: 1, height: 1 });
+  });
+  it("round trips every pixel of common coarse scan sizes", () => {
+    for (const size of [20, 180, 320]) {
+      for (let pixel = 0; pixel < size; pixel += 1) {
+        expect(normalizedZoneToPixelRect({ ...zone, x1: pixel / size, x2: (pixel + 1) / size,
+          y1: pixel / size, y2: (pixel + 1) / size }, size, size, "cover"))
+          .toEqual({ x: pixel, y: pixel, width: 1, height: 1 });
+      }
+    }
+  });
+  it("covers both boundary pixels for a genuinely fractional crop", () => {
+    expect(normalizedZoneToPixelRect({ ...zone, x1: 0.605, x2: 0.655, y1: 0.155, y2: 0.205 }, 20, 20, "cover"))
+      .toEqual({ x: 12, y: 3, width: 2, height: 2 });
+  });
+  it("clamps a degenerate bottom-right selection to a usable edge pixel", () => {
+    expect(normalizedZoneToPixelRect({ ...zone, x1: 1, x2: 1, y1: 1, y2: 1 }, 20, 20, "cover"))
+      .toEqual({ x: 19, y: 19, width: 1, height: 1 });
+  });
+  it("preserves existing sensor pixel membership unless coverage is requested", () => {
+    expect(normalizedZoneToPixelRect(zone, 20, 20)).toEqual({ x: 12, y: 3, width: 2, height: 2 });
+    const fractional = { ...zone, x1: 0.605, x2: 0.655, y1: 0.155, y2: 0.205 };
+    expect(normalizedZoneToPixelRect(fractional, 20, 20)).toEqual({ x: 12, y: 3, width: 2, height: 1 });
+  });
+  it("passes the requested crop policy through the actual color-sampling path", async () => {
+    const image = { width: 1, height: 1, data: new Uint8ClampedArray([34, 142, 48, 255]) } as ImageData;
+    const context = { drawImage: vi.fn(), getImageData: vi.fn(() => image) };
+    vi.stubGlobal("document", { createElement: () => ({ width: 0, height: 0, getContext: () => context }) });
+    const video = { videoWidth: 20, videoHeight: 20, duration: 5, currentTime: 1, readyState: 2, seeking: false } as HTMLVideoElement;
+    const precise = await sampleZoneAverageColor(video, 1, zone, "cover");
+    expect(context.drawImage).toHaveBeenLastCalledWith(video, 12, 3, 1, 1, 0, 0, 1, 1);
+    expect(precise.averageRgb).toEqual({ r: 34, g: 142, b: 48 });
+    await sampleZoneAverageColor(video, 1, zone);
+    expect(context.drawImage).toHaveBeenLastCalledWith(video, 12, 3, 2, 2, 0, 0, 2, 2);
+  });
+});
 
 describe("bounded frame sampling plans", () => {
   it("preserves normal frame grids", () => {

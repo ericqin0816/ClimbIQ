@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { RGB, StartLightCalibration } from "../types";
+import { normalizedZoneToPixelRect } from "./videoFrameSampler";
 import {
   analyzeTopFinishColorSamples,
   analyzeTopFinishFrames,
@@ -14,6 +15,38 @@ const darkRed: RGB = { r: 88, g: 24, b: 23 };
 const brightGreen: RGB = { r: 34, g: 142, b: 48 };
 
 describe("perspective-aware upper finish indicator", () => {
+  it.each([{ x: 12, y: 2 }, { x: 10, y: 2 }, { x: 14, y: 2 }])(
+    "preserves a tiny discovered light through temporal refinement at $x/$y",
+    (indicator) => {
+      const frames = makeFrames([...repeat(darkRed, 8), ...repeat(brightGreen, 12)], indicator);
+      const discovery = analyzeTopFinishFrames(frames, 0.82);
+      expect(discovery.found).toBe(true);
+      const rect = normalizedZoneToPixelRect(discovery.zone!, 20, 20, "cover");
+      // Model the browser's refinement crop, not the discovery helper's private
+      // patch. These must observe the same area and color calibration.
+      const cropAverage = (frame: TopFinishFrame): RGB => {
+        let r = 0; let g = 0; let b = 0;
+        for (let y = rect.y; y < rect.y + rect.height; y += 1) {
+          for (let x = rect.x; x < rect.x + rect.width; x += 1) {
+            const offset = (y * frame.width + x) * 4;
+            r += frame.data[offset]; g += frame.data[offset + 1]; b += frame.data[offset + 2];
+          }
+        }
+        const count = rect.width * rect.height;
+        return { r: Math.round(r / count), g: Math.round(g / count), b: Math.round(b / count) };
+      };
+      const before = cropAverage(frames[0]);
+      const after = cropAverage(frames[frames.length - 1]);
+      expect(before, JSON.stringify({ rect, zone: discovery.zone })).toEqual(discovery.calibration!.beforeStartRGB);
+      expect(after).toEqual(discovery.calibration!.afterStartRGB);
+      const samples = [...repeat(before, 24), ...repeat(after, 38)]
+        .map((averageRgb, index) => ({ time: 0.8 + index / 30, averageRgb }));
+      const refined = analyzeTopFinishColorSamples(samples, discovery.calibration!);
+      expect(refined.detected).toBe(true);
+      expect(refined.rawTime).toBeCloseTo(1.6, 3);
+      expect(requireUpperFinishCorroboration(refined, { found: false }).detected).toBe(false);
+    },
+  );
   it("rejects stopped red digits and brightness-only changes as finish indicators", () => {
     expect(hasDistinctIndicatorHue({ r: 180, g: 162, b: 145 }, { r: 220, g: 64, b: 63 })).toBe(false);
     expect(hasDistinctIndicatorHue(darkRed, { r: 176, g: 48, b: 46 })).toBe(false);

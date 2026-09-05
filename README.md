@@ -164,6 +164,8 @@ When two lanes start together, ClimbIQ retains every lane that supported the acc
 
 If the lower sensor cannot verify a finish, a perspective-aware fallback searches the upper wall without assuming the angled lane stays at one x-coordinate. It combines a discovered electronic indicator with fixed-camera foreground tracking, a robust body top band that ignores thin ropes, continuity and scale checks, physical top reach, and downward reversal. Anchored scoreboards and broad phone occlusions are rejected. Physical-only estimates and upper electronic changes without an official-time cross-check remain review-level. Nearby upper motion cannot independently verify the clock: a foreground spectator can coincide with a timing-unit reset. An entered official total must agree before an upper light can be accepted automatically.
 
+Upper-indicator timing refinement uses the same patch radius as discovery, with explicit pixel-edge coverage. This prevents a tiny light from being diluted into surrounding wall pixels or accidentally enlarged by floating-point rounding. The existing lower-sensor crop policy is preserved: changing its pixel membership produced an unverified new acceptance in testing and was not shipped. This refinement fix is demonstrated by synthetic capture-pipeline tests; it is not a general finish-accuracy estimate.
+
 Official total time remains available as a fallback or cross-check:
 
 ```text

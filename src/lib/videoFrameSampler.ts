@@ -150,9 +150,10 @@ export async function sampleZoneAverageColor(
   video: HTMLVideoElement,
   time: number,
   zone: NormalizedZone,
+  pixelBounds: "extent" | "cover" = "extent",
 ): Promise<{ time: number; averageRgb: RGB; pixelZone: ZonePixelRect }> {
   await seekTo(video, time);
-  const { imageData, pixelZone } = captureZoneImageData(video, zone);
+  const { imageData, pixelZone } = captureZoneImageData(video, zone, pixelBounds);
 
   return {
     time: video.currentTime,
@@ -236,20 +237,46 @@ export function sampleFramesInRange(start: number, end: number, fps: number): nu
   return times;
 }
 
-export function normalizedZoneToPixelRect(zone: NormalizedZone, width: number, height: number): ZonePixelRect {
+export function normalizedZoneToPixelRect(
+  zone: NormalizedZone,
+  width: number,
+  height: number,
+  pixelBounds: "extent" | "cover" = "extent",
+): ZonePixelRect {
   const left = clamp(Math.min(zone.x1, zone.x2), 0, 1);
   const top = clamp(Math.min(zone.y1, zone.y2), 0, 1);
   const right = clamp(Math.max(zone.x1, zone.x2), 0, 1);
   const bottom = clamp(Math.max(zone.y1, zone.y2), 0, 1);
 
-  const x = Math.floor(left * width);
-  const y = Math.floor(top * height);
-  const pixelWidth = Math.max(1, Math.ceil((right - left) * width));
-  const pixelHeight = Math.max(1, Math.ceil((bottom - top) * height));
+  // Existing calibrated sensors depend on extent-based crops. Keep that
+  // sampling contract unless a caller explicitly requests edge coverage.
+  // Broadly changing their pixel membership requires separate validation.
+  if (pixelBounds === "extent") {
+    const x = Math.floor(left * width);
+    const y = Math.floor(top * height);
+    return {
+      x: clamp(x, 0, Math.max(0, width - 1)),
+      y: clamp(y, 0, Math.max(0, height - 1)),
+      width: Math.min(Math.max(1, Math.ceil((right - left) * width)), width - x),
+      height: Math.min(Math.max(1, Math.ceil((bottom - top) * height)), height - y),
+    };
+  }
+
+  // Convert edges independently: ceil((right-left)*width) can both include
+  // an extra pixel through roundoff and omit a genuinely fractional right
+  // edge. Snap only machine-precision noise around integer pixel boundaries.
+  const snapPixelEdge = (value: number) => {
+    const nearest = Math.round(value);
+    return Math.abs(value - nearest) <= Number.EPSILON * Math.max(1, Math.abs(value)) * 8 ? nearest : value;
+  };
+  const x = clamp(Math.floor(snapPixelEdge(left * width)), 0, Math.max(0, width - 1));
+  const y = clamp(Math.floor(snapPixelEdge(top * height)), 0, Math.max(0, height - 1));
+  const pixelWidth = Math.max(1, Math.ceil(snapPixelEdge(right * width)) - x);
+  const pixelHeight = Math.max(1, Math.ceil(snapPixelEdge(bottom * height)) - y);
 
   return {
-    x: clamp(x, 0, Math.max(0, width - 1)),
-    y: clamp(y, 0, Math.max(0, height - 1)),
+    x,
+    y,
     width: Math.min(pixelWidth, width - x),
     height: Math.min(pixelHeight, height - y),
   };
@@ -357,8 +384,9 @@ export function computeMotionScore(frameA: ImageData, frameB: ImageData): number
 export function captureZoneImageData(
   video: HTMLVideoElement,
   zone: NormalizedZone,
+  pixelBounds: "extent" | "cover" = "extent",
 ): { imageData: ImageData; pixelZone: ZonePixelRect } {
-  const pixelZone = normalizedZoneToPixelRect(zone, video.videoWidth, video.videoHeight);
+  const pixelZone = normalizedZoneToPixelRect(zone, video.videoWidth, video.videoHeight, pixelBounds);
   const canvas = document.createElement("canvas");
   canvas.width = pixelZone.width;
   canvas.height = pixelZone.height;

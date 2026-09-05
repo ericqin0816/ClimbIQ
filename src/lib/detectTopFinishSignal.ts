@@ -160,7 +160,7 @@ export async function detectTopFinishSignal({
   const refinedSamples: TopFinishColorSample[] = [];
   for (let index = 0; index < refineTimes.length; index += 1) {
     throwIfCancelled(signal);
-    const sampled = await sampleZoneAverageColor(video, refineTimes[index], discovery.zone);
+    const sampled = await sampleZoneAverageColor(video, refineTimes[index], discovery.zone, "cover");
     refinedSamples.push({ time: roundTime(sampled.time), averageRgb: sampled.averageRgb });
     onProgress?.("refine", index + 1, refineTimes.length);
     if (index % 8 === 7) await new Promise<void>((resolve) => setTimeout(resolve, 0));
@@ -353,7 +353,10 @@ export function analyzeTopFinishFrames(
   const topScore = separated[0].score;
   const credible = separated.filter((candidate) => candidate.score >= topScore * 0.78);
   const selected = [...credible].sort((left, right) => left.rawTime - right.rawTime || right.score - left.score)[0];
-  const halfSize = Math.max(2, selected.radius + 2);
+  // Calibration comes from averagePatch at this exact radius. Expanding the
+  // temporal crop mixes in unrelated wall pixels while retaining the tiny
+  // patch's calibration, suppressing a real light transition during refinement.
+  const halfSize = selected.radius;
   const zone: NormalizedZone = {
     id: "finishLight",
     label: "Auto-detected upper finish indicator",
