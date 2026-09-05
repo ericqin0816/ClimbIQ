@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type RefObject } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from "react";
 import { observeVideoFramePresentation, type FramePresentation } from "./videoFramePresentation";
 
 const PENDING: FramePresentation = { status: "pending" };
@@ -14,15 +14,20 @@ export function useVideoFramePresentation(videoRef: RefObject<HTMLVideoElement |
     if (reviewing) setPresentation(latest.current);
   }, [reviewing]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     latest.current = PENDING;
     if (reviewingRef.current) setPresentation(PENDING);
     const video = videoRef.current;
     if (!video || !source || !reviewing) return;
-    return observeVideoFramePresentation(video, next => {
+    const publishPausedFrame = () => { if (reviewingRef.current) setPresentation(latest.current); };
+    video.addEventListener("pause", publishPausedFrame);
+    const stop = observeVideoFramePresentation(video, next => {
       latest.current = next;
-      if (reviewingRef.current) setPresentation(next);
+      // Keep playback metadata in a ref; a whole-app React render on every
+      // presented frame is unnecessary while acceptance is disabled.
+      if (reviewingRef.current && (video.paused || next.status !== "available")) setPresentation(next);
     });
+    return () => { stop(); video.removeEventListener("pause", publishPausedFrame); };
   }, [source, videoRef, reviewing]);
 
   return presentation;

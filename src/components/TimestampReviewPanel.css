@@ -1,0 +1,36 @@
+.video-review-card .review-workspace.active {
+  display: grid;
+  grid-template-columns: minmax(0, 1.25fr) minmax(300px, 0.85fr);
+  gap: 16px;
+  align-items: start;
+}
+.review-player-area { min-width: 0; }
+.video-review-card .review-workspace.active .video-player { max-height: min(56vh, 620px); }
+.video-review-card .review-workspace.active .timestamp-review { margin: 0; min-width: 0; gap: 6px; }
+.video-review-card .timestamp-review h3 { margin: 3px 0 0; font-size: 1rem; line-height: 1.35; }
+.video-review-card .timestamp-review-times { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+.video-review-card .timestamp-review-times > div { padding: 8px; }
+.video-review-card .timestamp-review-times span { font-size: 0.7rem; }
+.video-review-card .timestamp-review-times strong { font-size: 0.88rem; }
+.video-review-card .review-instruction, .video-review-card .review-frame-source { font-size: 0.82rem; margin: 0; }
+.video-review-card .review-time-details { font-size: 0.78rem; margin: 0; }
+.video-review-card .review-time-details summary { cursor: pointer; }
+.video-review-card .timestamp-review-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }
+.video-review-card .timestamp-review-actions button { width: 100%; min-width: 0; padding: 9px 7px; font-size: 0.76rem; }
+.video-review-card .timestamp-review-actions .primary { grid-column: 1 / -1; grid-row: 2; }
+.video-review-card .review-workspace.active .player-controls { gap: 6px; margin-top: 8px; }
+.video-review-card .review-workspace.active .player-controls button { padding: 7px 9px; }
+@media (max-width: 760px) {
+  .video-review-card .review-workspace.active { grid-template-columns: minmax(0, 1fr); gap: 10px; }
+  .video-review-card .review-workspace.active .video-player { max-height: min(28vh, 270px); }
+  .video-review-card .review-workspace.active .timestamp-review { padding: 10px; }
+  .video-review-card .timestamp-review-heading { gap: 7px; }
+  .video-review-card .timestamp-review-heading h3 { font-size: 0.86rem; }
+  .video-review-card .review-confidence { font-size: 0.65rem; padding: 5px; white-space: nowrap; }
+  .video-review-card .review-workspace.active .player-controls { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .video-review-card .review-workspace.active .player-controls .time-pill { grid-column: span 3; justify-content: center; }
+  .video-review-card .review-workspace.active .player-controls button { min-width: 0; padding: 7px 3px; font-size: 0.72rem; }
+  .video-review-card .review-workspace.active .player-controls .small-input { grid-column: span 3; width: 100%; min-width: 0; }
+  .video-review-card .review-workspace.active .review-jump-field,
+  .video-review-card .review-workspace.active .review-jump-action { display: none; }
+}

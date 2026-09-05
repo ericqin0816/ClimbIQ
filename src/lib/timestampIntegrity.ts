@@ -10,6 +10,7 @@ export interface TimestampAcceptanceOptions {
   detectedRawTime?: number;
   offsetApplied?: number;
   note?: string;
+  acceptanceMode?: TimestampMarker["acceptanceMode"];
 }
 
 export interface TimestampAcceptanceResult {
@@ -93,6 +94,7 @@ export function applyTimestampAcceptance(
         detectedRawTime: options.detectedRawTime ?? options.rawTime,
         offsetApplied: options.offsetApplied ?? 0,
         note: options.note,
+        acceptanceMode: options.acceptanceMode,
         source: options.source,
         confidence: options.confidence,
       }
@@ -176,6 +178,7 @@ function clearMarker(marker: TimestampMarker): TimestampMarker {
     detectedRawTime: undefined,
     offsetApplied: undefined,
     note: undefined,
+    acceptanceMode: undefined,
     source: "Not set",
     confidence: "None",
   };
@@ -197,7 +200,20 @@ function sanitizeEvidenceMetadata(marker: TimestampMarker, durationSeconds?: num
       ? marker.offsetApplied
       : undefined,
     note: typeof marker.note === "string" ? marker.note.slice(0, 4000) : undefined,
+    acceptanceMode: sanitizeAcceptanceMode(marker.acceptanceMode),
   };
+}
+
+export function sanitizeAcceptanceMode(value: unknown): TimestampMarker["acceptanceMode"] {
+  return value === "automatic" || value === "manual-entry" || value === "frame-review" ? value : undefined;
+}
+
+/** Operational acceptance is not an independent annotation or a correctness label. */
+export function timestampAcceptanceAudit(marker: TimestampMarker) {
+  const accepted = marker.rawTime !== null;
+  const acceptanceMode = !accepted ? "unset" : sanitizeAcceptanceMode(marker.acceptanceMode) ?? "legacy-unknown";
+  return { accepted, acceptanceMode, userAccepted: acceptanceMode === "manual-entry" || acceptanceMode === "frame-review",
+    isGroundTruthLabel: false };
 }
 
 function finiteInVideo(value: unknown, durationSeconds?: number): number | undefined {

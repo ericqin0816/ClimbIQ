@@ -220,6 +220,8 @@ export interface TimestampMarker {
   detectedRawTime?: number | null;
   offsetApplied?: number;
   note?: string;
+  /** How acceptance occurred; absent on legacy sessions, never proof of independent labeling. */
+  acceptanceMode?: "automatic" | "manual-entry" | "frame-review";
   source: TimestampSource;
   confidence: Confidence;
 }

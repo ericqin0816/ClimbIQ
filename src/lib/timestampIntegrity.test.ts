@@ -4,9 +4,31 @@ import {
   applyTimestampAcceptance,
   clearMarkerTimestamp,
   sanitizeTimestampSequence,
+  timestampAcceptanceAudit,
 } from "./timestampIntegrity";
 
 describe("timestamp integrity", () => {
+  it("distinguishes automatic, interactive, and legacy acceptance without creating ground truth", () => {
+    const marker = populated()[0];
+    expect(timestampAcceptanceAudit({ ...marker, acceptanceMode: "automatic" })).toMatchObject({ accepted: true, userAccepted: false, isGroundTruthLabel: false });
+    for (const acceptanceMode of ["manual-entry", "frame-review"] as const) {
+      expect(timestampAcceptanceAudit({ ...marker, acceptanceMode })).toMatchObject({ accepted: true, userAccepted: true, isGroundTruthLabel: false });
+    }
+    expect(timestampAcceptanceAudit(marker)).toMatchObject({ acceptanceMode: "legacy-unknown", userAccepted: false });
+  });
+  it("preserves recorded review mode through JSON and clears it with the timestamp", () => {
+    const result = applyTimestampAcceptance(populated(), { id: "hold10", rawTime: 10, source: "Manual", confidence: "Medium", acceptanceMode: "frame-review" });
+    const restored = sanitizeTimestampSequence(JSON.parse(JSON.stringify(result.timestamps)), 20);
+    expect(restored.find(marker => marker.id === "hold10")?.acceptanceMode).toBe("frame-review");
+    const cleared = clearMarkerTimestamp(restored, "hold10").find(marker => marker.id === "hold10")!;
+    expect(cleared.acceptanceMode).toBeUndefined();
+    expect(timestampAcceptanceAudit(cleared)).toMatchObject({ accepted: false, acceptanceMode: "unset", userAccepted: false });
+  });
+  it("does not accept invented provenance categories from imported JSON", () => {
+    const markers = populated();
+    Object.assign(markers[0], { acceptanceMode: "independently-verified" });
+    expect(sanitizeTimestampSequence(markers, 20)[0].acceptanceMode).toBeUndefined();
+  });
   it("clears every dependent marker when Start changes", () => {
     const result = applyTimestampAcceptance(populated(), {
       id: "startSignal",

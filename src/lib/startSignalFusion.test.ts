@@ -1,7 +1,28 @@
 import { describe, expect, it } from "vitest";
 import { fuseStartEvidence } from "./startSignalFusion";
 
+it("does not average an excluded artifact into an otherwise accepted light clock", () => {
+  const decision = fuseStartEvidence([
+    { kind: "color", rawTime: 2, confidence: "High", reason: "screen artifact", automaticVoteAllowed: false },
+    { kind: "color", rawTime: 2.3, confidence: "High", reason: "valid sensor" },
+  ]);
+  expect(decision.autoAccept).toBe(true);
+  expect(decision.rawTime).toBe(2.3);
+});
+
 describe("start signal fusion", () => {
+  it("keeps an artifact cursor inspectable without allowing correlated visual votes to accept it", () => {
+    const result = fuseStartEvidence([
+      { kind: "color", rawTime: 1, confidence: "High", reason: "first patch", automaticVoteAllowed: false, artifactReason: "Camera cut." },
+      { kind: "color", rawTime: 1.02, confidence: "High", reason: "second patch", automaticVoteAllowed: false, artifactReason: "Camera cut." },
+      { kind: "motion", rawTime: 1.1, confidence: "Low", reason: "edit motion" },
+    ]);
+    expect(result.rawTime).toBeCloseTo(1.01, 3);
+    expect(result.found).toBe(true);
+    expect(result.autoAccept).toBe(false);
+    expect(result.confidence).toBe("Low");
+    expect(result.reason).toContain("Camera cut");
+  });
   it("gives high confidence when light and exact final beep agree, timed by exact audio", () => {
     const result = fuseStartEvidence([
       { kind: "color", rawTime: 3.02, confidence: "High", reason: "blue transition" },

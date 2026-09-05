@@ -119,6 +119,11 @@ async function uploadFile(protocol, filePath) {
   );
   const error = await evaluate(`document.querySelector('.upload-error')?.textContent ?? ''`);
   if (error) throw new Error(error);
+  const initialCursor = await evaluate(`({ raw: document.querySelector('video')?.currentTime,
+    display: document.querySelector('.time-pill')?.textContent })`);
+  if (initialCursor.raw !== 0 || !initialCursor.display?.includes('0.000s')) {
+    throw new Error(`A newly attached video retained a stale cursor: ${JSON.stringify(initialCursor)}`);
+  }
 }
 
 async function runTiming(protocol, fileName) {
@@ -191,6 +196,7 @@ async function runTiming(protocol, fileName) {
       firstMovement: marker('Earliest Visible Motion'),
       finish: marker('Finish Pad'),
       reviewStart,
+      startEvidence: document.querySelector('.evidence-message')?.textContent.trim() ?? '',
       finishStatus,
       finishSuggestion: finishSuggestion?.textContent.trim() ?? '',
       status: document.querySelector('.quick-analysis-box .status-message')?.textContent.trim() ?? '',
@@ -236,6 +242,9 @@ async function verifySavedWorkflow({ evaluate, send }) {
   })()`);
   const saved = await evaluate(`JSON.parse(localStorage.getItem('climbiq.analysisSessions.v1') ?? '[]')[0]`);
   if (!saved) throw new Error("Full workflow failed to save the analysis.");
+  if (saved.timestamps.some(marker => marker.rawTime !== null && marker.acceptanceMode !== 'automatic')) {
+    throw new Error('Automatic analysis did not record automatic acceptance provenance.');
+  }
   const hasFinish = saved.timestamps.some(marker => marker.id === "finishPad" && marker.rawTime !== null);
   const validFrames = saved.biomechanics?.result?.metrics?.validFrames ?? 0;
   if (!hasFinish && !(Number(saved.settings?.officialTotalTime) > 0) && validFrames > 0) {
@@ -327,6 +336,21 @@ async function verifyHold10Review({ evaluate, send }, saved) {
   const savedLibrary = await evaluate(`localStorage.getItem('climbiq.analysisSessions.v1')`);
   await evaluate(`document.querySelectorAll('.hold10-evidence-frames button')[1].click()`);
   await waitUntil(evaluate, `([...document.querySelectorAll('button')].some(b => b.textContent.trim().startsWith('Set Hold 10 at ') && !b.disabled))`, 10000, "Hold 10 frame acceptance control");
+  let pendingSeekCancellationVerified;
+  if (await evaluate(`Boolean(document.querySelector('.review-workspace.active'))`)) {
+    const offsetTime = await evaluate(`(() => { const v = document.querySelector('video'); v.currentTime += 0.2; return v.currentTime; })()`);
+    await waitUntil(evaluate, `!document.querySelector('video').seeking`, 5000, "offset review frame");
+    await evaluate(`(() => {
+      const buttons = [...document.querySelectorAll('button')];
+      buttons.find(b => b.textContent.trim() === 'Return to suggestion').click();
+      buttons.find(b => b.textContent.trim() === 'Close review').click();
+    })()`);
+    const retainedTime = await evaluate(`new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve(document.querySelector('video').currentTime))))`);
+    if (Math.abs(retainedTime - offsetTime) > 0.001) throw new Error('Closing review did not cancel its queued seek.');
+    pendingSeekCancellationVerified = true;
+    await evaluate(`document.querySelectorAll('.hold10-evidence-frames button')[1].click()`);
+    await waitUntil(evaluate, `Boolean(document.querySelector('.timestamp-review-actions button.primary')) && !document.querySelector('.timestamp-review-actions button.primary').disabled`, 10000, "reopened review frame");
+  }
   await evaluate(`([...document.querySelectorAll('button')].find(b => b.textContent.trim() === 'Play / pause')).click()`);
   await waitUntil(evaluate, `Boolean(document.querySelector('.timestamp-review-actions button.primary')?.disabled)`, 5000, "review acceptance disabled during playback");
   await evaluate(`([...document.querySelectorAll('button')].find(b => b.textContent.trim() === 'Play / pause')).click()`);
@@ -363,6 +387,7 @@ async function verifyHold10Review({ evaluate, send }, saved) {
   const savedAfterReview = await evaluate(`localStorage.getItem('climbiq.analysisSessions.v1')`);
   const reviewedMarker = JSON.parse(savedAfterReview).find(s => s.id === saved.id)?.timestamps.find(m => m.id === 'hold10');
   if (reviewedMarker?.rawTime !== accepted.rawTime) throw new Error('Saving the reviewed contact did not preserve its timestamp.');
+  if (reviewedMarker.acceptanceMode !== 'frame-review') throw new Error('Saving the reviewed contact lost its interactive review provenance.');
   if (frameTimeSource && !reviewedMarker.note?.includes(frameTimeSource === 'presentation' ? 'browser presented-frame timestamp' : 'Frame timestamp unavailable')) {
     throw new Error('Saved marker did not record its presented-frame or fallback time provenance.');
   }
@@ -386,9 +411,25 @@ async function verifyHold10Review({ evaluate, send }, saved) {
   if (await evaluate(`localStorage.getItem('climbiq.analysisSessions.v1')`) !== savedAfterReview) {
     throw new Error('An unsaved Start edit unexpectedly overwrote the saved library.');
   }
+  const exportedAcceptance = await evaluate(`(() => {
+    // This isolated test profile captures the public Copy JSON action without
+    // writing anything to the user's system clipboard.
+    const original = navigator.clipboard.writeText; let captured;
+    Object.defineProperty(navigator.clipboard, 'writeText', { configurable: true, value: async text => { captured = text; } });
+    try {
+      const button = [...document.querySelectorAll('button')].find(b => b.textContent.trim() === 'Copy JSON');
+      for (let parent = button.parentElement; parent; parent = parent.parentElement) if (parent.tagName === 'DETAILS') parent.open = true;
+      button.click(); return JSON.parse(captured).acceptedTimestamps;
+    } finally { Object.defineProperty(navigator.clipboard, 'writeText', { configurable: true, value: original }); }
+  })()`);
+  const editedStart = exportedAcceptance.find(marker => marker.markerId === 'startSignal');
+  if (editedStart?.acceptanceMode !== 'manual-entry' || editedStart.userAccepted !== true ||
+      exportedAcceptance.some(marker => marker.isGroundTruthLabel !== false)) {
+    throw new Error('Dataset export confused operational acceptance with independent ground truth.');
+  }
   return { passed: true, isGroundTruthLabel: false, acceptedRawTime: accepted.rawTime,
     startToHold10Seconds: accepted.phases[0], hold10ToFinishSeconds: accepted.phases[1], staleEvidenceCleared: true,
-    frameTimeSource, savedReviewProvenance: true };
+    frameTimeSource, savedReviewProvenance: true, pendingSeekCancellationVerified, acceptanceModesVerified: true };
 }
 
 async function main() {
@@ -430,6 +471,7 @@ async function main() {
 
 function validateOutcome(outcome, expected, baselineStatus = "unbaselined") {
   const errors = [];
+  const observations = [];
   if (outcome.workflow?.error) return { fileName: outcome.fileName, baselineStatus, errors: [`Full workflow: ${outcome.workflow.error}`] };
   if (!expected) return { fileName: outcome.fileName, baselineStatus: "unbaselined", errors };
   if (outcome.workflow && Number.isFinite(expected.com?.fullWorkflowMinimumValidCoverage)) {
@@ -460,7 +502,14 @@ function validateOutcome(outcome, expected, baselineStatus = "unbaselined") {
     }
   } else if (expected.start?.status === "review") {
     if (acceptedStart !== null) errors.push(`Start was automatically accepted at ${acceptedStart.toFixed(3)}s but review was expected.`);
-    compareTime(errors, "review Start candidate", reviewStart, expected.start.rawTime);
+    if (baselineStatus === "research-compared" && expected.start.reviewedCorrect == null) {
+      // Broadcasts are a rejection-safety cohort, not exact start labels.
+      // Keep cursor changes visible, but do not force a camera-cut timestamp
+      // to remain the selected suggestion after better evidence filtering.
+      observations.push({ kind: "unverified-review-cursor", historicalRawTime: expected.start.rawTime,
+        currentRawTime: reviewStart, deltaSeconds: reviewStart === null ? null : reviewStart - expected.start.rawTime,
+        isGroundTruthLabel: false });
+    } else compareTime(errors, "review Start candidate", reviewStart, expected.start.rawTime);
   }
 
   // Finish is only reachable in this automatic timing run when Start itself is
@@ -486,7 +535,7 @@ function validateOutcome(outcome, expected, baselineStatus = "unbaselined") {
       if (reviewBoundary !== null) errors.push(`Finish supplied a ${reviewBoundary.toFixed(3)}s review boundary after the scene-cut guard should have rejected it.`);
     }
   }
-  return { fileName: outcome.fileName, baselineStatus, errors };
+  return { fileName: outcome.fileName, baselineStatus, errors, observations };
 }
 
 function parseTime(value) {

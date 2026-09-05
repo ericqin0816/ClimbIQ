@@ -130,7 +130,11 @@ Saved and imported sessions also revalidate video metadata, normalize detection-
 
 Suggested timestamps open a dedicated video-review workflow before acceptance. The review panel displays the suggested raw time, frame on screen, adjustment amount, and frame-step controls. Acceptance waits for a paused, decoded frame and reads time from the video element. Marker-input drafts clear after successful edits and reset when changing videos or sessions. Save Session stays visible outside advanced management; custom session names are retained while generated names follow replacement recordings.
 
+The compact review workspace keeps the player and acceptance controls together on desktop and phone screens. Native presented-frame timestamps are used when available, with an explicit approximate-cursor fallback. Closing review cancels pending review seeks; changing videos resets the cursor. Saved markers and dataset exports distinguish `automatic`, `manual-entry`, and `frame-review` acceptance. Older markers without that metadata remain `legacy-unknown` in the export audit. Acceptance records are workflow provenance, never independent ground-truth labels; dataset exports explicitly report `isGroundTruthLabel: false`.
+
 ## Start Signal Detection
+
+Before fusion, visual cues are checked for camera cuts and context-poor patches along the bottom edge of landscape footage. Such cues remain inspectable but cannot supply automatic clock votes or shift a valid cue's accepted time. These safeguards do not make edited broadcast footage a validated input format.
 
 Quick Analyze scans the complete clip at several pixel scales and keeps spatially separate left/right lane candidates. Automatic discovery is restricted to the lower 58% of the image because the climber, start holds, and lane sensor are near the bottom. A start must move in the blue direction and reach a verified blue state within the next 0.5 seconds; merely hiding or weakening green cannot backdate a later real start. The blue state may later reverse at the finish without invalidating the start. Higher-resolution refinement samples the strongest green/blue opponent pixels, while trimmed frame-color correction removes exposure drift and large foreground occlusions.
 

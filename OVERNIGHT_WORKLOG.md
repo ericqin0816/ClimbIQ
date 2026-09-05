@@ -212,3 +212,52 @@ before pushing verified checkpoints because the user also works from a Mac.
   The other five public crops passed in the preceding full replay. Final
   no-frame-callback 9199 test also passed with an explicit saved fallback note.
   Final checkpoint checks: 421 tests/42 files, typecheck and production build.
+
+## After 0.24.0 (`d0e51d5`) — ongoing work
+
+- Checkpoint pushed; GitHub verification passed. Live 8903/9199 full workflows
+  passed, but a mixed sequence still changed the unverified public 1745 cursor
+  to 0.250 s. Callback isolation was not the full cause: disabling the API in a
+  mixed full sequence also reproduces it. Timing-only sequences and two repeated
+  public save/reload workflows retain 1.017 s. Do not claim the low-level
+  sampling/review interaction is fully diagnosed.
+- Both competing public cursors are artifacts: 1.017 is a camera cut; 0.250 is
+  a lower-screen graphic patch (y=0.959–0.981). The 5.330 audio proposal is also
+  unverified. The public cohort now asserts safe refusal and records changed
+  cursors, rather than pinning an explicitly unverified cut as an exact label.
+- A pre-fusion artifact re-ranking experiment moved private 9075's review cursor
+  from 8.450 to 7.230 s and was rejected. Current approach retains inspectable
+  ranking but removes cut/overlay cues from automatic clock-establishing votes.
+  Unit tests cover correlated cut votes, broad lower-screen bands, and manual/
+  portrait exclusions. Full replay is checking this revised policy.
+- New TimestampReviewPanel and scoped CSS keep the actual video and acceptance
+  controls together. At 390x844 the player and all acceptance controls fit on
+  screen; at 1280x900 they sit side by side. Detailed timing explanation is
+  collapsed while fallback provenance remains visible. Step buttons pause;
+  pause synchronizes the actual cursor; each new video gets a fresh element.
+  Four component rendering tests pass. Native frame time remains best-effort:
+  if a callback is unavailable, the explicit cursor fallback is retained.
+
+- Review-close now cancels queued animation-frame seeks, including Return to
+  suggestion immediately followed by Close. Full 9199 workflow verifies this,
+  new-upload cursor reset, saved frame provenance, phase arithmetic, and that
+  unsaved edits do not change the saved library. All passed on 0.25.0 locally.
+- Accepted marker metadata now distinguishes automatic, manual-entry and
+  frame-review. Dataset JSON no longer marks every automatic result as
+  `userAccepted`; legacy metadata stays unknown and every operational acceptance
+  explicitly says it is not a ground-truth label. Save/reload and actual Copy
+  JSON export tests exercise these modes (clipboard is mocked, not overwritten).
+- Checkpoint checks passed at 433 tests/44 files, typecheck/build. One additional
+  fusion test now guards against an excluded artifact shifting a valid light's
+  accepted timestamp through cluster averaging; broad replay follows this fix.
+- Dark-frame calibration diagnosis: on 9199, proposed wall support is 0.850
+  versus the 0.860 requirement. At unchanged control geometry it drops from
+  154/160 to 130/160 accepted surface samples; many rejected points are at the
+  right edge, where direct inspection shows room/structure outside the wall.
+  Therefore merely lowering the darkness/surface threshold would risk accepting
+  incorrect geometry. No such threshold change has been made.
+- Final mixed 0.25.0 full-workflow replay passed all five original recordings and
+  six public crops. Private timing observations stayed consistent; all public
+  Starts remained unaccepted. 9199 retained 44/52 COM, 19 registered holds, and
+  passed the new review-cancellation and export-acceptance checks. This is
+  regression/workflow evidence, not a labeled accuracy result.

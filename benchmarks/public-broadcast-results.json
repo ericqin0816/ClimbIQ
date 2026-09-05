@@ -6,7 +6,8 @@
     "publisher": "World Climbing",
     "url": "https://www.youtube.com/watch?v=RvZXoTVxGBs"
   },
-  "description": "Exploratory 720p race crops from a public broadcast. Clips stay outside Git. These moving-camera cases are reported separately from the fixed-phone regression baseline.",
+  "description": "Exploratory 720p race crops from a public broadcast. Clips stay outside Git. These moving-camera cases are reported separately from the fixed-phone regression baseline. Historical review cursors are unverified; rejection safety is asserted, while cursor changes are reported rather than pinned as exact labels.",
+  "verificationIntent": "rejection-safety-only",
   "trials": [
     {
       "id": "public-chamonix-race-0590-attempt.mp4",

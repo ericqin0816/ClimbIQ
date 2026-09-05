@@ -8,6 +8,9 @@ export interface StartEvidence {
   confidence: Confidence;
   reason: string;
   label?: string;
+  /** Preserve a suspect cue for inspection, but do not let it establish the clock. */
+  automaticVoteAllowed?: boolean;
+  artifactReason?: string;
 }
 
 export interface FusedStartDecision {
@@ -61,10 +64,11 @@ export function fuseStartEvidence(evidence: StartEvidence[]): FusedStartDecision
   const best = exactAudioCluster ?? ranked[0].cluster;
   const bestRanked = ranked.find((entry) => entry.cluster === best) ?? ranked[0];
   const sources = new Set(best.map((item) => item.kind));
-  const strongColor = best.some((item) => item.kind === "color" && item.confidence !== "Low");
-  const strongAudio = best.some((item) => item.kind === "audio" && item.confidence !== "Low");
-  const strongMotion = best.some((item) => item.kind === "motion" && item.confidence !== "Low");
-  const colorCount = best.filter((item) => item.kind === "color" && item.confidence !== "Low").length;
+  const eligible = best.filter(item => item.automaticVoteAllowed !== false);
+  const strongColor = eligible.some((item) => item.kind === "color" && item.confidence !== "Low");
+  const strongAudio = eligible.some((item) => item.kind === "audio" && item.confidence !== "Low");
+  const strongMotion = eligible.some((item) => item.kind === "motion" && item.confidence !== "Low");
+  const colorCount = eligible.filter((item) => item.kind === "color" && item.confidence !== "Low").length;
   const competing = ranked.find((entry) =>
     entry.cluster !== best &&
     entry.cluster.some((item) => item.confidence === "High") &&
@@ -82,10 +86,10 @@ export function fuseStartEvidence(evidence: StartEvidence[]): FusedStartDecision
     confidence = "High";
     autoAccept = !conflict;
   } else if (strongColor) {
-    confidence = best.some((item) => item.kind === "motion") ? "Medium" : best.find((item) => item.kind === "color")!.confidence;
+    confidence = eligible.some((item) => item.kind === "motion") ? "Medium" : eligible.find((item) => item.kind === "color")!.confidence;
     autoAccept = !conflict && confidence === "High";
   } else if (strongAudio) {
-    const audioConfidence = best.find((item) => item.kind === "audio")!.confidence;
+    const audioConfidence = eligible.find((item) => item.kind === "audio")!.confidence;
     confidence = audioConfidence === "High" ? "High" : strongMotion ? "Medium" : audioConfidence;
     // Only the exact pitch-coded protocol is authoritative without a lane-light
     // transition. A generic gym beep can coincide with body motion by chance,
@@ -95,7 +99,9 @@ export function fuseStartEvidence(evidence: StartEvidence[]): FusedStartDecision
     confidence = "Low";
   }
 
-  const rawTime = roundMetric(weightedTime(best));
+  // Artifacts remain useful review cursors, but may not shift an accepted
+  // clock merely because they landed in the same cluster as a valid cue.
+  const rawTime = roundMetric(weightedTime(autoAccept ? eligible : best));
   const rejectedEvidence = usable.filter((item) => !best.includes(item));
   const sourceSummary = Array.from(sources).map(sourceLabel).join(" + ");
   const conflictNote = conflict
@@ -104,13 +110,14 @@ export function fuseStartEvidence(evidence: StartEvidence[]): FusedStartDecision
   const premovementNote = rejectedEvidence.some((item) => item.kind === "motion" && item.rawTime < rawTime - AGREEMENT_SECONDS)
     ? " Earlier body motion was treated as setup rocking rather than the start."
     : "";
+  const artifactNotes = [...new Set(best.filter(item => item.automaticVoteAllowed === false).map(item => item.artifactReason).filter(Boolean))];
   return {
     found: true,
     rawTime,
     confidence,
     autoAccept,
     conflict,
-    reason: `Start evidence agreed at ${rawTime.toFixed(3)}s using ${sourceSummary}.${premovementNote}${conflictNote}`,
+    reason: `${autoAccept ? "Start evidence agreed" : "Start review cursor"} at ${rawTime.toFixed(3)}s using ${sourceSummary}.${premovementNote}${conflictNote}${artifactNotes.length ? ` ${artifactNotes.join(" ")}` : ""}`,
     supportingEvidence: best,
     rejectedEvidence,
   };
