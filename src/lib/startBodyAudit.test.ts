@@ -8,10 +8,11 @@ describe("automatic start body audit", () => {
     expect(result.safeToAutoAccept).toBe(true);
   });
 
-  it("requires review when the measured reaction is below the valid-race floor", () => {
+  it("requires review below the visual-audit floor without claiming an official reaction measurement", () => {
     const result = assessAutomaticStartBodyAudit(movement({ rawTime: 8.85, confidence: "High" }), 8.817);
     expect(result.safeToAutoAccept).toBe(false);
     expect(result.reason).toContain("below 0.100s");
+    expect(result.reason).toContain("not an electronic pad-release measurement");
   });
 
   it("blocks a late event when motion is already underway", () => {

@@ -23,16 +23,18 @@ On the complete private phone-video baseline `IMG_9199.MOV`, local and public-pr
 - Finish: 17.480 s
 - Total: 10.350 s
 - COM: 42/52 usable frames at 5 fps
-- Reviewed Hold 10 cursor: 11.515 s raw, or 4.385 s after Start
-- Bottom phase: 4.385 s (42.4% of the race)
-- Top phase: 5.965 s (57.6% of the race), 1.580 s longer
+- New local route recovery: 19/20 matched hold silhouettes, versus 8 with the original diagram
+- New local contact-review cursor: 11.440 s raw; no Hold 10 marker is automatically accepted
+- Accepting that cursor in a workflow test yields bottom 4.310 s and top 6.040 s
+
+The Hold 10 acceptance test checks the UI and arithmetic, not a new ground-truth label. Its detailed scan retains 26/26 selected athlete samples; tracking coverage is not proof of exact contact timing. The previously production-verified timing/COM values above are unchanged in the local 0.23.0 regression.
 
 The complete five-video private regression automatically accepts two Starts (40% coverage), sends three to review, and has zero known false automatic Starts. Both accepted Starts were manually checked. That is a small regression set, not a population accuracy estimate: its 2/2 precision has a wide 95% Wilson interval of 34.2%–100%. One manually checked automatic Finish is correct, with the expected wider 20.7%–100% interval for 1/1.
 
 ## What makes the project technically interesting
 
 - It fuses the known countdown audio pattern, lane-light color transitions, lane-local athlete motion, and full-frame scene continuity.
-- A sub-0.100 s visual reaction, camera cut, missing launch, implausibly delayed launch, or uncorroborated upper-wall event is sent to review instead of being silently accepted.
+- A sub-0.100 s visible-motion delay, camera cut, missing launch, implausibly delayed launch, or uncorroborated upper-wall event is sent to review. Visual body motion is not an electronic pad-release measurement or a false-start ruling.
 - Angled footage does not assume that the lower start sensor and upper finish indicator share one screen x-coordinate.
 - Finish detection timestamps the first connected return-color flash, verifies its later settled state, and rejects neutral occlusion, detached old flashes, scoreboards, and timing resets.
 - Hold 10 uses hand-contact evidence. A COM halfway crossing is kept separate and cannot become an accepted Hold 10 marker.
@@ -43,7 +45,8 @@ The complete five-video private regression automatically accepts two Starts (40%
 - Edited multi-camera broadcasts are a safety stress test, not the same input class as fixed phone footage. Six men’s/women’s broadcast crops were all withheld for review rather than auto-accepted.
 - Automatic wall scale is approximate. Precise metre and m/s claims need four manually marked lane corners and a fixed camera.
 - The current private dataset is too small and related to claim general accuracy.
-- Route registration did not reach the automatic Hold 10 threshold on the complete baseline, so the demonstrated Hold 10 split is human-confirmed from a review cursor.
+- Route recovery now identifies Hold 10 on the complete reference, but both hand-contact proposals and the approximate wall scale still need review. One successful route fit cannot establish reliability across gyms or cameras.
+- Controlled resizing, exposure, compression, frame-rate and audio tests expose additional failures. A red obstruction caused a five-seconds-early finish and has been guarded against; some modified recordings still lose start availability or produce inaccurate review suggestions. Modified copies are not independent new climbs.
 
 ## Next defensible study
 

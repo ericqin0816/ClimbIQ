@@ -7,12 +7,14 @@ import { seekTo } from "./videoFrameSampler";
 
 export interface Hold10RefinementPlan {
   coarseRawTime: number;
+  coarseHand?: "left" | "right";
   startRawTime: number;
   endRawTime: number;
   seed: { center: NormalizedPoint; rawTime: number };
 }
 
 export interface Hold10SecondPassEvidence {
+  targetSource: Hold10TargetResolution["source"];
   coarseRawTime: number;
   candidateRawTime: number;
   refined: boolean;
@@ -25,6 +27,13 @@ export interface Hold10SecondPassEvidence {
   shiftSeconds?: number;
   reason: string;
   requiresReview: true;
+  diagnostics?: {
+    contactDetected: boolean;
+    contactRawTime?: number;
+    contactReason?: string;
+    candidateRawTime?: number;
+    candidateReason: string;
+  };
 }
 
 export interface Hold10EvidenceFrame {
@@ -41,15 +50,15 @@ export interface Hold10SecondPassResult {
 
 function broadCandidate(result: BiomechanicsResult, calibration: WallCalibration, target: Hold10TargetResolution) {
   const contact = target.source !== "standard-template"
-    ? detectHoldContact(result, calibration, target.wallTarget, { holdLabel: "Hold 10" }) : undefined;
-  return contact?.detected ? contact : estimateHold10HeightPassage(result, calibration);
+    ? detectHoldContact(result, calibration, target.wallTarget, { holdLabel: "Hold 10", observedRouteHolds: target.observedRouteHolds }) : undefined;
+  return { candidate: contact?.detected ? contact : estimateHold10HeightPassage(result, calibration), contact };
 }
 
 /** Bound expensive inference to a short window and retain the original athlete. */
 export function planHold10SecondPass(
   broad: BiomechanicsResult, calibration: WallCalibration, target: Hold10TargetResolution, duration: number,
 ): Hold10RefinementPlan | undefined {
-  const candidate = broadCandidate(broad, calibration, target);
+  const { candidate } = broadCandidate(broad, calibration, target);
   if (!candidate.detected || candidate.rawTime === undefined || !Number.isFinite(duration) || duration <= 0) return undefined;
   const coarseRawTime = candidate.rawTime;
   if (coarseRawTime <= broad.startRawTime || coarseRawTime >= Math.min(duration, broad.endRawTime)) return undefined;
@@ -61,36 +70,50 @@ export function planHold10SecondPass(
   if (!seed) return undefined;
   const endRawTime = Math.min(duration - 0.001, broad.endRawTime, coarseRawTime + 0.9);
   if (endRawTime - seed.rawTime < 0.4 || endRawTime - seed.rawTime > 2.2) return undefined;
-  return { coarseRawTime, startRawTime: seed.rawTime, endRawTime, seed };
+  return { coarseRawTime, coarseHand: candidate.hand, startRawTime: seed.rawTime, endRawTime, seed };
 }
 
 export function assessHold10SecondPass(
   plan: Hold10RefinementPlan, dense: BiomechanicsResult, calibration: WallCalibration, target: Hold10TargetResolution,
 ): Hold10SecondPassEvidence {
-  const candidate = broadCandidate(dense, calibration, target);
+  const { candidate, contact } = broadCandidate(dense, calibration, target);
   const selectedFrames = dense.frames.filter(f => f.poseSelected !== false && f.landmarks.length > 0).length;
   const eligible = candidate.detected && candidate.rawTime !== undefined &&
     candidate.rawTime >= plan.startRawTime && candidate.rawTime <= plan.endRawTime &&
     Math.abs(candidate.rawTime - plan.coarseRawTime) <= 0.45 && selectedFrames >= 4;
   const candidateRawTime = eligible ? candidate.rawTime! : plan.coarseRawTime;
-  const contactCandidate = eligible && target.source !== "standard-template" &&
-    detectHoldContact(dense, calibration, target.wallTarget, { holdLabel: "Hold 10" }).detected;
+  const contactCandidate = eligible && Boolean(contact?.detected);
+  const disagreementReason = selectedFrames < 4
+    ? `Only ${selectedFrames} nearby samples retained the selected athlete.`
+    : !candidate.detected || candidate.rawTime === undefined
+      ? contact?.reason ?? candidate.reason
+      : candidate.rawTime < plan.startRawTime || candidate.rawTime > plan.endRawTime
+        ? "The proposed event fell outside the closer scan."
+        : `The denser candidate at ${candidate.rawTime.toFixed(3)}s disagreed with the broad cursor by ${Math.abs(candidate.rawTime - plan.coarseRawTime).toFixed(3)}s (review limit 0.450s).`;
   const tracked = dense.frames.filter(f => f.poseSelected !== false && handPoint(f, candidate.hand));
   const before = tracked.filter(f => f.rawTime <= candidateRawTime).at(-1);
   const after = tracked.find(f => f.rawTime >= candidateRawTime);
   const sampleBracket = eligible && before && after && after.rawTime - before.rawTime <= 0.15
     ? { startRawTime: before.rawTime, endRawTime: after.rawTime } : undefined;
   return {
+    targetSource: target.source,
     coarseRawTime: plan.coarseRawTime, candidateRawTime, refined: Boolean(eligible),
     kind: contactCandidate ? "contact-candidate" : eligible ? "height-passage" : "inconclusive",
-    hand: eligible ? candidate.hand : undefined,
+    hand: eligible ? candidate.hand : plan.coarseHand,
     sampleFps: 15, requestedFrames: dense.frames.length, selectedFrames, sampleBracket,
     shiftSeconds: eligible ? Math.round((candidateRawTime - plan.coarseRawTime) * 1000) / 1000 : undefined,
     reason: eligible ? contactCandidate
       ? `A denser scan found sustained hand proximity to the identified Hold 10. ${candidate.reason} Confirm the visible contact before setting a split.`
       : "A denser scan located the hand's height passage. The actual Hold 10 is not confirmed by this evidence; inspect the close-ups before setting contact."
-      : "The denser scan did not corroborate a nearby event with enough hand tracking. The original review cursor is retained; no contact or split was accepted.",
+      : `${disagreementReason} The original review cursor is retained; no contact or split was accepted.`,
     requiresReview: true,
+    diagnostics: {
+      contactDetected: Boolean(contact?.detected),
+      contactRawTime: contact?.rawTime,
+      contactReason: contact?.reason,
+      candidateRawTime: candidate.rawTime,
+      candidateReason: candidate.reason,
+    },
   };
 }
 
@@ -149,9 +172,14 @@ async function captureEvidence(video: HTMLVideoElement, dense: BiomechanicsResul
 }
 
 function anchor(frame: BiomechanicsFrame): NormalizedPoint | undefined {
+  // COM is retained in compact saved sessions, whereas hip landmarks are not.
+  // Use the same observed seed before and after reload so storage compaction
+  // cannot itself change the second-pass crop. This is an image-space anchor,
+  // not a COM-based claim that the hand contacted the hold.
+  if (frame.imageCom && Number.isFinite(frame.imageCom.x) && Number.isFinite(frame.imageCom.y)) return frame.imageCom;
   const hips = [23, 24].map(index => frame.landmarks.find(l => l.index === index && l.visibility >= 0.2));
   if (hips[0] && hips[1]) return { x: (hips[0].x + hips[1].x) / 2, y: (hips[0].y + hips[1].y) / 2 };
-  return frame.imageCom;
+  return undefined;
 }
 
 function handPoint(frame: BiomechanicsFrame, hand?: "left" | "right"): NormalizedPoint | undefined {

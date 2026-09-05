@@ -12,6 +12,12 @@ const target = resolveHold10Target({ calibration });
 const height = getStandardSpeedHold(10).wall.yMeters;
 
 describe("Hold 10 second-pass planning and evidence", () => {
+  it("uses the same seed before and after compact storage removes hips", () => {
+    const full = trajectory(5);
+    for (const frame of full.frames) frame.landmarks.filter(l => l.index >= 23).forEach(l => { l.x = 0.57; l.y = 0.65; });
+    const compact = { ...full, frames: full.frames.map(f => ({ ...f, landmarks: f.landmarks.filter(l => l.index < 23) })) };
+    expect(planHold10SecondPass(full, calibration, target, 8)).toEqual(planHold10SecondPass(compact, calibration, target, 8));
+  });
   it("uses a nearby selected athlete and confines the scan to a small window", () => {
     const broad = trajectory(5);
     const plan = planHold10SecondPass(broad, calibration, target, 8)!;
@@ -47,6 +53,7 @@ describe("Hold 10 second-pass planning and evidence", () => {
     expect(evidence.refined).toBe(false);
     expect(evidence.kind).toBe("inconclusive");
     expect(evidence.candidateRawTime).toBe(plan.coarseRawTime);
+    expect(evidence.reason).toContain("disagreed with the broad cursor");
   });
 
   it("does not interpolate through missing detailed hand observations", () => {

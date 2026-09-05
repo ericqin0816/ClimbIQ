@@ -63,8 +63,8 @@ async function openProtocol() {
   });
   const { send } = createProtocolClient(socket);
   const evaluate = async (expression) => {
-    const response = await send("Runtime.evaluate", { expression, returnByValue: true, awaitPromise: true });
-    if (response.exceptionDetails) throw new Error(response.exceptionDetails.text);
+    const response = await send("Runtime.evaluate", { expression, returnByValue: true, awaitPromise: true, userGesture: true });
+    if (response.exceptionDetails) throw new Error(response.exceptionDetails.exception?.description ?? response.exceptionDetails.text);
     return response.result.value;
   };
   await send("Runtime.enable");
@@ -148,11 +148,12 @@ async function runTiming(protocol, fileName) {
         cancelVisible: Boolean(cancel && !cancel.disabled),
         finishAccepted: Boolean(finishAccepted),
         reviewStart: reviewStart?.textContent.trim() ?? '',
+        timingFinished: /Timing finished|Camera looks stable|Registering the 20|Following the climber/.test(document.querySelector('.quick-analysis-box .status-message')?.textContent ?? ''),
       };
     })()`);
     // This runner measures timing only. Once an accepted finish exists, stop
     // the expensive pose stage while preserving accepted marker state.
-    if (!fullWorkflow && !cancelledAfterTiming && state.finishAccepted && state.cancelVisible) {
+    if (!fullWorkflow && !cancelledAfterTiming && (state.finishAccepted || state.timingFinished) && state.cancelVisible) {
       await evaluate(`([...document.querySelectorAll('button')].find((button) => button.textContent.trim() === 'Cancel'))?.click()`);
       cancelledAfterTiming = true;
     }
@@ -199,12 +200,21 @@ async function verifySavedWorkflow({ evaluate, send }) {
     const marker = [...document.querySelectorAll('tbody tr')].find(r => r.firstElementChild?.textContent.trim() === 'Hold 10');
     const images = [...document.querySelectorAll('.hold10-evidence-frames img')];
     return { available: Boolean(panel), text: panel?.innerText ?? '', previewCount: images.length,
+      targetSource: panel?.dataset.targetSource, kind: panel?.dataset.evidenceKind,
       previewsLoaded: images.length > 0 && images.every(i => i.complete && i.naturalWidth > 0),
       acceptedHold10: marker?.querySelectorAll('td')[1]?.textContent.trim() ?? 'Not set' };
   })()`);
   // This runner owns its temporary Chrome profile. Exercise the real save,
   // duplicate and reload controls without touching a user's browser sessions.
-  await evaluate(`([...document.querySelectorAll('button')].find(b => b.textContent.trim() === 'Save Session')).click()`);
+  await waitUntil(evaluate, `(() => {
+    const button = [...document.querySelectorAll('button')].find(b => b.textContent.trim() === 'Save Session');
+    return Boolean(button && button.getClientRects().length && !button.disabled);
+  })()`, 20000, "visible Save Session and released video tasks");
+  await evaluate(`(() => {
+    const button = [...document.querySelectorAll('button')].find(b => b.textContent.trim() === 'Save Session');
+    if (!button || !button.getClientRects().length || button.disabled) throw new Error('Save Session is not visibly available.');
+    button.click();
+  })()`);
   const saved = await evaluate(`JSON.parse(localStorage.getItem('climbiq.analysisSessions.v1') ?? '[]')[0]`);
   if (!saved) throw new Error("Full workflow failed to save the analysis.");
   const hasFinish = saved.timestamps.some(marker => marker.id === "finishPad" && marker.rawTime !== null);
@@ -213,7 +223,13 @@ async function verifySavedWorkflow({ evaluate, send }) {
     throw new Error("Full workflow did not use the requested pose sample rate.");
   }
   if (hasFinish && validFrames < 3) throw new Error("Full workflow produced accepted timing but fewer than three usable COM frames.");
-  await evaluate(`([...document.querySelectorAll('button')].find(b => b.textContent.trim() === 'Duplicate Session')).click()`);
+  await evaluate(`(() => {
+    const details = document.querySelector('.session-details');
+    if (details && !details.open) details.querySelector('summary').click();
+    const button = [...document.querySelectorAll('button')].find(b => b.textContent.trim() === 'Duplicate Session');
+    if (!button?.getClientRects().length) throw new Error('Duplicate Session is hidden after opening session management.');
+    button.click();
+  })()`);
   await evaluate(`window.__climbiqReloadSentinel = true`);
   await send("Page.reload");
   await waitUntil(evaluate, `window.__climbiqReloadSentinel !== true && document.readyState === 'complete' && Boolean(document.querySelector('.comparison-card'))`, 15000, "saved workflow reload");
@@ -234,11 +250,14 @@ async function verifySavedWorkflow({ evaluate, send }) {
     throw new Error("Identical saved attempts did not compare as below threshold after reload.");
   }
   let secondPassRetryPassed;
+  let manualReviewWorkflow;
   if (secondPass.available && saved.videoFileName) {
     await uploadFile({ evaluate, send }, path.join(videoDirectory, saved.videoFileName));
     await evaluate(`(() => {
       const select = document.querySelector('.session-load-row select');
       if (!select) throw new Error('Saved-session picker is missing.');
+      const details = select.closest('details');
+      if (details && !details.open) details.querySelector('summary').click();
       select.value = ${JSON.stringify(saved.id)};
       select.dispatchEvent(new Event('change', { bubbles: true }));
     })()`);
@@ -255,14 +274,61 @@ async function verifySavedWorkflow({ evaluate, send }) {
     await waitUntil(evaluate, `document.querySelectorAll('.hold10-evidence-frames img').length === 3 && ![...document.querySelectorAll('button')].some(b => b.textContent.trim() === 'Cancel closer scan')`, 60000, "second-pass retry evidence");
     const hold10AfterRetry = await evaluate(`([...document.querySelectorAll('tbody tr')].find(r => r.firstElementChild?.textContent.trim() === 'Hold 10'))?.querySelectorAll('td')[1]?.textContent.trim()`);
     if (hold10AfterRetry !== 'Not set') throw new Error("Second-pass retry accepted an unreviewed Hold 10 marker.");
+    const retryTargetSource = await evaluate(`document.querySelector('.hold10-second-pass')?.dataset.targetSource`);
+    if (secondPass.targetSource === 'visual-alignment' && retryTargetSource !== 'visual-alignment') {
+      throw new Error("Second-pass retry lost the registered Hold 10 target after saved-session reload.");
+    }
     secondPassRetryPassed = true;
+    manualReviewWorkflow = await verifyHold10Review({ evaluate }, saved);
   }
   return { savedAndReloaded: true, identicalComparisonPassed: hasFinish,
     secondPass,
     secondPassRetryPassed,
+    manualReviewWorkflow,
     validFrames, requestedFrames: saved.biomechanics?.result?.metrics?.requestedFrames ?? 0,
     sampleFps: saved.biomechanics?.result?.settings?.sampleFps,
     comparison: restored.comparison };
+}
+
+async function verifyHold10Review({ evaluate }, saved) {
+  const savedLibrary = await evaluate(`localStorage.getItem('climbiq.analysisSessions.v1')`);
+  await evaluate(`document.querySelectorAll('.hold10-evidence-frames button')[1].click()`);
+  await waitUntil(evaluate, `([...document.querySelectorAll('button')].some(b => b.textContent.trim().startsWith('Set Hold 10 at ') && !b.disabled))`, 10000, "Hold 10 frame acceptance control");
+  await evaluate(`([...document.querySelectorAll('button')].find(b => b.textContent.trim() === 'Play / pause')).click()`);
+  await waitUntil(evaluate, `Boolean(document.querySelector('.timestamp-review-actions button.primary')?.disabled)`, 5000, "review acceptance disabled during playback");
+  await evaluate(`([...document.querySelectorAll('button')].find(b => b.textContent.trim() === 'Play / pause')).click()`);
+  await evaluate(`([...document.querySelectorAll('button')].find(b => b.textContent.trim() === 'Return to suggestion')).click()`);
+  await waitUntil(evaluate, `!document.querySelector('video').seeking && [...document.querySelectorAll('button')].some(b => b.textContent.trim().startsWith('Set Hold 10 at ') && !b.disabled)`, 10000, "paused, decoded Hold 10 frame");
+  await evaluate(`([...document.querySelectorAll('button')].find(b => b.textContent.trim().startsWith('Set Hold 10 at '))).click()`);
+  await waitUntil(evaluate, `Boolean(document.querySelector('.hold10-phase-grid'))`, 10000, "contact-defined race phases");
+  const accepted = await evaluate(`(() => {
+    const row = [...document.querySelectorAll('tbody tr')].find(r => r.firstElementChild?.textContent.trim() === 'Hold 10');
+    const cells = [...row.querySelectorAll('td')].map(c => c.textContent.trim());
+    return { rawTime: parseFloat(cells[1]), source: cells[3],
+      phases: [...document.querySelectorAll('.hold10-phase-grid .metric strong')].map(e => parseFloat(e.textContent)) };
+  })()`);
+  const start = saved.timestamps.find(m => m.id === 'startSignal').rawTime;
+  const finish = saved.timestamps.find(m => m.id === 'finishPad').rawTime;
+  if (accepted.source !== 'Manual' || accepted.phases.length !== 2 ||
+      Math.abs(accepted.phases[0] - (accepted.rawTime - start)) > 0.001 ||
+      Math.abs(accepted.phases[1] - (finish - accepted.rawTime)) > 0.001 ||
+      Math.abs(accepted.phases[0] + accepted.phases[1] - (finish - start)) > 0.001) {
+    throw new Error('Reviewed Hold 10 did not produce consistent bottom/top race phases.');
+  }
+  await evaluate(`(() => {
+    const details = document.querySelector('.results-details');
+    if (!details.open) details.querySelector('summary').click();
+    const input = document.querySelector('input[aria-label="Start Signal raw video time"]');
+    input.focus(); input.value = ${JSON.stringify(String(start + 0.07))}; input.blur();
+  })()`);
+  await waitUntil(evaluate, `!document.querySelector('.hold10-second-pass') && !document.querySelector('.hold10-phase-grid')`, 10000, "stale Hold 10 evidence and phases to clear after Start edit");
+  const draftCleared = await evaluate(`document.querySelector('input[aria-label="Start Signal raw video time"]').value === ''`);
+  if (!draftCleared) throw new Error('The committed marker input retained stale text.');
+  if (await evaluate(`localStorage.getItem('climbiq.analysisSessions.v1')`) !== savedLibrary) {
+    throw new Error('Unsaved frame review unexpectedly overwrote the saved library.');
+  }
+  return { passed: true, isGroundTruthLabel: false, acceptedRawTime: accepted.rawTime,
+    startToHold10Seconds: accepted.phases[0], hold10ToFinishSeconds: accepted.phases[1], staleEvidenceCleared: true };
 }
 
 async function main() {
@@ -315,6 +381,9 @@ function validateOutcome(outcome, expected, baselineStatus = "unbaselined") {
       errors.push("Full workflow did not produce three loaded Hold 10 second-pass previews.");
     }
     if (evidence?.acceptedHold10 !== 'Not set') errors.push("Second-pass evidence incorrectly accepted Hold 10 without frame review.");
+    if (expected.hold10.fullWorkflowRequiresRegisteredHold && evidence?.targetSource !== 'visual-alignment') {
+      errors.push("Full workflow did not recover the visibly registered Hold 10 target.");
+    }
   }
   const acceptedStart = parseTime(outcome.start?.rawTime);
   const reviewStart = parseFirstTime(outcome.reviewStart);

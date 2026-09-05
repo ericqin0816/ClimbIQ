@@ -5,13 +5,21 @@ export default function Hold10SecondPassPanel({ result, disabled, onReview }: {
   result: Hold10SecondPassResult; disabled: boolean; onReview: (rawTime: number) => void;
 }) {
   const { evidence, previews } = result;
-  return <section className="hold10-second-pass" aria-label="Hold 10 second-pass evidence">
+  return <section className="hold10-second-pass" aria-label="Hold 10 second-pass evidence"
+    data-target-source={evidence.targetSource} data-evidence-kind={evidence.kind}>
     <div className="hold10-second-pass-heading">
       <div><h3>Hold 10 close-up</h3>
         <small>Second pass · {evidence.selectedFrames}/{evidence.requestedFrames} tracked samples · 15 samples/s</small></div>
       <span>{evidence.kind === "contact-candidate" ? "Possible contact" : evidence.kind === "height-passage" ? "Height estimate" : "Needs review"}</span>
     </div>
-    <p>{evidence.reason}</p>
+    <p>{evidence.kind === "contact-candidate"
+      ? `The ${evidence.hand ?? "tracked"} hand stayed near the identified Hold 10. Check the close-ups, then confirm contact in the full video.`
+      : evidence.kind === "height-passage"
+        ? "The hand crossed the approximate Hold 10 height. This is a review cue, not confirmed contact with the hold."
+        : evidence.reason}</p>
+    {evidence.kind !== "inconclusive" && <details className="hold10-detection-details">
+      <summary>How this was found</summary><p>{evidence.reason}</p>
+    </details>}
     <p className="muted">Broad pass: {evidence.coarseRawTime.toFixed(3)}s · Review cursor: {evidence.candidateRawTime.toFixed(3)}s
       {evidence.shiftSeconds !== undefined && ` · Shift: ${evidence.shiftSeconds >= 0 ? "+" : ""}${evidence.shiftSeconds.toFixed(3)}s`}
       {evidence.sampleBracket && ` · Adjacent tracked samples: ${evidence.sampleBracket.startRawTime.toFixed(3)}–${evidence.sampleBracket.endRawTime.toFixed(3)}s`}

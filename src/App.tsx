@@ -1,4 +1,5 @@
 import { ChangeEvent, CSSProperties, DragEvent, lazy, PointerEvent, Suspense, useEffect, useMemo, useRef, useState } from "react";
+import "./components/SessionWorkflow.css";
 import {
   resolveAutomaticPoseFinishBoundary,
   trimBiomechanicsResultAtFinish,
@@ -44,7 +45,7 @@ import {
   isSessionLibraryBackup,
   mergeSessionLibraries,
 } from "./lib/sessionLibrary";
-import { validateVideoFile } from "./lib/videoFileSelection";
+import { resolveNewVideoSessionName, validateVideoFile } from "./lib/videoFileSelection";
 import { inferAutomaticWallCalibration, validateWallCalibration } from "./lib/wallCalibration";
 import type {
   Confidence,
@@ -84,7 +85,7 @@ const INITIAL_TIMESTAMPS: TimestampMarker[] = [
   marker("finishPad", "Finish Pad"),
 ];
 
-const APP_VERSION = "0.22.1";
+const APP_VERSION = "0.23.0";
 const SESSION_STORAGE_KEY = "climbiq.analysisSessions.v1";
 const AttemptComparisonPanel = lazy(() => import("./components/AttemptComparisonPanel"));
 const Hold10SecondPassPanel = lazy(() => import("./components/Hold10SecondPassPanel"));
@@ -184,6 +185,7 @@ function App() {
   const [videoLoadError, setVideoLoadError] = useState("");
   const [videoDropActive, setVideoDropActive] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
+  const [reviewFrameReady, setReviewFrameReady] = useState(true);
   const [jumpInput, setJumpInput] = useState("");
   const [capturedFrame, setCapturedFrame] = useState<string | null>(null);
   const [selectedZoneId, setSelectedZoneId] = useState<ZoneId>("startLight");
@@ -434,9 +436,9 @@ function App() {
 
   const hold10Contact = useMemo(
     () => effectiveBiomechanicsResult && hold10WallTarget
-      ? detectHoldContact(effectiveBiomechanicsResult, biomechanics.calibration, hold10WallTarget, { holdLabel: "Hold 10" })
+      ? detectHoldContact(effectiveBiomechanicsResult, biomechanics.calibration, hold10WallTarget, { holdLabel: "Hold 10", observedRouteHolds: hold10Target.observedRouteHolds })
       : null,
-    [biomechanics.calibration, effectiveBiomechanicsResult, hold10WallTarget],
+    [biomechanics.calibration, effectiveBiomechanicsResult, hold10WallTarget, hold10Target.observedRouteHolds],
   );
   const hold10HeightEstimate = useMemo(
     () => effectiveBiomechanicsResult && !hold10Contact?.detected
@@ -530,9 +532,7 @@ function App() {
     setTimestampReview(null);
     setTimestamps(INITIAL_TIMESTAMPS);
     setActiveSessionId(null);
-    if (!sessionName || sessionName === "Untitled climb analysis") {
-      setSessionName(fileName.replace(/\.[^/.]+$/, ""));
-    }
+    setSessionName(resolveNewVideoSessionName(sessionName, metadata?.fileName, fileName));
   }
 
   function handleVideoUpload(event: ChangeEvent<HTMLInputElement>) {
@@ -704,6 +704,7 @@ function App() {
     video.pause();
     setTimestampReview(target);
     jumpTo(target.suggestedRawTime);
+    setReviewFrameReady(!video.seeking);
     window.requestAnimationFrame(() => {
       document.getElementById("video-review")?.scrollIntoView({ behavior: "smooth", block: "start" });
     });
@@ -736,8 +737,21 @@ function App() {
     setSecondPassRunning(true);
     setSecondPassStatus("Preparing a closer Hold 10 scan…");
     try {
-      await runNamedVideoTask("Hold 10 second pass", () => calculateHold10SecondPass(videoRef.current!,
-        effectiveBiomechanicsResult, biomechanics.calibration!, hold10Target, controller.signal, setSecondPassStatus),
+      await runNamedVideoTask("Hold 10 second pass", async () => {
+        let target = hold10Target;
+        // Registered silhouettes are transient video evidence. Rebuild them
+        // after reattaching a saved recording instead of silently reverting a
+        // previously identified hold to a generic height estimate.
+        if (target.source === "standard-template" && !routeAlignment) {
+          setSecondPassStatus("Rechecking the visible route for this saved analysis…");
+          const alignment = await locateVisibleRouteHolds(effectiveBiomechanicsResult.startRawTime,
+            effectiveBiomechanicsResult.endRawTime, biomechanics.calibration!, controller.signal);
+          if (controller.signal.aborted) throw new PoseAnalysisCancelledError();
+          target = resolveHold10Target({ manualZone: zones.hold10, calibration: biomechanics.calibration, visualAlignment: alignment });
+        }
+        await calculateHold10SecondPass(videoRef.current!, effectiveBiomechanicsResult,
+          biomechanics.calibration!, target, controller.signal, setSecondPassStatus);
+      },
         "Hold 10 inspection finished. Video position restored.");
     } catch {
       setSecondPassStatus(controller.signal.aborted ? "Closer scan cancelled. Existing timing was kept." : "Closer scan stopped.");
@@ -2267,10 +2281,11 @@ function App() {
     });
     if (!validation.accepted) {
       setTimestampStatus(validation.reason ?? "That timestamp could not be accepted.");
-      return;
+      return false;
     }
     setTimestampStatus("");
     acceptTimestamp(id, rawTime, "Manual", "Medium", acceptanceMetadata);
+    return true;
   }
 
   function clearFinishDependents(clearMarker = true) {
@@ -2408,7 +2423,7 @@ function App() {
 
     const startRaw = getTimestamp(timestamps, "startSignal").rawTime ?? startResult?.rawTime;
     const rawTime = mode === "climb" && startRaw !== null && startRaw !== undefined ? startRaw + parsed : parsed;
-    acceptManualTimestamp(id, rawTime);
+    return acceptManualTimestamp(id, rawTime);
   }
 
   function buildDebugReport(): DetectionDebugReport {
@@ -3251,6 +3266,13 @@ function App() {
         </section>
 
         <Card title="Save this analysis" className="full secondary-card session-card">
+          <div className="session-save-summary">
+            <div><strong>{sessionName || "Current analysis"}</strong>
+              <p className="muted">Save in this browser. Export your library to move saved attempts to another computer.</p>
+            </div>
+            <button className="primary" onClick={saveCurrentSession} disabled={videoAnalysisRunning}>Save Session</button>
+          </div>
+          {sessionStatus && <p className="status-message" role="status">{sessionStatus}</p>}
           <details className="session-details">
             <summary><span><strong>Session details & saved analyses</strong><small>Add an athlete name, notes, or reopen an earlier result.</small></span><span>Manage</span></summary>
             <div className="session-details-content">
@@ -3288,13 +3310,12 @@ function App() {
           </label>
           </details>
           <div className="button-row">
-            <button className="primary" onClick={saveCurrentSession} disabled={videoAnalysisRunning}>Save Session</button>
-            <button onClick={renameActiveSession} disabled={videoAnalysisRunning}>Rename Session</button>
+            <button onClick={renameActiveSession} disabled={videoAnalysisRunning || !activeSessionId}>Rename Session</button>
             <button onClick={duplicateActiveSession} disabled={videoAnalysisRunning}>Duplicate Session</button>
             <button onClick={exportCurrentSession} disabled={videoAnalysisRunning}>Export current session</button>
           </div>
           <div className="session-load-row">
-            <select value={activeSessionId ?? ""} onChange={(event) => loadSelectedSession(event.target.value)} disabled={videoAnalysisRunning}>
+            <select aria-label="Load saved session" value={activeSessionId ?? ""} onChange={(event) => loadSelectedSession(event.target.value)} disabled={videoAnalysisRunning || savedSessions.length === 0}>
               <option value="">Load saved session</option>
               {savedSessions.map((session) => (
                 <option key={session.id} value={session.id}>
@@ -3302,13 +3323,12 @@ function App() {
                 </option>
               ))}
             </select>
-            <button onClick={deleteActiveSession} disabled={videoAnalysisRunning}>Delete Session</button>
+            <button onClick={deleteActiveSession} disabled={videoAnalysisRunning || !activeSessionId}>Delete Session</button>
           </div>
           <SavedSessionsList sessions={savedSessions} activeSessionId={activeSessionId} onLoad={loadSelectedSession} disabled={videoAnalysisRunning} />
           <p className="muted">
             Sessions save zones, timing, compact biomechanics results, settings, and notes in this browser. Videos stay local and are not uploaded.
           </p>
-          {sessionStatus && <p className="status-message">{sessionStatus}</p>}
             </div>
           </details>
         </Card>
@@ -3324,7 +3344,13 @@ function App() {
               onLoadedMetadata={handleMetadataLoaded}
               onError={handleVideoLoadError}
               onTimeUpdate={(event) => setCurrentTime(event.currentTarget.currentTime)}
-              onSeeked={(event) => setCurrentTime(event.currentTarget.currentTime)}
+              onSeeking={() => { if (timestampReview) setReviewFrameReady(false); }}
+              onPlay={() => { if (timestampReview) setReviewFrameReady(false); }}
+              onPause={(event) => setReviewFrameReady(!event.currentTarget.seeking)}
+              onSeeked={(event) => {
+                setCurrentTime(event.currentTarget.currentTime);
+                setReviewFrameReady(event.currentTarget.paused);
+              }}
             />
             <Suspense fallback={null}>
               <PoseVideoOverlay
@@ -3407,13 +3433,15 @@ function App() {
                 <button disabled={videoAnalysisRunning} onClick={() => jumpTo(timestampReview.suggestedRawTime)}>Return to suggestion</button>
                 <button
                   className="primary"
-                  disabled={videoAnalysisRunning}
+                  disabled={videoAnalysisRunning || !reviewFrameReady}
                   onClick={() => {
-                    timestampReview.onAccept(currentTime);
+                    const video = videoRef.current;
+                    if (!video || !video.paused || video.seeking) return;
+                    timestampReview.onAccept(video.currentTime);
                     setTimestampReview(null);
                   }}
                 >
-                  {timestampReview.acceptLabel} at {currentTime.toFixed(3)}s
+                  {reviewFrameReady ? `${timestampReview.acceptLabel} at ${currentTime.toFixed(3)}s` : "Pause and wait for the frame"}
                 </button>
                 <button onClick={() => setTimestampReview(null)}>Close review</button>
               </div>
@@ -3909,7 +3937,7 @@ function App() {
               </thead>
               <tbody>
                 {timestamps.map((item) => (
-                  <tr key={item.id}>
+                  <tr key={`${item.id}:${videoUrl ?? "no-video"}:${activeSessionId ?? "draft"}`}>
                     <td>{item.label}</td>
                     <td>{formatTime(item.rawTime)}</td>
                     <td>{formatTime(item.climbTime)}</td>
@@ -3944,14 +3972,16 @@ function App() {
                           disabled={videoAnalysisRunning}
                           inputMode="decimal"
                           placeholder="Raw"
-                          onBlur={(event) => setTimestampFromInput(item.id, event.target.value, "raw")}
+                          onBlur={(event) => { if (setTimestampFromInput(item.id, event.target.value, "raw")) event.currentTarget.value = ""; }}
+                          onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur(); }}
                         />
                         <input
                           aria-label={`${item.label} climb time`}
                           inputMode="decimal"
                           placeholder="Climb"
                           disabled={videoAnalysisRunning || startSignalRaw === null}
-                          onBlur={(event) => setTimestampFromInput(item.id, event.target.value, "climb")}
+                          onBlur={(event) => { if (setTimestampFromInput(item.id, event.target.value, "climb")) event.currentTarget.value = ""; }}
+                          onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur(); }}
                         />
                       </div>
                     </td>

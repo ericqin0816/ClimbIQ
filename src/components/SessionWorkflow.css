@@ -1,0 +1,19 @@
+.session-save-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin: 14px 20px;
+}
+
+.session-save-summary > div { min-width: 0; }
+.session-save-summary strong { overflow-wrap: anywhere; }
+.session-save-summary p { margin: 5px 0 0; max-width: 60ch; }
+.session-save-summary > button { flex-shrink: 0; }
+.session-card > .status-message { margin: 0 20px 14px; }
+
+@media (max-width: 540px) {
+  .session-save-summary { align-items: stretch; flex-direction: column; }
+}
+.layout-grid > .session-card { order: 8; }
+.layout-grid > .export-card { order: 9; }

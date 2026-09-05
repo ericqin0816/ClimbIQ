@@ -7,6 +7,7 @@ import type {
 import { getStandardSpeedHold, projectWallPointToImage } from "./standardSpeedRoute";
 import { projectImagePointToWall, validateWallCalibration } from "./wallCalibration";
 import type { RouteAlignmentResult } from "./routeAlignment";
+import type { ObservedRouteHold } from "./holdContact";
 
 export type Hold10TargetFallbackReason =
   | "not-provided"
@@ -22,6 +23,8 @@ interface Hold10TargetBase {
   imagePoint?: NormalizedPoint;
   /** User-facing explanation of how this target was selected. */
   reason: string;
+  /** Direct visible centers only; never fitted guesses for hidden holds. */
+  observedRouteHolds?: readonly ObservedRouteHold[];
 }
 
 export interface ManualHold10Target extends Hold10TargetBase {
@@ -139,10 +142,24 @@ function alignedOrTemplateTarget(
       source: "visual-alignment",
       imagePoint: { ...imagePoint },
       wallTarget: { ...wallTarget },
+      observedRouteHolds: observedRouteNeighborhood(visualAlignment, calibration),
       reason: `Using Hold 10 from the visually registered route. ${visualAlignment.reason}`,
     };
   }
   return templateTarget(fallbackReason, templateReason, calibration);
+}
+
+function observedRouteNeighborhood(alignment: RouteAlignmentResult, calibration: WallCalibration): ObservedRouteHold[] | undefined {
+  const validation = validateWallCalibration(calibration);
+  if (!validation.valid || !validation.matrix) return undefined;
+  const observed = alignment.holds.flatMap(hold => {
+    if (!hold.observedImage || !insideNormalizedFrame(hold.observedImage)) return [];
+    try {
+      const wall = projectImagePointToWall(hold.observedImage, validation.matrix!);
+      return insideCalibratedWall(wall, calibration) ? [{ id: hold.holdId, wall }] : [];
+    } catch { return []; }
+  });
+  return observed.length >= 3 && observed.some(hold => hold.id === 10) ? observed : undefined;
 }
 
 function sanitizeManualHold10Zone(value: unknown): NormalizedZone | undefined {

@@ -61,7 +61,7 @@ Both boundary shifts and total-duration shifts are reported. A correct total
 alone can hide equal errors in Start and Finish. Nonzero exit status signals a
 workflow error or a wrong accepted boundary; inspect availability losses and
 unverified acceptances even when the runner exits successfully.
-Review suggestions are also compared when a separate human-reviewed reference
+Review suggestions are also compared when a separately reviewed reference
 exists. An inaccurate suggestion is flagged for investigation but not counted as
 a wrong automatic acceptance.
 

@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "capturedAt": "2026-09-02",
+  "capturedAt": "2026-09-05",
   "description": "Private-video regression observations. Videos are not stored in Git.",
   "trials": [
     {
@@ -43,17 +43,19 @@
       "hold10": {
         "status": "review-candidate",
         "fullWorkflowRequiresSecondPass": true,
-        "rawTime": 11.515,
-        "climbTime": 4.385,
-        "source": "continuous-hand-height-crossing",
-        "routeMatches": 8,
-        "requiredRouteMatches": 10,
+        "fullWorkflowRequiresRegisteredHold": true,
+        "rawTime": 11.44,
+        "climbTime": 4.31,
+        "source": "visually-registered-hand-proximity",
+        "routeMatches": 19,
+        "requiredRouteMatches": 16,
+        "isGroundTruthLabel": false,
         "manualAcceptanceWorkflowTested": true,
-        "resultingHold10ToFinishSeconds": 5.965,
-        "bottomPhaseShare": 0.424,
-        "topPhaseShare": 0.576,
+        "resultingHold10ToFinishSeconds": 6.04,
+        "bottomPhaseShare": 0.4164,
+        "topPhaseShare": 0.5836,
         "slowerPhase": "top",
-        "phaseDifferenceSeconds": 1.58
+        "phaseDifferenceSeconds": 1.73
       },
       "com": {
         "status": "needs-review",

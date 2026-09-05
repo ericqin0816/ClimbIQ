@@ -13,6 +13,20 @@ const fullFrameCalibration = buildWallCalibration([
 ], 0, true);
 
 describe("Hold 10 target resolution", () => {
+  it("projects only directly observed route neighbors into the current wall plane", () => {
+    const alignment = alignedRoute({ x: 0.4, y: 0.5 }, { xMeters: 1.2, yMeters: 7.5 });
+    alignment.holds = [
+      { holdId: 9, originalImage: { x: 0.35, y: 0.55 }, image: { x: 0.35, y: 0.55 }, observedImage: { x: 0.35, y: 0.55 } },
+      { holdId: 10, originalImage: { x: 0.4, y: 0.5 }, image: { x: 0.4, y: 0.5 }, observedImage: { x: 0.4, y: 0.5 } },
+      { holdId: 11, originalImage: { x: 0.48, y: 0.44 }, image: { x: 0.48, y: 0.44 }, observedImage: { x: 0.48, y: 0.44 } },
+      { holdId: 12, originalImage: { x: 0.42, y: 0.4 }, image: { x: 0.42, y: 0.4 } },
+    ];
+    const target = resolveHold10Target({ calibration: fullFrameCalibration, visualAlignment: alignment });
+    expect(target.observedRouteHolds?.map(hold => hold.id)).toEqual([9, 10, 11]);
+    expect(target.observedRouteHolds?.[1].wall.xMeters).toBeCloseTo(1.2, 8);
+    expect(target.observedRouteHolds?.[1].wall.yMeters).toBeCloseTo(7.5, 8);
+  });
+
   it("sanitizes a valid reversed manual zone and returns its projected center", () => {
     const result = resolveHold10Target({
       manualZone: zone({ x1: 0.5, y1: 0.6, x2: 0.3, y2: 0.4 }),

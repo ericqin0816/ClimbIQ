@@ -74,6 +74,8 @@ export interface HoldContactDetectionResult {
 }
 
 export interface HoldContactDetectionOptions {
+  /** Actual registered hold centers, replacing the translated diagram neighborhood. */
+  observedRouteHolds?: readonly ObservedRouteHold[];
   holdLabel?: string;
   proximityRadiusMeters?: number;
   confirmationRadiusMeters?: number;
@@ -83,6 +85,11 @@ export interface HoldContactDetectionOptions {
   maxMedianWristSpeedMps?: number;
   maxNetWristSpeedMps?: number;
   reviewPaddingSeconds?: number;
+}
+
+export interface ObservedRouteHold {
+  id: StandardSpeedHoldId;
+  wall: WallPoint;
 }
 
 interface ResolvedOptions {
@@ -100,8 +107,8 @@ interface ResolvedOptions {
 
 interface RouteContext {
   targetHoldId: StandardSpeedHoldId;
-  offsetX: number;
-  offsetY: number;
+  holds: readonly ObservedRouteHold[];
+  observed: boolean;
 }
 
 interface WristObservation {
@@ -172,7 +179,10 @@ export function detectHoldContact(
   }
 
   const resolved = resolveOptions(result, calibration, options);
-  const route = resolveRouteContext(hold, resolved.holdLabel, calibration);
+  const route = resolveRouteContext(hold, resolved.holdLabel, calibration, options.observedRouteHolds);
+  if (options.observedRouteHolds && !route) {
+    return unavailable("The registered hold neighborhood is invalid or does not match the target; rerun route registration.");
+  }
   const frames = [...result.frames]
     .filter((frame) => Number.isFinite(frame.rawTime) &&
       frame.rawTime >= result.startRawTime - 1e-9 && frame.rawTime <= result.endRawTime + 1e-9)
@@ -222,7 +232,7 @@ export function detectHoldContact(
   const onsetRawTime = accepted.onsetRawTime ?? firstObservation(accepted).rawTime;
   const confidence = contactConfidence(accepted, result, calibration);
   const routeReason = route
-    ? ` Hold ${route.targetHoldId} was the nearest numbered-hold match for ${(accepted.targetNearestFraction * 100).toFixed(0)}% of confirmation samples.`
+    ? ` Hold ${route.targetHoldId} was the nearest ${route.observed ? "registered hold" : "numbered-hold match"} for ${(accepted.targetNearestFraction * 100).toFixed(0)}% of confirmation samples.`
     : "";
   return {
     detected: true,
@@ -542,6 +552,7 @@ function resolveRouteContext(
   hold: WallPoint,
   label: string,
   calibration: WallCalibration,
+  observedHolds?: readonly ObservedRouteHold[],
 ): RouteContext | undefined {
   if (calibration.widthMeters < 2.4 || calibration.widthMeters > 3.6 ||
       calibration.heightMeters < 12 || calibration.heightMeters > 18) {
@@ -553,12 +564,27 @@ function resolveRouteContext(
     return undefined;
   }
   const target = STANDARD_SPEED_HOLDS[id - 1];
+  if (observedHolds) {
+    const ids = new Set(observedHolds.map(entry => entry.id));
+    const observedTarget = observedHolds.find(entry => entry.id === id);
+    if (observedHolds.length < 3 || ids.size !== observedHolds.length || !observedTarget ||
+        observedHolds.some(entry => !Number.isInteger(entry.id) || entry.id < 1 || entry.id > 20 ||
+          !isFiniteWallPoint(entry.wall) || entry.wall.xMeters < 0 || entry.wall.xMeters > calibration.widthMeters ||
+          entry.wall.yMeters < 0 || entry.wall.yMeters > calibration.heightMeters) ||
+        Math.hypot(observedTarget.wall.xMeters - hold.xMeters, observedTarget.wall.yMeters - hold.yMeters) > 0.02) {
+      return undefined;
+    }
+    return { targetHoldId: target.id, holds: observedHolds, observed: true };
+  }
   return {
     targetHoldId: target.id,
     // A manual target correction translates the route neighbourhood too, so
     // nearby-hold disambiguation remains useful without overriding the user.
-    offsetX: hold.xMeters - target.wall.xMeters,
-    offsetY: hold.yMeters - target.wall.yMeters,
+    holds: STANDARD_SPEED_HOLDS.map(entry => ({ id: entry.id, wall: {
+      xMeters: entry.wall.xMeters + hold.xMeters - target.wall.xMeters,
+      yMeters: entry.wall.yMeters + hold.yMeters - target.wall.yMeters,
+    } })),
+    observed: false,
   };
 }
 
@@ -567,11 +593,11 @@ function matchNumberedHold(
   route: RouteContext,
 ): Pick<WristObservation,
   "nearestHoldId" | "nearestHoldDistanceMeters" | "closestAlternativeHoldId" | "closestAlternativeDistanceMeters"> {
-  const matches = STANDARD_SPEED_HOLDS.map((hold) => ({
+  const matches = route.holds.map((hold) => ({
     id: hold.id,
     distance: Math.hypot(
-      point.xMeters - (hold.wall.xMeters + route.offsetX),
-      point.yMeters - (hold.wall.yMeters + route.offsetY),
+      point.xMeters - hold.wall.xMeters,
+      point.yMeters - hold.wall.yMeters,
     ),
   })).sort((left, right) => left.distance - right.distance || left.id - right.id);
   const nearest = matches[0];

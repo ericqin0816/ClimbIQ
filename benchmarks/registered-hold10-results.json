@@ -1,0 +1,43 @@
+{
+  "version": 1,
+  "capturedAt": "2026-09-05",
+  "appVersion": "0.23.0",
+  "clip": "IMG_9199.MOV",
+  "referenceGeometry": "ifsc-2022-bolt-grid",
+  "sourceDocument": "https://images.ifsc-climbing.org/ifsc/image/private/t_q_good/prd/urwl7n2hnnyvhiwiq0xg.pdf",
+  "route": {
+    "legacyMatchedHolds": 8,
+    "recoveryMatchedHolds": 19,
+    "minimumDirectRecoveryMatches": 16,
+    "medianResidualNormalized": 0.0018412,
+    "model": "projective",
+    "hold10Image": { "x": 0.490942, "y": 0.394237 },
+    "calibrationUnchanged": true
+  },
+  "timing": { "startRawTime": 7.13, "finishRawTime": 17.48, "totalSeconds": 10.35 },
+  "contactReview": {
+    "broadSampleFps": 5,
+    "broadCandidateRawTime": 11.499,
+    "secondPassSampleFps": 15,
+    "secondPassCandidateRawTime": 11.44,
+    "adjacentSampleRawTimes": [11.397, 11.463],
+    "selectedSamples": 26,
+    "requestedSamples": 26,
+    "hand": "left",
+    "targetSource": "visual-alignment",
+    "kind": "contact-candidate",
+    "hold10AutomaticallyAccepted": false,
+    "isGroundTruthLabel": false
+  },
+  "workflow": {
+    "savedAndReloaded": true,
+    "registeredTargetRecoveredAfterReload": true,
+    "cancelAndRetryPassed": true,
+    "manualAcceptanceTestPassed": true,
+    "startToHold10SecondsAfterTestAcceptance": 4.31,
+    "hold10ToFinishSecondsAfterTestAcceptance": 6.04,
+    "staleEvidenceAndSplitsClearedAfterStartEdit": true,
+    "savedLibraryUnchangedByUnsavedReview": true
+  },
+  "interpretation": "A stronger route prior finds visible Hold 10 and enables a proximity-based review candidate on one existing recording. Attachment bolts are not contact centers. Matching residuals and tracked sample counts are not contact timing accuracy. COM calibration and accepted Start/Finish stay unchanged. Wider validation remains necessary."
+}

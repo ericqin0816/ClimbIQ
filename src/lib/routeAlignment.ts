@@ -2,11 +2,15 @@ import type { Confidence, NormalizedPoint, NormalizedZone, WallCalibration, Wall
 import {
   STANDARD_SPEED_HOLDS,
   projectStandardSpeedRouteToImage,
+  projectWallPointToImage,
   type StandardSpeedHoldId,
 } from "./standardSpeedRoute";
 import { projectImagePointToWall, validateWallCalibration } from "./wallCalibration";
+import { SPEED_ROUTE_BOLTS } from "./speedRouteBoltGrid";
 
 export interface RouteAlignmentOptions {
+  /** Research comparison only; bolt positions are not contact/silhouette centers. */
+  referenceGeometry?: "legacy-diagram" | "ifsc-2022-bolt-grid";
   /** Analysis-grid width. Height follows the source aspect ratio. */
   maxGridWidth?: number;
   /** Fraction of frames in which a red/pink grid cell must be present. */
@@ -80,6 +84,8 @@ export interface RouteAlignmentDiagnostics {
 export interface RouteAlignmentResult {
   aligned: boolean;
   confidence: Confidence;
+  /** The matched image silhouettes remain the target; this identifies only the fitting prior. */
+  referenceGeometry?: "legacy-diagram" | "ifsc-2022-bolt-grid";
   model?: "affine" | "projective";
   /** Normalized-image correction applied after the wall calibration projection. */
   correctionMatrix?: RouteAlignmentMatrix;
@@ -164,7 +170,9 @@ export function alignStandardSpeedRouteVisually(
   const frameError = validateFrames(frames);
   if (frameError) return refusedResult(frames, frameError);
 
-  const projected = projectStandardSpeedRouteToImage(calibration).map((entry) => entry.image);
+  const projected = options.referenceGeometry === "ifsc-2022-bolt-grid"
+    ? SPEED_ROUTE_BOLTS.map(bolt => projectWallPointToImage(bolt.wall, calibration))
+    : projectStandardSpeedRouteToImage(calibration).map((entry) => entry.image);
   const segmentation = segmentPersistentRedPink(frames, resolved);
   const components = scoreCandidateSilhouettes(extractComponents(segmentation), calibration);
   const nearbyCandidates = components.filter((candidate) => candidate.macroSilhouette &&
@@ -368,6 +376,44 @@ export function alignStandardSpeedRouteWithFallback(
   frames: readonly ImageData[],
   calibration: WallCalibration | undefined,
   options: RouteAlignmentOptions = {},
+): RouteAlignmentPolicyResult {
+  const preferred = alignWithGeometryCorrection(frames, calibration, options);
+  if (options.referenceGeometry || preferred.result.aligned || !calibration || !validZone(options.startBodyZone)) {
+    return preferred;
+  }
+
+  // The original diagram includes large margins and is not a measured lane
+  // grid. Recover a failed fit from the published attachment layout, but demand
+  // more support and smaller residuals than either ordinary registration pass.
+  // This wider search never changes wall calibration or accepted timestamps.
+  const grid = alignStandardSpeedRouteVisually(frames, calibration, {
+    ...options,
+    referenceGeometry: "ifsc-2022-bolt-grid",
+    maxCorrectionNormalized: 0.18,
+    minimumMatchedHolds: 16,
+  });
+  const diagnostic = grid.diagnostics;
+  const directlyMatched = new Set(diagnostic.matches.filter(match => match.association !== "topology-recovery").map(match => match.holdId));
+  const strongGrid = grid.aligned && !diagnostic.ambiguous && directlyMatched.size >= 16 &&
+    [9, 10, 11].every(id => directlyMatched.has(id as StandardSpeedHoldId)) &&
+    (diagnostic.medianResidualNormalized ?? Infinity) <= 0.008 &&
+    (diagnostic.rmsResidualNormalized ?? Infinity) <= 0.012 &&
+    (diagnostic.startAnchorDistanceNormalized ?? Infinity) <= 0.08;
+  if (!strongGrid) return preferred;
+  return {
+    usedExpandedSearch: true,
+    result: {
+      ...grid,
+      referenceGeometry: "ifsc-2022-bolt-grid",
+      reason: `${grid.reason} Recovery used the published IFSC attachment grid with at least 16 direct silhouette matches. Hold centers come from the video, not the attachment bolts.`,
+    },
+  };
+}
+
+function alignWithGeometryCorrection(
+  frames: readonly ImageData[],
+  calibration: WallCalibration | undefined,
+  options: RouteAlignmentOptions,
 ): RouteAlignmentPolicyResult {
   const conservative = alignStandardSpeedRouteVisually(frames, calibration, options);
   const conservativeDiagnostics = conservative.diagnostics;

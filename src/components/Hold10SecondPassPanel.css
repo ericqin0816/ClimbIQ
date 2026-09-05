@@ -2,6 +2,8 @@
 .hold10-second-pass h3 { margin: 0 0 4px; color: var(--ink); }
 .hold10-second-pass p { line-height: 1.5; }
 .hold10-second-pass small { color: var(--muted-text); line-height: 1.5; }
+.hold10-detection-details { margin: 8px 0; font-size: 0.85rem; }
+.hold10-detection-details summary { cursor: pointer; color: var(--muted-text); }
 .hold10-second-pass-heading { display: flex; justify-content: space-between; gap: 16px; align-items: start; }
 .hold10-second-pass-heading > span { border: 1px solid var(--line); border-radius: 5px; padding: 6px 10px; font-size: 0.78rem; white-space: nowrap; }
 .hold10-evidence-frames { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin: 14px 0; }

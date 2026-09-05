@@ -19,6 +19,34 @@ const hold10: WallPoint = { xMeters: 1.399, yMeters: 8.334 };
 const farLeft: WallPoint = { xMeters: 0.25, yMeters: 6 };
 
 describe("hold contact detection", () => {
+  it("uses actual registered neighbors rather than translating the old diagram", () => {
+    const result = makeResult([1, 1.1, 1.2, 1.3].map(time => frame(time, farLeft, offset(hold10, 0.23, 0))));
+    const observedRouteHolds = [
+      { id: 9 as const, wall: offset(hold10, -0.5, -0.5) },
+      { id: 10 as const, wall: hold10 },
+      { id: 11 as const, wall: offset(hold10, 0.25, 0) },
+    ];
+    expect(detectHoldContact(result, calibration, hold10, { holdLabel: "Hold 10" }).detected).toBe(true);
+    const corrected = detectHoldContact(result, calibration, hold10, { holdLabel: "Hold 10", observedRouteHolds });
+    expect(corrected.detected).toBe(false);
+    expect(corrected.candidates?.[0].competingHoldId).toBe(11);
+    const onTarget = makeResult([1, 1.1, 1.2, 1.3].map(time => frame(time, farLeft, hold10)));
+    expect(detectHoldContact(onTarget, calibration, hold10, { holdLabel: "Hold 10", observedRouteHolds }).reason).toContain("nearest registered hold");
+  });
+
+  it("refuses an explicitly supplied inconsistent registered neighborhood", () => {
+    const result = makeResult([1, 1.1, 1.2, 1.3].map(time => frame(time, farLeft, hold10)));
+    for (const observedRouteHolds of [
+      [{ id: 10 as const, wall: hold10 }],
+      [{ id: 10 as const, wall: hold10 }, { id: 10 as const, wall: hold10 }, { id: 11 as const, wall: hold10 }],
+      [{ id: 9 as const, wall: hold10 }, { id: 10 as const, wall: offset(hold10, 0.3, 0) }, { id: 11 as const, wall: hold10 }],
+    ]) {
+      expect(detectHoldContact(result, calibration, hold10, { holdLabel: "Hold 10", observedRouteHolds })).toMatchObject({
+        detected: false, confidence: "None", reason: expect.stringContaining("registered hold neighborhood"),
+      });
+    }
+  });
+
   it("detects the first sustained wrist dwell and reports its hand and review window", () => {
     const result = makeResult([
       frame(0.9, farLeft, offset(hold10, -0.7, 0)),

@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import type { NormalizedPoint, RGB } from "../types";
 import { buildWallCalibration } from "./wallCalibration";
-import { projectStandardSpeedRouteToImage } from "./standardSpeedRoute";
+import { projectStandardSpeedRouteToImage, projectWallPointToImage } from "./standardSpeedRoute";
+import { SPEED_ROUTE_BOLTS } from "./speedRouteBoltGrid";
 import {
   alignStandardSpeedRouteWithFallback,
   alignStandardSpeedRouteVisually,
@@ -20,6 +21,43 @@ const red: RGB = { r: 205, g: 45, b: 55 };
 const background: RGB = { r: 102, g: 105, b: 108 };
 
 describe("persistent visual route alignment", () => {
+  const gridAnchor = { id: "startBody" as const, label: "Selected athlete", x1: 0.68, x2: 0.86, y1: 0.8, y2: 0.98 };
+  function gridFrames(missing = new Set<number>()) {
+    return Array.from({ length: 3 }, () => {
+      const image = makeFrame(360, 720);
+      for (const bolt of SPEED_ROUTE_BOLTS) {
+        if (!missing.has(bolt.id)) drawDisc(image, projectWallPointToImage(bolt.wall, calibration), 4, pink);
+      }
+      return image;
+    });
+  }
+
+  it("recovers a published-grid route with strong direct support and an athlete anchor", () => {
+    const result = alignStandardSpeedRouteWithFallback(gridFrames(), calibration, { startBodyZone: gridAnchor }).result;
+    expect(result.aligned).toBe(true);
+    expect(result.referenceGeometry).toBe("ifsc-2022-bolt-grid");
+    expect(result.diagnostics.matchedHoldIds.length).toBeGreaterThanOrEqual(19);
+    expect(pointDistance(result.hold10Image!, projectWallPointToImage(SPEED_ROUTE_BOLTS[9].wall, calibration))).toBeLessThan(0.004);
+    expect(result.reason).toContain("Hold centers come from the video");
+  });
+
+  it("does not run the wider published-grid recovery without athlete identity", () => {
+    const result = alignStandardSpeedRouteWithFallback(gridFrames(), calibration).result;
+    expect(result.referenceGeometry).not.toBe("ifsc-2022-bolt-grid");
+  });
+
+  it("does not lower recovery support to accept a sparse grid", () => {
+    const result = alignStandardSpeedRouteWithFallback(gridFrames(new Set([1, 2, 3, 4, 5, 6])), calibration, { startBodyZone: gridAnchor }).result;
+    expect(result.referenceGeometry).not.toBe("ifsc-2022-bolt-grid");
+  });
+
+  it("requires direct Hold 10 and neighboring evidence for published-grid recovery", () => {
+    for (const missing of [9, 10, 11]) {
+      const result = alignStandardSpeedRouteWithFallback(gridFrames(new Set([missing])), calibration, { startBodyZone: gridAnchor }).result;
+      expect(result.referenceGeometry, `missing Hold ${missing}`).not.toBe("ifsc-2022-bolt-grid");
+    }
+  });
+
   it("jointly aligns the full route despite missing holds, moving red distractors, and climber occlusion", () => {
     const transform: Matrix = [1.02, 0.012, -0.018, -0.008, 0.975, 0.016, 0, 0, 1];
     const missing = new Set([3, 7, 12, 18]);

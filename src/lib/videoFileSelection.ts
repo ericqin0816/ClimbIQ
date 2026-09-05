@@ -17,6 +17,14 @@ interface VideoFileCandidate {
   type: string;
 }
 
+/** Update generated titles on replacement while retaining a deliberately custom name. */
+export function resolveNewVideoSessionName(currentName: string, previousFileName: string | undefined, nextFileName: string): string {
+  const withoutExtension = (name: string) => name.replace(/\.[^/.]+$/, "");
+  const generated = !currentName.trim() || currentName === "Untitled climb analysis" ||
+    previousFileName !== undefined && currentName.trim() === withoutExtension(previousFileName);
+  return generated ? withoutExtension(nextFileName) : currentName;
+}
+
 export function validateVideoFile(file: VideoFileCandidate): string | null {
   if (file.size <= 0) {
     return "This video file is empty. Choose a different recording.";
