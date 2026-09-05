@@ -17,6 +17,7 @@
 - Tracks the selected athlete through a standardized 15 m speed wall with MediaPipe Pose Landmarker.
 - Estimates a 2D wall-projected center-of-mass path, speed, efficiency, route sections, and Hold 10 contact.
 - Compares two saved attempts across total time, reaction, reviewed Hold 10 phases, and trustworthy wall thirds.
+- Moves a complete saved-attempt library between browsers or computers with a merge-safe JSON backup.
 - Processes videos entirely in the browser; videos are never uploaded or stored by ClimbIQ.
 - Exports portable JSON datasets and Obsidian-ready training notes.
 
@@ -158,7 +159,7 @@ npm run dev
 npm run check
 ```
 
-Open the dev server URL, upload a local climbing video, and press **Run full analysis**. Zones are optional unless another person appears in frame or automatic light discovery needs manual help.
+Open the dev server URL, choose or drag in one local climbing video, and press **Run full analysis**. Zones are optional unless another person appears in frame or automatic light discovery needs manual help.
 
 ### Work from another computer
 
@@ -177,6 +178,8 @@ Before starting new work on either computer, sync the pushed `main` branch:
 ```bash
 git pull --ff-only origin main
 ```
+
+Git synchronizes the app, but browser-saved attempts remain local to that computer. In **Attempt comparison**, choose **Export saved library** on the first computer and **Import session or library** on the second. Import merges by session ID: the newer saved copy wins, local-only attempts remain, and an analysis already open on screen is never silently replaced.
 
 Private videos are intentionally excluded from Git. You can upload a downloaded Drive video directly in the app. To run the repeatable timing benchmark on the Mac, put clips in `node_modules/.climbiq-private-videos/` or set `CLIMBIQ_VIDEO_DIR` to their local folder. The benchmark runner supports the standard macOS Google Chrome location and uses the macOS temporary directory for its isolated profile; set `CLIMBIQ_CHROME` only if Chrome lives somewhere else.
 
@@ -287,7 +290,7 @@ The dataset JSON includes:
 - detection warnings
 - athlete notes
 
-Use **Import Session JSON** to load a previous export back into the browser. Imported sessions restore metadata, zones, calibration, settings, timestamps, notes, and splits where possible. They do not restore the video file; reupload the matching local video if you want to review frames.
+Use **Import session or library** to load one previous session export or a complete saved-library backup. Imported sessions restore metadata, zones, calibration, settings, timestamps, notes, and splits where possible. They do not restore video files; reupload the matching local video if you want to review frames.
 
 ## Local Privacy
 

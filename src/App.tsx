@@ -1,4 +1,4 @@
-import { ChangeEvent, CSSProperties, lazy, PointerEvent, Suspense, useEffect, useMemo, useRef, useState } from "react";
+import { ChangeEvent, CSSProperties, DragEvent, lazy, PointerEvent, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import {
   resolveAutomaticPoseFinishBoundary,
   trimBiomechanicsResultAtFinish,
@@ -37,6 +37,12 @@ import { deriveAutomaticStartBodyZone, resolveAnalysisBodyZone } from "./lib/sta
 import { applyTimestampAcceptance, clearMarkerTimestamp, recalculateTimestampClimbs, sanitizeTimestampSequence } from "./lib/timestampIntegrity";
 import { captureFrame, clamp, hasUsableVideoMetadata, roundTime, sampleFrameAt, sampleZoneOpponentColor, seekTo } from "./lib/videoFrameSampler";
 import { getVideoUiState } from "./lib/videoUiState";
+import {
+  createSessionLibraryBackup,
+  isSessionLibraryBackup,
+  mergeSessionLibraries,
+} from "./lib/sessionLibrary";
+import { validateVideoFile } from "./lib/videoFileSelection";
 import { inferAutomaticWallCalibration, validateWallCalibration } from "./lib/wallCalibration";
 import type {
   Confidence,
@@ -74,7 +80,7 @@ const INITIAL_TIMESTAMPS: TimestampMarker[] = [
   marker("finishPad", "Finish Pad"),
 ];
 
-const APP_VERSION = "0.20.1";
+const APP_VERSION = "0.21.1";
 const SESSION_STORAGE_KEY = "climbiq.analysisSessions.v1";
 const AttemptComparisonPanel = lazy(() => import("./components/AttemptComparisonPanel"));
 const BiomechanicsPanel = lazy(async () => {
@@ -165,10 +171,12 @@ function App() {
   const autoAnalysisAbortRef = useRef<AbortController | null>(null);
   const pendingAutomaticContextRef = useRef<PendingAutomaticAnalysisContext | null>(null);
   const automaticLaneCandidatesRef = useRef<AnalysisLaneCandidate[]>([]);
+  const videoDragDepthRef = useRef(0);
 
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
   const [metadata, setMetadata] = useState<VideoMetadata | null>(null);
   const [videoLoadError, setVideoLoadError] = useState("");
+  const [videoDropActive, setVideoDropActive] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [jumpInput, setJumpInput] = useState("");
   const [capturedFrame, setCapturedFrame] = useState<string | null>(null);
@@ -222,8 +230,8 @@ function App() {
   const [savedSessions, setSavedSessions] = useState<SavedAnalysisSession[]>(readSavedSessions);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [sessionStatus, setSessionStatus] = useState("");
+  const [libraryStatus, setLibraryStatus] = useState("");
   const [exportStatus, setExportStatus] = useState("");
-  const [importStatus, setImportStatus] = useState("");
   const [obsidianFolderName, setObsidianFolderName] = useState("");
   const [biomechanics, setBiomechanics] = useState<BiomechanicsSession>(createDefaultBiomechanicsSession());
   const [biomechanicsRunning, setBiomechanicsRunning] = useState(false);
@@ -524,6 +532,58 @@ function App() {
     // Retain the File in app state/refs, then clear the native control so the
     // same clip can be selected again after a decode or metadata error.
     event.target.value = "";
+    selectVideoFile(file);
+  }
+
+  function handleVideoDragEnter(event: DragEvent<HTMLLabelElement>) {
+    event.preventDefault();
+    if (videoAnalysisRunning) return;
+    videoDragDepthRef.current += 1;
+    setVideoDropActive(true);
+  }
+
+  function handleVideoDragOver(event: DragEvent<HTMLLabelElement>) {
+    event.preventDefault();
+    if (event.dataTransfer) {
+      event.dataTransfer.dropEffect = videoAnalysisRunning ? "none" : "copy";
+    }
+  }
+
+  function handleVideoDragLeave(event: DragEvent<HTMLLabelElement>) {
+    event.preventDefault();
+    videoDragDepthRef.current = Math.max(0, videoDragDepthRef.current - 1);
+    if (videoDragDepthRef.current === 0) {
+      setVideoDropActive(false);
+    }
+  }
+
+  function handleVideoDrop(event: DragEvent<HTMLLabelElement>) {
+    event.preventDefault();
+    videoDragDepthRef.current = 0;
+    setVideoDropActive(false);
+    if (videoAnalysisRunning) {
+      setSessionStatus("Wait for the active analysis to finish before replacing the video.");
+      return;
+    }
+
+    const files = [...event.dataTransfer.files];
+    if (files.length !== 1) {
+      setVideoLoadError(files.length > 1
+        ? "Drop one video at a time so each analysis stays tied to the correct recording."
+        : "No video file was found in that drop.");
+      return;
+    }
+    selectVideoFile(files[0]);
+  }
+
+  function selectVideoFile(file: File) {
+    const validationError = validateVideoFile(file);
+    if (validationError) {
+      setVideoLoadError(validationError);
+      setSessionStatus(validationError);
+      return;
+    }
+
     setVideoLoadError("");
 
     if (previousObjectUrl.current) {
@@ -2815,6 +2875,21 @@ function App() {
     setSessionStatus(`Exported "${session.name}" as JSON.`);
   }
 
+  function exportSessionLibrary() {
+    if (savedSessions.length === 0) {
+      setLibraryStatus("Save at least one analysis before exporting a library backup.");
+      return;
+    }
+
+    const backup = createSessionLibraryBackup(savedSessions);
+    downloadTextFile(
+      `climbiq-library-${todayDateString()}.json`,
+      JSON.stringify(backup, null, 2),
+      "application/json",
+    );
+    setLibraryStatus(`Exported ${savedSessions.length} saved ${savedSessions.length === 1 ? "attempt" : "attempts"}.`);
+  }
+
   async function importSession(event: ChangeEvent<HTMLInputElement>) {
     if (videoAnalysisRunning) {
       setSessionStatus("Wait for the active analysis to finish before importing a session.");
@@ -2828,29 +2903,50 @@ function App() {
 
     try {
       const parsed = JSON.parse(await file.text());
+      if (isSessionLibraryBackup(parsed)) {
+        const importedSessions = parsed.sessions
+          .filter(isSavedAnalysisSession)
+          .map(sanitizeSavedSession);
+        if (importedSessions.length === 0) {
+          throw new Error("This ClimbIQ library backup does not contain any valid saved attempts.");
+        }
+
+        const merged = mergeSessionLibraries(savedSessions, importedSessions);
+        const storageError = writeSavedSessions(merged.sessions);
+        if (storageError) throw new Error(storageError);
+        setSavedSessions(merged.sessions);
+        const activeImportedCopy = activeSessionId
+          ? importedSessions.find((session) => session.id === activeSessionId)
+          : undefined;
+        const activeCopyWasUpdated = Boolean(
+          activeImportedCopy && merged.sessions.find((session) => session.id === activeSessionId) === activeImportedCopy,
+        );
+        if (activeCopyWasUpdated) {
+          // Keep an analysis already open on screen intact. Detaching it means a
+          // later Save creates a separate copy instead of silently overwriting
+          // the newer session that just arrived from another computer.
+          setActiveSessionId(null);
+        }
+        const summary = [
+          `${merged.addedCount} added`,
+          `${merged.updatedCount} updated`,
+          `${merged.unchangedCount} already current`,
+        ].join(", ");
+        setLibraryStatus(`Library imported: ${summary}. Your local-only attempts were preserved.${activeCopyWasUpdated ? " The analysis already open on screen was left unchanged; load the imported copy when you are ready." : ""}`);
+        setExportStatus(`Library imported: ${summary}.`);
+        return;
+      }
+
       const parsedSession = isDatasetExport(parsed) ? datasetToSavedSession(parsed) : parsed;
       if (!isSavedAnalysisSession(parsedSession)) {
         throw new Error("This file is not a ClimbIQ analysis session.");
       }
 
-      const safeVideoMetadata = sanitizeVideoMetadata(parsedSession.videoMetadata);
-      const session: SavedAnalysisSession = {
+      const session = sanitizeSavedSession({
         ...parsedSession,
         id: parsedSession.id || createSessionId(),
         updatedAt: new Date().toISOString(),
-        videoMetadata: safeVideoMetadata,
-        zones: sanitizeZoneMap(parsedSession.zones),
-        startLightCalibration: sanitizeStartLightCalibration(
-          parsedSession.startLightCalibration,
-          safeVideoMetadata?.duration,
-        ),
-        settings: sanitizeAnalysisSessionSettings(parsedSession.settings),
-        biomechanics: sanitizeBiomechanicsSession(parsedSession.biomechanics),
-        timestamps: sanitizeTimestampSequence(
-          mergeTimestampDefaults(parsedSession.timestamps),
-          safeVideoMetadata?.duration,
-        ),
-      };
+      });
       const next = [session, ...savedSessions.filter((item) => item.id !== session.id)].sort((a, b) =>
         b.updatedAt.localeCompare(a.updatedAt),
       );
@@ -2859,11 +2955,12 @@ function App() {
       setSavedSessions(next);
       applySession(session);
       setSessionStatus(`Session imported. Reload the matching local video file if you want to review frames.`);
+      setLibraryStatus(`Imported "${session.name}" and opened its saved results.`);
       setExportStatus(`Imported "${session.name}".`);
-      setImportStatus(`Imported "${session.name}". Saved attempts can be compared without their videos.`);
     } catch (error) {
-      setSessionStatus(error instanceof Error ? error.message : "Session import failed.");
-      setImportStatus(error instanceof Error ? error.message : "Session import failed.");
+      const message = error instanceof Error ? error.message : "Session import failed.";
+      setSessionStatus(message);
+      setLibraryStatus(message);
     } finally {
       event.target.value = "";
     }
@@ -2908,6 +3005,7 @@ function App() {
 
   return (
     <main className="app-shell" id="top">
+      <a className="skip-link" href="#upload">Skip to analysis</a>
       <header className="site-header">
         <a className="brand" href="#top" aria-label="ClimbIQ home">
           <strong>ClimbIQ</strong>
@@ -2949,15 +3047,23 @@ function App() {
 
       <section className="layout-grid">
         <Card id="upload" title={hasSelectedVideo ? "Video" : "Upload a video"} className="full launch-card">
-          <label className={hasSelectedVideo ? "upload-dropzone loaded" : "upload-dropzone"}>
+          <label
+            className={`upload-dropzone${hasSelectedVideo ? " loaded" : ""}${videoDropActive ? " drag-active" : ""}`}
+            onDragEnter={handleVideoDragEnter}
+            onDragOver={handleVideoDragOver}
+            onDragLeave={handleVideoDragLeave}
+            onDrop={handleVideoDrop}
+          >
             <span className="upload-icon" aria-hidden="true">↑</span>
             <span className="upload-copy">
-              <strong>{hasSelectedVideo ? metadata?.fileName : "Drop in a speed-climbing video"}</strong>
-              <small>{hasSelectedVideo
+              <strong>{videoDropActive ? "Release to load this video" : hasSelectedVideo ? metadata?.fileName : "Drop in a speed-climbing video"}</strong>
+              <small>{videoDropActive
+                ? "One recording at a time"
+                : hasSelectedVideo
                 ? hasLoadedVideo ? "Ready to analyze · choose another video to replace it" : "Reading video details…"
                 : "MOV, MP4, or any video your browser can play"}</small>
             </span>
-            <span className="upload-action">{hasSelectedVideo ? "Replace video" : "Choose video"}</span>
+            <span className="upload-action">{videoDropActive ? "Drop video" : hasSelectedVideo ? "Replace video" : "Choose video"}</span>
             <input aria-label={hasSelectedVideo ? "Replace video" : "Choose video"} type="file" accept="video/*" onChange={handleVideoUpload} disabled={videoAnalysisRunning} />
           </label>
           {!hasSelectedVideo && (
@@ -3022,13 +3128,22 @@ function App() {
           <Suspense fallback={<p className="muted">Preparing saved attempt comparison…</p>}>
             <AttemptComparisonPanel sessions={savedSessions} />
           </Suspense>
-          <div className="button-row">
-            <label className="file-button">
-              Import Session JSON
-              <input type="file" accept="application/json,.json" onChange={importSession} disabled={videoAnalysisRunning} />
-            </label>
+          <div className="library-transfer">
+            <div>
+              <strong>Move saved attempts between computers</strong>
+              <p className="muted">Export one library backup on your PC, then import it here. Newer copies update while attempts saved only on this Mac stay intact.</p>
+            </div>
+            <div className="button-row">
+              <button onClick={exportSessionLibrary} disabled={savedSessions.length === 0 || videoAnalysisRunning}>
+                Export saved library
+              </button>
+              <label className="file-button">
+                Import session or library
+                <input type="file" accept="application/json,.json" onChange={importSession} disabled={videoAnalysisRunning} />
+              </label>
+            </div>
+            {libraryStatus && <p className="status-message" role="status">{libraryStatus}</p>}
           </div>
-          {importStatus && <p className="status-message" role="status">{importStatus}</p>}
         </Card>
 
         {hasSelectedVideo && (
@@ -3101,6 +3216,7 @@ function App() {
             <button className="primary" onClick={saveCurrentSession} disabled={videoAnalysisRunning}>Save Session</button>
             <button onClick={renameActiveSession} disabled={videoAnalysisRunning}>Rename Session</button>
             <button onClick={duplicateActiveSession} disabled={videoAnalysisRunning}>Duplicate Session</button>
+            <button onClick={exportCurrentSession} disabled={videoAnalysisRunning}>Export current session</button>
           </div>
           <div className="session-load-row">
             <select value={activeSessionId ?? ""} onChange={(event) => loadSelectedSession(event.target.value)} disabled={videoAnalysisRunning}>
@@ -5061,28 +5177,30 @@ function readSavedSessions(): SavedAnalysisSession[] {
     }
     return parsed
       .filter(isSavedAnalysisSession)
-      .map((session) => {
-        const videoMetadata = sanitizeVideoMetadata(session.videoMetadata);
-        return {
-          ...session,
-          videoMetadata,
-          zones: sanitizeZoneMap(session.zones),
-          startLightCalibration: sanitizeStartLightCalibration(
-            session.startLightCalibration,
-            videoMetadata?.duration,
-          ),
-          settings: sanitizeAnalysisSessionSettings(session.settings),
-          biomechanics: sanitizeBiomechanicsSession(session.biomechanics),
-          timestamps: sanitizeTimestampSequence(
-            mergeTimestampDefaults(session.timestamps),
-            videoMetadata?.duration,
-          ),
-        };
-      })
+      .map(sanitizeSavedSession)
       .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
   } catch {
     return [];
   }
+}
+
+function sanitizeSavedSession(session: SavedAnalysisSession): SavedAnalysisSession {
+  const videoMetadata = sanitizeVideoMetadata(session.videoMetadata);
+  return {
+    ...session,
+    videoMetadata,
+    zones: sanitizeZoneMap(session.zones),
+    startLightCalibration: sanitizeStartLightCalibration(
+      session.startLightCalibration,
+      videoMetadata?.duration,
+    ),
+    settings: sanitizeAnalysisSessionSettings(session.settings),
+    timestamps: sanitizeTimestampSequence(
+      mergeTimestampDefaults(session.timestamps),
+      videoMetadata?.duration,
+    ),
+    biomechanics: sanitizeBiomechanicsSession(session.biomechanics),
+  };
 }
 
 function writeSavedSessions(sessions: SavedAnalysisSession[]): string | null {
@@ -5102,6 +5220,8 @@ function isSavedAnalysisSession(value: unknown): value is SavedAnalysisSession {
   const candidate = value as Partial<SavedAnalysisSession>;
   return (
     candidate.version === 1 &&
+    typeof candidate.id === "string" &&
+    candidate.id.length > 0 &&
     typeof candidate.name === "string" &&
     typeof candidate.createdAt === "string" &&
     typeof candidate.updatedAt === "string" &&
