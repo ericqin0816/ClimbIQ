@@ -176,14 +176,15 @@ export async function detectTopFinishSignal({
   // A standalone upper electronic change may be the timing unit resetting
   // after the athlete has already descended. It becomes authoritative only
   // when physical top contact occurs in the same window or an entered official
-  // total independently agrees. Otherwise preserve it as a review suggestion.
+  // total agrees. Nearby motion remains review support, not an independent
+  // clock reference: foreground people can coincide with a timing-unit reset.
   result = requireUpperFinishCorroboration(result, contactDiscovery, expectedFinishTime);
   return { result, zone: discovery.zone, calibration: discovery.calibration };
 }
 
-/** Keeps an isolated upper-light transition review-only because timing units
- * can reset after the athlete has descended. Exported for deterministic policy
- * tests independent of browser video decoding. */
+/** Only an entered official total can promote an upper visual cue to High.
+ * Nearby motion supports review but may be a spectator during a timer reset.
+ * Exported for deterministic policy tests independent of browser decoding. */
 export function requireUpperFinishCorroboration(
   result: StartSignalDetectionResult,
   contactDiscovery: Pick<TopFinishDiscovery, "found" | "rawTime">,
@@ -193,8 +194,18 @@ export function requireUpperFinishCorroboration(
     result.rawTime !== undefined && Math.abs(contactDiscovery.rawTime - result.rawTime) <= 1.2;
   const officiallyCorroborated = expectedFinishTime !== undefined && result.rawTime !== undefined &&
     Math.abs(expectedFinishTime - result.rawTime) <= 0.45;
-  if (!result.detected || physicallyCorroborated || officiallyCorroborated) {
+  if (!result.detected || officiallyCorroborated) {
     return result;
+  }
+
+  if (physicallyCorroborated) {
+    // A spectator entering the upper image can look like a top reach while
+    // the timing unit resets. Two correlated visual heuristics are not an
+    // independent finish reference. Keep the cursor, but never auto-accept it.
+    const reason = `${result.reason} Nearby upper-wall motion supports inspection, but cannot independently distinguish pad contact from a timer reset or foreground person. Review the finish frame; no official-time cross-check corroborated this cue.`;
+    return { ...result, confidence: "Medium", reason,
+      candidates: result.candidates?.map(candidate => ({ ...candidate, confidence: "Medium", reason })),
+      debug: { ...result.debug, selectedCandidateReason: reason } };
   }
 
   const reviewReason = "An upper color change was not independently corroborated by nearby top motion or an official total. No finish time was established; unverified color-change candidates remain available for inspection.";

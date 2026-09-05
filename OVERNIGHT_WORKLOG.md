@@ -261,3 +261,25 @@ before pushing verified checkpoints because the user also works from a Mac.
   Starts remained unaccepted. 9199 retained 44/52 COM, 19 registered holds, and
   passed the new review-cancellation and export-acceptance checks. This is
   regression/workflow evidence, not a labeled accuracy result.
+
+## 0.25.1 safety correction — still working toward seven hours
+
+- 0.25.0 (`29c16ef`) pushed, GitHub verification passed, and live 9199 full
+  review/save/export flow passed with native frame time 11.470 s (workflow
+  acceptance only, not a contact label).
+- Final 30-copy 0.25.0 batch: zero workflow errors and zero drift from accepted
+  original timing observations. However a new paired-report comparator exposed
+  an additional unverified accepted Finish on silent 9076 at 29.717 s. This
+  shows why matching old source observations alone is an insufficient check.
+- Direct inspection: an upper light resets at 29.717 while a foreground person
+  enters the upper image. The motion fallback reports a false top reach at
+  30.317, accidentally corroborating the reset. Earlier footage already shows
+  a stopped timer. Neither late event is a credible finish boundary.
+- Fix: nearby upper motion can support a review cursor but cannot promote an
+  upper indicator to automatic acceptance. Only agreement with an entered
+  official total can promote that fallback to High. The lower verified sensor
+  path remains unchanged. Exact observed failure times have a policy unit test.
+- New real-browser interruption test passed cancellation during Start, Finish,
+  and pose stages; cursor restored to 2.500 s, accepted markers preserved,
+  active-run replacement blocked, rapid replacement and invalid-file recovery
+  passed. The test uses a fresh isolated browser profile and no user library.

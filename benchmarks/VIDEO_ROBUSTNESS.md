@@ -48,6 +48,26 @@ are saved incrementally in ignored `test-results/`, including per-case failures.
 
 ## Interpret outcomes
 
+Compare two completed runs on identical checksummed media:
+
+```sh
+npm run benchmark:compare -- test-results/BEFORE.json test-results/AFTER.json
+```
+
+This separates changes between app versions from differences between an original
+and a transformed copy. Different/missing media, unfinished reports, duplicate
+cases, and workflow errors cannot silently count as successful pairs. Coverage
+is compared only at the same pose sampling rate and full-workflow mode. Exit 1
+means unpaired cases or output timing drift; exit 2 means newly accepted timing
+without independent verification, which needs inspection. Neither matching
+outputs nor increased acceptance is proof of better accuracy.
+
+Interruption/replacement checks are available separately with
+`npm run test:cancellation` and the same `CLIMBIQ_VIDEO_DIR` / `CLIMBIQ_E2E_URL`
+settings. They require original 9199 and 9076, cancel three analysis stages,
+and verify cursor restoration, marker preservation, busy-state replacement
+blocking, rapid replacement, and invalid-file recovery.
+
 - **Consistent:** accepted boundary agrees with a reviewed original reference.
 - **Availability loss:** an originally accepted boundary is now missing/reviewed.
   This is a usability regression, not a wrong automatic measurement.

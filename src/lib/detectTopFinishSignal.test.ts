@@ -133,9 +133,19 @@ describe("perspective-aware upper finish indicator", () => {
     expect(requireUpperFinishCorroboration({ ...finishResult(14.29), confidence: "Medium" }, { found: false }).detected).toBe(false);
   });
 
-  it("keeps a high upper light when physical top contact agrees", () => {
+  it("keeps coincident upper motion review-only without an official cross-check", () => {
     const result = requireUpperFinishCorroboration(finishResult(14.29), { found: true, rawTime: 13.7 });
-    expect(result.confidence).toBe("High");
+    expect(result.confidence).toBe("Medium");
+    expect(result.detected).toBe(true);
+    expect(result.reason).toContain("foreground person");
+  });
+
+  it("cannot accept a timer reset corroborated by a late foreground-person trajectory", () => {
+    // Observed failure times from the silent 9076 stress copy, not contact labels.
+    const result = requireUpperFinishCorroboration(finishResult(29.717), { found: true, rawTime: 30.317 });
+    expect(result.confidence).toBe("Medium");
+    expect(result.rawTime).toBe(29.717);
+    expect(result.reason).toContain("no official-time cross-check");
   });
 
   it("keeps a high upper light when an official total agrees", () => {
