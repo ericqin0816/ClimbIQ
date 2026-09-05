@@ -15,6 +15,7 @@ import {
 } from "./videoFrameSampler";
 import { resolveFinishSearchWindow } from "./finishSearchWindow";
 import { readDecodedVideoFrameTime } from "./decodedVideoFrame";
+import { finishObservationInterval } from "./timingEvidence";
 
 export interface FinishColorSample {
   time: number;
@@ -24,6 +25,7 @@ export interface FinishColorSample {
   /** Seek cursor retained separately from the decoded source-frame timestamp. */
   cursorTime?: number;
   timestampMethod?: "video-frame" | "seek-cursor";
+  sourceFrameDurationSeconds?: number;
 }
 
 interface DetectFinishSignalOptions {
@@ -491,6 +493,7 @@ async function sampleFinishColors(
       time: decoded?.mediaTime ?? sampled.time,
       cursorTime: sampled.time,
       timestampMethod: decoded ? "video-frame" : "seek-cursor",
+      sourceFrameDurationSeconds: decoded?.durationSeconds,
       averageRgb: sampled.averageRgb,
       directionalRgb: sampled.directionalRgb,
     });
@@ -527,6 +530,7 @@ function toResult(
   }));
   return {
     detected: analysis.detected,
+    observationIntervalSeconds: finishObservationInterval(analysis.samples, analysis.rawTime),
     rawTime: analysis.rawTime,
     confidence: analysis.confidence,
     reason: analysis.reason,

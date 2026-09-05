@@ -209,6 +209,7 @@ async function runTiming(protocol, fileName) {
       finishSuggestion: finishSuggestion?.textContent.trim() ?? '',
       status: document.querySelector('.quick-analysis-box .status-message')?.textContent.trim() ?? '',
       summary: document.querySelector('.run-summary')?.innerText ?? '',
+      timingPrecisionNote: document.querySelector('.timing-precision-note')?.textContent ?? '',
       routeMarkers: [...document.querySelectorAll('.video-route-hold')].map(group => ({
         holdId: Number(group.querySelector('text')?.textContent),
         x: Number(group.querySelector('circle')?.getAttribute('cx')) / document.querySelector('video').videoWidth,
@@ -280,7 +281,18 @@ async function verifySavedWorkflow({ evaluate, send }) {
   const hasFinish = saved.timestamps.some(marker => marker.id === "finishPad" && marker.rawTime !== null);
   const validFrames = saved.biomechanics?.result?.metrics?.validFrames ?? 0;
   const savedNativeFrames = saved.biomechanics?.result?.frames?.filter(frame => Number.isFinite(frame.decodedFrameRawTime)).length ?? 0;
-  const sourceFrameTimingAudit = (await captureDatasetExport(evaluate)).sourceFrameTimingAudit;
+  const timingDataset = await captureDatasetExport(evaluate);
+  const sourceFrameTimingAudit = timingDataset.sourceFrameTimingAudit;
+  const observationIntervals = saved.timestamps.filter(marker => marker.observationIntervalSeconds !== undefined)
+    .map(marker => ({ id: marker.id, seconds: marker.observationIntervalSeconds }));
+  for (const observation of observationIntervals) {
+    const exported = timingDataset.acceptedTimestamps?.find(marker => marker.markerId === observation.id);
+    if (exported?.observationIntervalSeconds !== observation.seconds) throw new Error('Dataset export lost boundary observation spacing.');
+  }
+  if (hasFinish) {
+    const precisionNote = await evaluate(`document.querySelector('.timing-precision-note')?.textContent ?? ''`);
+    if (!precisionNote.includes('accuracy bound')) throw new Error('Accepted timing lacks an explicit precision limitation.');
+  }
   if (savedNativeFrames && (sourceFrameTimingAudit?.nativeTimingFrames !== savedNativeFrames || sourceFrameTimingAudit?.isEventAccuracyBound !== false)) {
     throw new Error('Dataset export lost native sampled-frame timing or mislabeled it as event accuracy.');
   }
@@ -352,6 +364,7 @@ async function verifySavedWorkflow({ evaluate, send }) {
     manualReviewWorkflow = await verifyHold10Review({ evaluate, send }, saved);
   }
   return { savedAndReloaded: true, identicalComparisonPassed: hasFinish,
+    observationIntervals,
     secondPass,
     secondPassRetryPassed,
     manualReviewWorkflow,

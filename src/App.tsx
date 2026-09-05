@@ -45,6 +45,7 @@ import { fuseStartEvidence, type FusedStartDecision, type StartEvidence } from "
 import { assessAutomaticStartBodyAudit } from "./lib/startBodyAudit";
 import { deriveAutomaticStartBodyZone, resolveAnalysisBodyZone } from "./lib/startRegion";
 import { applyTimestampAcceptance, clearMarkerTimestamp, recalculateTimestampClimbs, sanitizeTimestampSequence, sanitizeAcceptanceMode, timestampAcceptanceAudit } from "./lib/timestampIntegrity";
+import { finishPrecisionNote, sanitizeObservationInterval, timingConfidence } from "./lib/timingEvidence";
 import { captureFrame, captureVideoPixels, clamp, hasUsableVideoMetadata, roundTime, sampleFrameAt, sampleZoneOpponentColor, seekTo } from "./lib/videoFrameSampler";
 import { getVideoUiState } from "./lib/videoUiState";
 import {
@@ -92,7 +93,7 @@ const INITIAL_TIMESTAMPS: TimestampMarker[] = [
   marker("finishPad", "Finish Pad"),
 ];
 
-const APP_VERSION = "0.28.4";
+const APP_VERSION = "0.28.5";
 const SESSION_STORAGE_KEY = "climbiq.analysisSessions.v1";
 const AttemptComparisonPanel = lazy(() => import("./components/AttemptComparisonPanel"));
 const FinishReviewPanel = lazy(() => import("./components/FinishReviewPanel"));
@@ -2227,6 +2228,7 @@ function App() {
           ...candidates.filter((item) => item !== candidate),
         ];
         acceptTimestamp("finishPad", result.rawTime, "Finish light detection", result.confidence, {
+          observationIntervalSeconds: result.observationIntervalSeconds,
           detectedRawTime: result.rawTime,
           note: `${notePrefix} ${result.reason}`,
         });
@@ -2412,7 +2414,7 @@ function App() {
     rawTime: number,
     source: TimestampSource,
     confidence: Confidence,
-    acceptanceMetadata?: { detectedRawTime?: number; offsetApplied?: number; note?: string; frameReviewed?: boolean },
+    acceptanceMetadata?: { detectedRawTime?: number; offsetApplied?: number; note?: string; frameReviewed?: boolean; observationIntervalSeconds?: number },
   ) {
     if (id === "startSignal") {
       pendingAutomaticContextRef.current = null;
@@ -2433,6 +2435,7 @@ function App() {
         offsetApplied: acceptanceMetadata?.offsetApplied,
         note: acceptanceMetadata?.note,
         acceptanceMode: acceptanceMetadata?.frameReviewed ? "frame-review" : source === "Manual" || source === "Official total time" ? "manual-entry" : "automatic",
+        observationIntervalSeconds: acceptanceMetadata?.observationIntervalSeconds,
       });
       return result.timestamps;
     });
@@ -2671,6 +2674,7 @@ function App() {
       offsetApplied: item.offsetApplied ?? 0,
       source: item.source,
       confidence: item.confidence,
+      observationIntervalSeconds: item.observationIntervalSeconds ?? null,
       ...timestampAcceptanceAudit(item),
       userAdjusted: item.rawTime !== null && item.detectedRawTime !== undefined && item.detectedRawTime !== null
         ? Math.abs(item.rawTime - item.detectedRawTime) > 0.001
@@ -3430,13 +3434,14 @@ function App() {
             <div className="summary-primary-metric">
               <span>Total climb</span>
               <strong>{calculatedClimbTime === null ? "—" : calculatedClimbTime.toFixed(3)}<small>{calculatedClimbTime === null ? "" : "s"}</small></strong>
-              <small>{acceptedFinish.confidence} confidence</small>
+              <small>{timingConfidence(acceptedStart, acceptedFinish)} detection confidence</small>
             </div>
             <div><span>First movement</span><strong>{acceptedReactionTime === null ? "—" : `${acceptedReactionTime.toFixed(3)}s`}</strong><small>after start</small></div>
             <div><span>Hold 10</span><strong>{acceptedHold10.climbTime === null ? "—" : `${acceptedHold10.climbTime.toFixed(3)}s`}</strong><small>{acceptedHold10.rawTime === null ? "awaiting contact" : "split time"}</small></div>
             <div><span>Tracking quality</span><strong>{effectiveBiomechanicsResult?.metrics.quality ?? "—"}</strong><small>{effectiveBiomechanicsResult ? "on-device pose" : "run COM analysis"}</small></div>
           </div>
           <div className="summary-footer">
+            {calculatedClimbTime !== null && <p className="timing-precision-note"><span>{finishPrecisionNote(acceptedFinish)}</span></p>}
             <p><strong>Review the analysis</strong><span>Check the video against the detected timestamps, then open insights for pace and center-of-mass details.</span></p>
           </div>
         </section>
@@ -5426,6 +5431,7 @@ function timestampsFromDataset(values: any[], durationSeconds?: number): Timesta
     existing.confidence = value.confidence ?? "None";
     existing.note = value.note ?? "";
     existing.acceptanceMode = sanitizeAcceptanceMode(value.acceptanceMode);
+    existing.observationIntervalSeconds = sanitizeObservationInterval(value.observationIntervalSeconds);
   }
   return sanitizeTimestampSequence(next, durationSeconds);
 }

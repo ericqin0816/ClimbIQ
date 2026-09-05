@@ -100,7 +100,7 @@ export default memo(function AttemptComparisonPanel({ sessions }: { sessions: Sa
           <EvidenceQuality label="New attempt" session={comparison.candidate} />
         </div>
         <p className="muted comparison-note">
-          Negative values are shorter times. Small differences stay unclassified: timing uses a minimum 0.100s threshold, body-motion timing 0.200s, and COM sections at least two pose sample intervals. These are conservative comparison rules, not measured error bounds. Hold 10 phases require reviewed contact in both sessions. Contact phases and wall thirds overlap and must not be added together.
+          Negative values are shorter times. Small differences stay unclassified: timing uses a minimum 0.100s threshold, body-motion timing 0.200s, and COM sections at least two pose sample intervals. Recorded video observation intervals can increase these thresholds. These are conservative comparison rules, not measured error bounds. Hold 10 phases require reviewed contact in both sessions. Contact phases and wall thirds overlap and must not be added together.
         </p>
       </div>
     </details>

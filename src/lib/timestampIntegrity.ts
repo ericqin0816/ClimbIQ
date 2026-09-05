@@ -1,7 +1,9 @@
 import type { Confidence, TimestampMarker, TimestampSource } from "../types";
 import { isLegacyAutomaticHold10Marker } from "./hold10MarkerPolicy";
+import { sanitizeObservationInterval } from "./timingEvidence";
 
 export interface TimestampAcceptanceOptions {
+  observationIntervalSeconds?: number;
   id: TimestampMarker["id"];
   rawTime: number;
   source: TimestampSource;
@@ -95,6 +97,7 @@ export function applyTimestampAcceptance(
         offsetApplied: options.offsetApplied ?? 0,
         note: options.note,
         acceptanceMode: options.acceptanceMode,
+        observationIntervalSeconds: sanitizeObservationInterval(options.observationIntervalSeconds),
         source: options.source,
         confidence: options.confidence,
       }
@@ -179,6 +182,7 @@ function clearMarker(marker: TimestampMarker): TimestampMarker {
     offsetApplied: undefined,
     note: undefined,
     acceptanceMode: undefined,
+    observationIntervalSeconds: undefined,
     source: "Not set",
     confidence: "None",
   };
@@ -201,6 +205,7 @@ function sanitizeEvidenceMetadata(marker: TimestampMarker, durationSeconds?: num
       : undefined,
     note: typeof marker.note === "string" ? marker.note.slice(0, 4000) : undefined,
     acceptanceMode: sanitizeAcceptanceMode(marker.acceptanceMode),
+    observationIntervalSeconds: marker.rawTime === null ? undefined : sanitizeObservationInterval(marker.observationIntervalSeconds),
   };
 }
 

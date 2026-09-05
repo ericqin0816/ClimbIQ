@@ -5,6 +5,14 @@ import { compactBiomechanicsSession, sanitizeBiomechanicsSession } from "./biome
 import { sanitizeTimestampSequence } from "./timestampIntegrity";
 
 describe("attempt comparison", () => {
+  it("does not call a 150 ms difference a gain when finish observations were 200 ms apart", () => {
+    const baseline=makeSession("baseline",{start:1,finish:11});
+    const candidate=makeSession("candidate",{start:1,finish:10.85});
+    baseline.timestamps.find(marker=>marker.id==="finishPad")!.observationIntervalSeconds=.2;
+    const total=row(compareAttempts(baseline,candidate),"total");
+    expect(total).toMatchObject({outcome:"similar",comparisonFloorSeconds:.4});
+    expect(total?.deltaSeconds).toBe(-.15);
+  });
   it("compares accepted total, reaction, and Hold 10 phases", () => {
     const baseline = makeSession("baseline", { start: 2, movement: 2.2, hold10: 6.5, finish: 12 });
     const candidate = makeSession("candidate", { start: 3, movement: 3.18, hold10: 7.2, finish: 12.7 });

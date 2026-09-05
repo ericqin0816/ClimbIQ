@@ -8,6 +8,21 @@ import {
 } from "./timestampIntegrity";
 
 describe("timestamp integrity", () => {
+  it("preserves measured observation spacing through JSON and clears it when a boundary is replaced", () => {
+    const accepted=applyTimestampAcceptance(populated(),{id:"finishPad",rawTime:15,source:"Finish light detection",confidence:"High",observationIntervalSeconds:.2});
+    const restored=sanitizeTimestampSequence(JSON.parse(JSON.stringify(accepted.timestamps)),20);
+    expect(restored.find(marker=>marker.id==="finishPad")?.observationIntervalSeconds).toBe(.2);
+    const edited=applyTimestampAcceptance(restored,{id:"finishPad",rawTime:14.9,source:"Manual",confidence:"Medium"});
+    expect(edited.timestamps.find(marker=>marker.id==="finishPad")?.observationIntervalSeconds).toBeUndefined();
+    expect(clearMarkerTimestamp(restored,"finishPad").find(marker=>marker.id==="finishPad")?.observationIntervalSeconds).toBeUndefined();
+  });
+  it("discards invalid imported observation intervals", () => {
+    for(const value of [null,".2",-1,0,Infinity,5]) {
+      const markers=populated();
+      Object.assign(markers.find(marker=>marker.id==="finishPad")!,{observationIntervalSeconds:value});
+      expect(sanitizeTimestampSequence(markers,20).find(marker=>marker.id==="finishPad")?.observationIntervalSeconds).toBeUndefined();
+    }
+  });
   it("distinguishes automatic, interactive, and legacy acceptance without creating ground truth", () => {
     const marker = populated()[0];
     expect(timestampAcceptanceAudit({ ...marker, acceptanceMode: "automatic" })).toMatchObject({ accepted: true, userAccepted: false, isGroundTruthLabel: false });

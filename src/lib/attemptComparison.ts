@@ -3,6 +3,7 @@ import { analyzeRouteSplits } from "./routeSplits";
 import { isBiomechanicsResultFresh } from "./biomechanicsFreshness";
 import { sanitizeTimestampSequence } from "./timestampIntegrity";
 import { validateWallCalibration } from "./wallCalibration";
+import { observationComparisonFloor } from "./timingEvidence";
 
 export type AttemptMetricId =
   | "total"
@@ -284,10 +285,10 @@ function minimumConfidence(...values: Confidence[]): Confidence {
 }
 
 function timingComparisonFloor(...markers: TimestampMarker[]): number {
-  // Source video frame intervals and detector timing error are not yet stored.
-  // Do not infer millisecond accuracy from decimal places or confidence labels.
-  return markers.some((marker) => marker.source === "Body motion detection" || marker.source === "Motion-based estimate")
-    ? 0.2 : 0.1;
+  // Retain the legacy minimum when source evidence is absent. Coarse observed
+  // intervals can only increase this policy; they are not measured error bars.
+  const minimum = markers.some((marker) => marker.source === "Body motion detection" || marker.source === "Motion-based estimate") ? 0.2 : 0.1;
+  return Math.max(minimum, observationComparisonFloor(markers));
 }
 
 function finiteFraction(value: number | undefined): number | undefined {

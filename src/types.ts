@@ -141,6 +141,8 @@ export interface DetectionCandidate {
 }
 
 export interface StartSignalDetectionResult {
+  /** Observed source-frame/scan bracket, not a validated timing error bound. */
+  observationIntervalSeconds?: number;
   detected: boolean;
   rawTime?: number;
   confidence: Confidence;
@@ -213,6 +215,8 @@ export interface FirstMovementDetectionResult {
 }
 
 export interface TimestampMarker {
+  /** Observed video interval at this boundary; never an accuracy guarantee. */
+  observationIntervalSeconds?: number;
   id: "startSignal" | "firstMovement" | "committedLaunch" | "firstHold" | "hold10" | "finishPad";
   label: string;
   rawTime: number | null;
