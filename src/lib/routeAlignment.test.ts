@@ -64,6 +64,21 @@ describe("persistent visual route alignment", () => {
     expect(result.referenceGeometry).not.toBe("ifsc-2022-bolt-grid");
   });
 
+  it("allows a supported route inside a broad body region without treating its center as an exact hand position", () => {
+    const broadAnchor = { ...gridAnchor, x1: 0.36, x2: 0.88 };
+    const result = alignStandardSpeedRouteWithFallback(gridFrames(), calibration, { startBodyZone: broadAnchor }).result;
+    expect(result.aligned, result.reason).toBe(true);
+    expect(result.referenceGeometry).toBe("ifsc-2022-bolt-grid");
+    expect(result.diagnostics.matchedHoldIds.length).toBeGreaterThanOrEqual(19);
+    expect(result.diagnostics.startAnchorDistanceNormalized).toBeGreaterThan(0.08);
+  });
+
+  it("does not use a strong grid outside the selected athlete's narrow region", () => {
+    const wrongAnchor = { ...gridAnchor, x1: 0.48, x2: 0.60 };
+    const result = alignStandardSpeedRouteWithFallback(gridFrames(), calibration, { startBodyZone: wrongAnchor }).result;
+    expect(result.referenceGeometry).not.toBe("ifsc-2022-bolt-grid");
+  });
+
   it("does not lower recovery support to accept a sparse grid", () => {
     const result = alignStandardSpeedRouteWithFallback(gridFrames(new Set([1, 2, 3, 4, 5, 6])), calibration, { startBodyZone: gridAnchor }).result;
     expect(result.referenceGeometry).not.toBe("ifsc-2022-bolt-grid");
@@ -177,8 +192,9 @@ describe("persistent visual route alignment", () => {
     const result = alignStandardSpeedRouteVisually(frames, calibration);
 
     expect(result.aligned).toBe(false);
-    expect(result.diagnostics.ambiguous).toBe(true);
+    expect(result.hold10Image).toBeUndefined();
     expect(result.reason).toContain("Two different route placements");
+    expect(result.diagnostics.ambiguous).toBe(true);
   });
 
   it("uses the selected athlete start zone to choose between two valid macro routes", () => {
@@ -210,6 +226,23 @@ describe("persistent visual route alignment", () => {
     expect(result.diagnostics.ambiguous).toBe(false);
     expect(result.diagnostics.startAnchorDistanceNormalized).toBeLessThan(0.015);
     expect(pointDistance(result.holds[9].observedImage!, apply(right, projected[9]))).toBeLessThan(0.01);
+  });
+
+  it("still refuses two equally supported routes when a broad athlete region does not distinguish them", () => {
+    const left: Matrix = [1, 0, -0.027, 0, 1, 0.004, 0, 0, 1];
+    const right: Matrix = [1, 0, 0.027, 0, 1, 0.004, 0, 0, 1];
+    const frames = Array.from({ length: 3 }, () => {
+      const image = makeFrame(360, 720);
+      drawRoute(image, left, new Set(), pink, 3);
+      drawRoute(image, right, new Set(), red, 3);
+      return image;
+    });
+    const center = (projected[0].x + projected[1].x) / 2;
+    const result = alignStandardSpeedRouteVisually(frames, calibration, {
+      startBodyZone: { id: "startBody", label: "Broad region", x1: center - 0.18, x2: center + 0.18, y1: 0.8, y2: 0.98 },
+    });
+    expect(result.aligned).toBe(false);
+    expect(result.diagnostics.ambiguous).toBe(true);
   });
 
   it("ignores yellow rope and large red regions while retaining faint pink holds", () => {

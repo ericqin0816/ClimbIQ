@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { RGB, StartLightCalibration } from "../types";
-import { analyzeFinishColorSamples, resolveFinishRefinement, type FinishColorSample } from "./detectFinishSignal";
+import { analyzeFinishColorSamples, appendFinishFrameSample, resolveFinishRefinement, type FinishColorSample } from "./detectFinishSignal";
 
 const green: RGB = { r: 70, g: 92, b: 58 };
 const blue: RGB = { r: 70, g: 62, b: 105 };
@@ -11,6 +11,42 @@ const calibration: StartLightCalibration = {
 };
 
 describe("same-lane automatic finish detection", () => {
+  it("timestamps source frames instead of the later seek cursor and ignores duplicate decoded frames", () => {
+    const samples: FinishColorSample[] = [];
+    for (let index = 0; index < 30; index++) {
+      const time = 21.31 + index * 0.0345;
+      for (const offset of [0.001, 0.028]) appendFinishFrameSample(samples, {
+        time, cursorTime: time + offset, timestampMethod: "video-frame",
+        averageRgb: index < 10 ? blue : green,
+      });
+    }
+    expect(samples).toHaveLength(30);
+    expect(analyzeFinishColorSamples(samples, calibration).rawTime).toBeCloseTo(21.655, 6);
+    expect(samples[10].cursorTime).toBeCloseTo(21.656, 6);
+  });
+
+  it("retains seek-time fallback when native frame timing is unavailable and refuses backward samples", () => {
+    const samples: FinishColorSample[] = [];
+    appendFinishFrameSample(samples, { time: 1.05, averageRgb: blue, timestampMethod: "seek-cursor" });
+    appendFinishFrameSample(samples, { time: 1.04, averageRgb: green, timestampMethod: "video-frame" });
+    appendFinishFrameSample(samples, { time: 1.10, averageRgb: green, timestampMethod: "seek-cursor" });
+    expect(samples.map(sample => sample.time)).toEqual([1.05, 1.10]);
+  });
+
+  it("recovers the source-matched 12.24 clip's first lower-lamp flash from recorded colors", () => {
+    // Pixel summaries from the supplied recording, not a boundary label derived
+    // from its total. Native frame 21.620 is still blue; 21.655 returns green.
+    const clipCalibration = { beforeStartRGB: {r:90,g:87,b:78}, afterStartRGB: {r:91,g:86,b:100}, colorDelta:22.045 };
+    const samples = Array.from({length:30}, (_, index) => ({
+      time: 21.31 + index * .0345,
+      averageRgb: index < 10 ? {r:94,g:90,b:105} : {r:94,g:88,b:76},
+      directionalRgb: index < 10 ? {r:93,g:88,b:91} : {r:94,g:88,b:76},
+    }));
+    const result = analyzeFinishColorSamples(samples, clipCalibration);
+    expect(result.detected).toBe(true);
+    expect(result.rawTime).toBeCloseTo(21.655, 6);
+  });
+
   it("does not mistake a red-dominant obstruction for a green return lamp", () => {
     const darkCalibration = {
       beforeStartRGB: { r: 28, g: 37, b: 33 },

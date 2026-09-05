@@ -4,9 +4,9 @@
   "reports": [
     {
       "id": "2026-09-05-screenshot-12-24",
-      "sourceFileName": null,
-      "sourceSha256": null,
-      "sourceStatus": "awaiting-matching-video",
+      "sourceFileName": "12.24.mov",
+      "sourceSha256": "b981cc57f8d3d4fe9c57e4e6414f23457ad8bc7eb7cbec5a95c969707d21b333",
+      "sourceStatus": "matched-user-supplied-video",
       "expectedTotalSeconds": 12.24,
       "screenshotTotalSeconds": 12.283,
       "screenshotSignedTotalErrorSeconds": 0.043,
@@ -14,7 +14,8 @@
       "startRawTime": null,
       "finishRawTime": null,
       "holdFeedback": "The marker displayed as 9 should be 8 on this run.",
-      "notes": "The screenshot camera view has not been matched to the five original Drive recordings. Do not subtract 43 ms globally or renumber Hold 9 across every run. A matching source recording or exported session is needed for exact reproduction."
+      "requiredHoldMarkers": [{ "holdId": 8, "x": 0.32986, "y": 0.34820, "radius": 0.012 }],
+      "notes": "User supplied the matching 12.24.mov after the initial five-clip audit. Baseline reproduced 12.283 s and the wrong Hold 9 at the specified normalized position. Total is user-reported, not an independent raw Start/Finish annotation. Do not subtract 43 ms globally or renumber Hold 9 across every run."
     }
   ]
 }

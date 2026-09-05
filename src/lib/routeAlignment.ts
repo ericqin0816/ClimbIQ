@@ -214,7 +214,10 @@ export function alignStandardSpeedRouteVisually(
       }
       return right.score - left.score || left.medianResidual - right.medianResidual;
     });
-  const best = unique[0];
+  // An athlete anchor selects between supported routes; it must not let a
+  // nearby four-point accident hide a complete route slightly farther away.
+  const best = unique.find(hypothesis => hypothesis.matches.length >= resolved.minimumMatchedHolds &&
+    hypothesis.effectiveSupport >= resolved.minimumMatchedHolds * 0.7 && hypothesis.meanSilhouetteScore >= 0.36) ?? unique[0];
   if (!best || best.matches.length < resolved.minimumMatchedHolds ||
       best.effectiveSupport < resolved.minimumMatchedHolds * 0.7 ||
       best.meanSilhouetteScore < 0.36) {
@@ -285,8 +288,8 @@ export function alignStandardSpeedRouteVisually(
     };
   }
 
-  const alternative = unique.find((candidate, index) => index > 0 &&
-    !resolved.startBodyZone &&
+  const alternative = unique.find(candidate => candidate !== best &&
+    (!resolved.startBodyZone || Math.abs((candidate.startAnchorDistance ?? Infinity) - (best.startAnchorDistance ?? Infinity)) <= 0.025) &&
     meanTransformSeparation(best.transform, candidate.transform, projected) > 0.028 &&
     candidate.matches.length >= best.matches.length - 1 &&
     candidate.medianResidual <= best.medianResidual + 0.004 &&
@@ -379,12 +382,14 @@ export function alignStandardSpeedRouteWithFallback(
   options: RouteAlignmentOptions = {},
 ): RouteAlignmentPolicyResult {
   const preferred = alignWithGeometryCorrection(frames, calibration, options);
-  if (options.referenceGeometry || preferred.result.aligned || !calibration || !validZone(options.startBodyZone)) {
+  const strongPreferred = preferred.result.aligned && preferred.result.diagnostics.matchedHoldIds.length >= 16 &&
+    !preferred.result.diagnostics.hold10Recovered && (preferred.result.diagnostics.medianResidualNormalized ?? Infinity) <= 0.008;
+  if (options.referenceGeometry || strongPreferred || !calibration || !validZone(options.startBodyZone)) {
     return preferred;
   }
 
   // The original diagram includes large margins and is not a measured lane
-  // grid. Recover a failed fit from the published attachment layout, but demand
+  // grid. Recover a failed or weak fit from the published attachment layout, but demand
   // more support and smaller residuals than either ordinary registration pass.
   // This wider search never changes wall calibration or accepted timestamps.
   const grid = alignStandardSpeedRouteVisually(frames, calibration, {
@@ -394,12 +399,17 @@ export function alignStandardSpeedRouteWithFallback(
     minimumMatchedHolds: 16,
   });
   const diagnostic = grid.diagnostics;
+  // The selected body region is an interval, not an exact hand position. In
+  // edge-clipped automatic regions its center can be well left/right of the
+  // athlete. Keep center-distance ranking for competing lanes, but accept a
+  // strongly supported route whose starting holds lie inside that region.
+  const anchorTolerance = Math.max(0.08, (options.startBodyZone!.x2 - options.startBodyZone!.x1) / 2);
   const directlyMatched = new Set(diagnostic.matches.filter(match => match.association !== "topology-recovery").map(match => match.holdId));
   const strongGrid = grid.aligned && !diagnostic.ambiguous && directlyMatched.size >= 16 &&
     [9, 10, 11].every(id => directlyMatched.has(id as StandardSpeedHoldId)) &&
     (diagnostic.medianResidualNormalized ?? Infinity) <= 0.008 &&
     (diagnostic.rmsResidualNormalized ?? Infinity) <= 0.012 &&
-    (diagnostic.startAnchorDistanceNormalized ?? Infinity) <= 0.08;
+    (diagnostic.startAnchorDistanceNormalized ?? Infinity) <= anchorTolerance;
   if (!strongGrid) return preferred;
   return {
     usedExpandedSearch: true,

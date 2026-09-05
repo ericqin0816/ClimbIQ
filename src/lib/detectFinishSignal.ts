@@ -14,12 +14,16 @@ import {
   sampleZoneOpponentColors,
 } from "./videoFrameSampler";
 import { resolveFinishSearchWindow } from "./finishSearchWindow";
+import { readDecodedVideoFrameTime } from "./decodedVideoFrame";
 
 export interface FinishColorSample {
   time: number;
   averageRgb: RGB;
   /** Pixels ranked toward the calibrated return color, when video sampling provides them. */
   directionalRgb?: RGB;
+  /** Seek cursor retained separately from the decoded source-frame timestamp. */
+  cursorTime?: number;
+  timestampMethod?: "video-frame" | "seek-cursor";
 }
 
 interface DetectFinishSignalOptions {
@@ -482,8 +486,11 @@ async function sampleFinishColors(
   for (let index = 0; index < times.length; index += 1) {
     throwIfCancelled(signal);
     const sampled = await sampleZoneOpponentColors(video, times[index], zone, targetDirection);
-    samples.push({
-      time: roundTime(sampled.time),
+    const decoded = readDecodedVideoFrameTime(video);
+    appendFinishFrameSample(samples, {
+      time: decoded?.mediaTime ?? sampled.time,
+      cursorTime: sampled.time,
+      timestampMethod: decoded ? "video-frame" : "seek-cursor",
       averageRgb: sampled.averageRgb,
       directionalRgb: sampled.directionalRgb,
     });
@@ -493,6 +500,13 @@ async function sampleFinishColors(
     }
   }
   return samples;
+}
+
+/** Oversampling a low-frame-rate clip must not count one flash frame twice. */
+export function appendFinishFrameSample(samples: FinishColorSample[], sample: FinishColorSample): void {
+  const previous = samples.at(-1);
+  if (previous && sample.time <= previous.time + 0.000001) return;
+  samples.push(sample);
 }
 
 function toResult(

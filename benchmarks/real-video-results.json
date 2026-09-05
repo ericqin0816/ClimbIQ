@@ -5,6 +5,16 @@
   "labelPolicy": "Only confirmed labelReview records with an independent reviewer, method, date and raw time can score accuracy. Existing observations remain useful for source-consistency regression checks.",
   "trials": [
     {
+      "id": "12.24.mov",
+      "sourceSha256": "b981cc57f8d3d4fe9c57e4e6414f23457ad8bc7eb7cbec5a95c969707d21b333",
+      "durationSeconds": 24.97,
+      "start": { "rawTime": 9.4, "status": "accepted", "source": "Fused start detection", "confidence": "High", "reviewedCorrect": false },
+      "finish": { "rawTime": 21.655, "status": "accepted", "source": "Finish light detection", "confidence": "High", "reviewedCorrect": false },
+      "hold10": { "status": "review-candidate", "isGroundTruthLabel": false },
+      "com": { "status": "needs-review", "fullWorkflowMinimumValidCoverage": 0.65 },
+      "notes": "Sixth user-supplied recording. 12.24 s total reference is tracked separately in user-reported-references.json; raw times here are detector regression observations, not independent accuracy labels."
+    },
+    {
       "id": "IMG_8903.MOV",
       "durationSeconds": 26.75,
       "start": { "rawTime": 4.29, "status": "accepted", "source": "Fused start detection", "confidence": "High", "reviewedCorrect": true, "firstMovementRawTime": 4.39, "firstMovementConfidence": "High", "reactionSeconds": 0.1 },

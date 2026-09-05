@@ -1,5 +1,10 @@
 # Hold numbering and timing follow-up — September 5
 
+Historical 0.28.2 audit below. The user subsequently supplied the exact clip;
+see [the matching-video audit](MATCHED_12_24_AUDIT.md) for the reproduced defects,
+0.28.3 fixes, and new verification. The missing-video limitation below describes
+the earlier checkpoint, not the current state.
+
 ## User feedback
 
 The supplied screenshot shows 12.283 s; the user's reference for that run is

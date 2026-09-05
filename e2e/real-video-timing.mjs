@@ -1,4 +1,4 @@
-import { readFile, readdir } from "node:fs/promises";
+import { readFile, readdir, mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { spawn } from "node:child_process";
 import { tmpdir } from "node:os";
@@ -7,6 +7,7 @@ import { closeTestBrowser } from "./browser-lifecycle.mjs";
 import { createReadStream } from "node:fs";
 import { createHash } from "node:crypto";
 import { analysisFailureFromOutcome, evaluateKnownVideoFailure } from "../scripts/lib/known-video-failures.mjs";
+import { assessUserVideoReference } from "../scripts/lib/user-video-reference.mjs";
 
 const defaultChromePath = process.platform === "darwin"
   ? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
@@ -22,7 +23,8 @@ const disableVideoFrame = process.env.CLIMBIQ_E2E_DISABLE_VIDEO_FRAME === "1";
 const fpsArgument = process.argv.find(value => value.startsWith("--fps="));
 const poseFps = fpsArgument ? Number(fpsArgument.slice(6)) : undefined;
 if (poseFps !== undefined && ![5, 10, 15].includes(poseFps)) throw new Error("--fps must be 5, 10, or 15.");
-const commandLineFiles = process.argv.slice(2).filter((value) => value !== "--full" && !value.startsWith("--fps=")).map((value) => value.trim()).filter(Boolean);
+const reportFile = process.argv.find(value => value.startsWith("--report="))?.slice(9);
+const commandLineFiles = process.argv.slice(2).filter((value) => value !== "--full" && !value.startsWith("--fps=") && !value.startsWith("--report=")).map((value) => value.trim()).filter(Boolean);
 const environmentFiles = process.env.CLIMBIQ_BENCHMARK_FILES?.split(",").map((value) => value.trim()).filter(Boolean);
 const requestedFiles = commandLineFiles.length ? commandLineFiles : environmentFiles;
 const port = 9334;
@@ -471,6 +473,7 @@ async function main() {
   const expectations = JSON.parse(await readFile(new URL("../benchmarks/real-video-results.json", import.meta.url), "utf8"));
   const publicResearch = JSON.parse(await readFile(new URL("../benchmarks/public-broadcast-results.json", import.meta.url), "utf8"));
   const knownFailures = JSON.parse(await readFile(new URL("../benchmarks/known-video-failures.json", import.meta.url), "utf8"));
+  const userReferences = JSON.parse(await readFile(new URL("../benchmarks/user-reported-references.json", import.meta.url), "utf8"));
   const privateTrials = expectations.trials ?? [];
   const expectedById = new Map([
     ...privateTrials.map((trial) => [trial.id, { trial, baselineStatus: "compared" }]),
@@ -499,6 +502,17 @@ async function main() {
     });
     const failures = assertions.flatMap((assertion) => assertion.errors.map((error) => `${assertion.fileName}: ${error}`));
     const safetyAssertions = [];
+    const userReferenceAssertions = [];
+    for (const outcome of outcomes) {
+      const hash = createHash("sha256");
+      for await (const chunk of createReadStream(path.join(videoDirectory, outcome.fileName))) hash.update(chunk);
+      outcome.sourceSha256 = hash.digest("hex");
+      for (const reference of userReferences.reports.filter(reference => reference.sourceFileName === outcome.fileName)) {
+        const assertion = assessUserVideoReference(reference, outcome, outcome.sourceSha256, fullWorkflow);
+        userReferenceAssertions.push(assertion);
+        failures.push(...assertion.errors.map(error => `${outcome.fileName}: ${error}`));
+      }
+    }
     for (const testCase of knownFailures.cases.filter(testCase => files.includes(testCase.fileName))) {
       const hash = createHash("sha256");
       for await (const chunk of createReadStream(path.join(videoDirectory, testCase.fileName))) hash.update(chunk);
@@ -506,7 +520,12 @@ async function main() {
       safetyAssertions.push(result);
       if (result.failed) failures.push(`${testCase.fileName}: ${result.reason}`);
     }
-    console.log(JSON.stringify({ appUrl, app, videoDirectory, fullWorkflow, disableFrameCallback, disableVideoFrame, passed: failures.length === 0, assertions, safetyAssertions, outcomes }, null, 2));
+    const report = { appUrl, app, videoDirectory, fullWorkflow, disableFrameCallback, disableVideoFrame, passed: failures.length === 0, assertions, safetyAssertions, userReferenceAssertions, outcomes };
+    if (reportFile) {
+      await mkdir(path.dirname(path.resolve(reportFile)), { recursive: true });
+      await writeFile(reportFile, JSON.stringify(report, null, 2) + "\n", { flag: "wx" });
+    }
+    console.log(JSON.stringify(report, null, 2));
     if (failures.length) process.exitCode = 1;
   } finally {
     await closeTestBrowser(chrome, protocol.send);
