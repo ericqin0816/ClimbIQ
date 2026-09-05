@@ -54,6 +54,27 @@ accuracy on phone recordings.
   17.480 s, passed identical-attempt comparison, and produced 44/52 usable COM
   samples with 19/20 registered hold silhouettes. Accepted timing did not change;
   the sampling fix is not represented as increased real-video accuracy.
+- The 0.27.2 cancelled-rerun test preserved prior accepted timing, unsaved COM
+  evidence and Hold 10 previews. Rapid and invalid replacement checks passed.
+
+## Deploy result
+
+- URL: https://climbiq-detection-lab.vercel.app/
+- Target: production
+- Status: ready; live 0.27.2 verified
+- Code commit: `2a09dff4389a49bf6b2e1d95dd29700caee06e5f`
+- Framework: React / Vite
+- Hosted build duration: not measured; GitHub verification passed
+- Entry asset: `/assets/index-VB8T1TdO.js`
+
+### Post-deploy verification
+
+Full production workflows passed original 8903 and 9199. The first still
+withholds Finish; the latter retains 7.130 s Start and 17.480 s Finish, passes
+save/reload and identical-attempt comparison, and returns 45/52 usable COM
+samples. Provider runtime logs and external monitoring/drain configuration were
+not inspected; these are browser workflow checks, not a platform-wide error
+scan. Private source videos and preview images remain outside Git.
 
 ## Limitations
 
