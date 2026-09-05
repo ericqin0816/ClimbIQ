@@ -78,3 +78,22 @@ remains a total-only reference, not separate Start/Finish annotations.
   and pure shared calculations rather than adding effects or duplicate state.
 - Existing `src/styles.css` edits remain untouched and uncommitted. No private
   media, screenshot, or generated session is included in Git.
+
+## Deploy result
+
+- URL: [ClimbIQ](https://climbiq-detection-lab.vercel.app/)
+- Target: production
+- Status: ready; 0.28.4 verified
+- Code commit: `b8e3883`
+- Framework: React / Vite
+- Build duration: hosted duration not measured; GitHub `verify` succeeded
+- Entry asset: `/assets/index-CNqhJWfN.js`
+- Full production replay passed `12.24.mov` and `IMG_9199.MOV`, including
+  persisted results, comparison and review. The new recording remains 12.255 s
+  with 18 registered holds and corrected Hold 8. Report:
+  `test-results/source-time-production-0.28.4.json`.
+- Runtime provider logs, drains and external monitoring were not inspected.
+
+Rerun analysis to obtain newly computed measurements. This release improves
+time-based calculations and evidence handling; it does not claim improved
+pose-coordinate accuracy or independently validated metre-per-second values.
