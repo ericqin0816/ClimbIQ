@@ -1,6 +1,9 @@
+import { readDecodedVideoFrameTime } from "./decodedVideoFrame";
+
 export type FramePresentation =
   | { status: "pending" | "unsupported" | "unavailable" }
-  | { status: "available"; mediaTime: number; cursorTime: number; source: string };
+  | { status: "available"; mediaTime: number; cursorTime: number; source: string;
+      method?: "video-frame"; durationSeconds?: number };
 
 /** Observe compositor timestamps without slowing pixel-analysis seeks. */
 export function observeVideoFramePresentation(
@@ -8,6 +11,29 @@ export function observeVideoFramePresentation(
   onUpdate: (presentation: FramePresentation) => void,
   timeoutMs = 250,
 ): () => void {
+  // Unlike compositor callbacks, this also works for paused/offscreen videos.
+  // Reading the current frame must not change playback or set its timestamp.
+  if (typeof globalThis.VideoFrame === "function") {
+    let active = true;
+    const source = video.src;
+    const invalidate = () => { if (active) onUpdate({ status: "pending" }); };
+    const publish = () => {
+      if (!active || video.src !== source) return;
+      if (video.seeking) { invalidate(); return; }
+      const frame = readDecodedVideoFrameTime(video);
+      onUpdate(frame ? { status: "available", ...frame } : { status: "unavailable" });
+    };
+    const invalidatingEvents = ["seeking", "emptied", "loadstart"];
+    const readyEvents = ["seeked", "loadeddata", "pause"];
+    invalidatingEvents.forEach(event => video.addEventListener(event, invalidate));
+    readyEvents.forEach(event => video.addEventListener(event, publish));
+    publish();
+    return () => {
+      active = false;
+      invalidatingEvents.forEach(event => video.removeEventListener(event, invalidate));
+      readyEvents.forEach(event => video.removeEventListener(event, publish));
+    };
+  }
   if (typeof video.requestVideoFrameCallback !== "function") {
     onUpdate({ status: "unsupported" });
     return () => undefined;

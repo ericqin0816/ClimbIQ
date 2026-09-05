@@ -2,12 +2,14 @@ import { spawn } from "node:child_process";
 import path from "node:path";
 import { tmpdir } from "node:os";
 import { createProtocolClient } from "./cdp-client.mjs";
+import { auditDecodedSourceFrames } from "./frame-audit.mjs";
 
 const chromePath = process.env.CLIMBIQ_CHROME ?? (process.platform === "darwin"
   ? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
   : process.platform === "win32" ? "C:/Program Files/Google/Chrome/Application/chrome.exe" : "/usr/bin/google-chrome");
 const sampleVideo = process.env.CLIMBIQ_E2E_VIDEO;
 const appUrl = process.env.CLIMBIQ_E2E_URL ?? "http://127.0.0.1:5173/";
+const auditFrames = process.argv.includes("--frame-audit");
 const port = 9333;
 const profile = path.join(tmpdir(), `climbiq-e2e-${Date.now()}`);
 
@@ -124,9 +126,10 @@ async function run() {
   await delay(500);
   const retryReady = await evaluate("document.querySelector('.video-meta-line')?.textContent.includes('Ready') ?? false");
   if (!retryReady) throw new Error("Selecting the same file a second time did not recover to Ready.");
+  const frameAudit = auditFrames ? await evaluate(`(${auditDecodedSourceFrames.toString()})()`) : undefined;
   if (runtimeErrors.length) throw new Error(`Browser runtime errors: ${runtimeErrors.join(' | ')}`);
 
-  console.log(JSON.stringify({ status: "passed", hitTargetIsInput, ...snapshot, sameFileRetry: retryReady }, null, 2));
+  console.log(JSON.stringify({ status: "passed", hitTargetIsInput, ...snapshot, sameFileRetry: retryReady, frameAudit }, null, 2));
   socket.close();
 }
 

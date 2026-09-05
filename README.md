@@ -132,6 +132,8 @@ Suggested timestamps open a dedicated video-review workflow before acceptance. T
 
 The compact review workspace keeps the player and acceptance controls together on desktop and phone screens. Native presented-frame timestamps are used when available, with an explicit approximate-cursor fallback. Closing review cancels pending review seeks; changing videos resets the cursor. Saved markers and dataset exports distinguish `automatic`, `manual-entry`, and `frame-review` acceptance. Older markers without that metadata remain `legacy-unknown` in the export audit. Acceptance records are workflow provenance, never independent ground-truth labels; dataset exports explicitly report `isGroundTruthLabel: false`.
 
+On browsers with `VideoFrame`, the player reads the current source-frame timestamp directly, including while paused or offscreen; compositor callbacks remain a fallback for older browsers. Previous/Next Frame uses that frame's boundary and duration instead of assuming 30 fps. When native frame duration is unavailable, the controls explicitly fall back to approximate 0.03 s cursor steps. Review details and the saved note include source-frame duration when available. This is a presentation interval, not an event-accuracy bound, and it does not change automatic detector timing.
+
 ## Start Signal Detection
 
 Before fusion, visual cues are checked for camera cuts and context-poor patches along the bottom edge of landscape footage. Such cues remain inspectable but cannot supply automatic clock votes or shift a valid cue's accepted time. These safeguards do not make edited broadcast footage a validated input format.

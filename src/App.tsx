@@ -1,6 +1,7 @@
 import { ChangeEvent, CSSProperties, DragEvent, lazy, PointerEvent, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import "./components/SessionWorkflow.css";
 import TimestampReviewPanel from "./components/TimestampReviewPanel";
+import { readDecodedVideoFrameTime, sourceFrameStepTarget } from "./lib/decodedVideoFrame";
 import { useVideoFramePresentation } from "./lib/useVideoFramePresentation";
 import { resolvePresentedFrameTime } from "./lib/videoFramePresentation";
 import {
@@ -89,7 +90,7 @@ const INITIAL_TIMESTAMPS: TimestampMarker[] = [
   marker("finishPad", "Finish Pad"),
 ];
 
-const APP_VERSION = "0.25.1";
+const APP_VERSION = "0.26.0";
 const SESSION_STORAGE_KEY = "climbiq.analysisSessions.v1";
 const AttemptComparisonPanel = lazy(() => import("./components/AttemptComparisonPanel"));
 const Hold10SecondPassPanel = lazy(() => import("./components/Hold10SecondPassPanel"));
@@ -485,8 +486,10 @@ function App() {
       : "Generic color-distance detection";
   const videoAnalysisRunning = frameTestRunning || startRunning || movementRunning || movementPreviewRunning || finishRunning || biomechanicsRunning || autoAnalysisRunning || secondPassRunning;
   const visibleTimestampReview = timestampReview && (!timestampReview.secondPassBasis || timestampReview.secondPassBasis === activeHold10SecondPass) ? timestampReview : null;
-  const framePresentation = useVideoFramePresentation(videoRef, videoUrl, Boolean(visibleTimestampReview) && !videoAnalysisRunning);
+  const framePresentation = useVideoFramePresentation(videoRef, videoUrl,
+    !videoAnalysisRunning && (Boolean(visibleTimestampReview) || typeof globalThis.VideoFrame === "function"));
   const decodedReviewTime = resolvePresentedFrameTime({ src: videoUrl ?? "", currentTime, seeking: !reviewFrameReady }, framePresentation);
+  const nativeFrameStepsAvailable = decodedReviewTime !== undefined && framePresentation.status === "available" && framePresentation.durationSeconds !== undefined;
 
   const zoneStageStyle = useMemo((): CSSProperties => {
     const width = metadata?.videoWidth || 16;
@@ -735,8 +738,10 @@ function App() {
     const video = videoRef.current;
     if (!visibleTimestampReview || !video || !video.paused || video.seeking || videoAnalysisRunning) return;
     const decodedTime = resolvePresentedFrameTime(video, framePresentation);
+    const frameDurationNote = decodedTime !== undefined && framePresentation.status === "available" && framePresentation.durationSeconds !== undefined
+      ? ` Source frame duration ${framePresentation.durationSeconds.toFixed(6)}s; not an event-error bound.` : "";
     visibleTimestampReview.onAccept(decodedTime ?? video.currentTime, decodedTime !== undefined
-      ? `Used browser presented-frame timestamp ${decodedTime.toFixed(6)}s (cursor ${video.currentTime.toFixed(6)}s).`
+      ? `Used browser presented-frame timestamp ${decodedTime.toFixed(6)}s (cursor ${video.currentTime.toFixed(6)}s).${frameDurationNote}`
       : `Frame timestamp unavailable; used paused cursor ${video.currentTime.toFixed(6)}s.`);
     closeTimestampReview();
   }
@@ -744,6 +749,21 @@ function App() {
   function cancelPendingReviewSeek() {
     if (reviewSeekRequestRef.current !== null) window.cancelAnimationFrame(reviewSeekRequestRef.current);
     reviewSeekRequestRef.current = null;
+  }
+
+  function stepSourceFrame(direction: -1 | 1) {
+    const video = videoRef.current;
+    if (!video || videoAnalysisRunning) return;
+    video.pause();
+    const frame = readDecodedVideoFrameTime(video);
+    const target = frame ? sourceFrameStepTarget(frame, video.duration, direction) : undefined;
+    if (target === undefined) {
+      stepVideo(direction * 0.03);
+      setVideoRestoreStatus("Native frame duration unavailable; moved the approximate cursor by 0.03s.");
+    } else {
+      jumpTo(target);
+      setVideoRestoreStatus("");
+    }
   }
 
   function closeTimestampReview() {
@@ -3458,8 +3478,10 @@ function App() {
               Play / pause
             </button>
             <span className="time-pill">Raw video time {currentTime.toFixed(3)}s</span>
-            <button disabled={videoAnalysisRunning} onClick={() => stepVideo(-0.03)}>-0.03s</button>
-            <button disabled={videoAnalysisRunning} onClick={() => stepVideo(0.03)}>+0.03s</button>
+            <button data-frame-step="previous" disabled={videoAnalysisRunning} onClick={() => nativeFrameStepsAvailable ? stepSourceFrame(-1) : stepVideo(-0.03)}
+              aria-label={nativeFrameStepsAvailable ? "Previous source frame" : "Back 0.03 seconds (approximate)"}>{nativeFrameStepsAvailable ? "← Frame" : "-0.03s"}</button>
+            <button data-frame-step="next" disabled={videoAnalysisRunning} onClick={() => nativeFrameStepsAvailable ? stepSourceFrame(1) : stepVideo(0.03)}
+              aria-label={nativeFrameStepsAvailable ? "Next source frame" : "Forward 0.03 seconds (approximate)"}>{nativeFrameStepsAvailable ? "Frame →" : "+0.03s"}</button>
             <button disabled={videoAnalysisRunning} onClick={() => stepVideo(-0.1)}>-0.10s</button>
             <button disabled={videoAnalysisRunning} onClick={() => stepVideo(0.1)}>+0.10s</button>
             <input
@@ -3478,6 +3500,7 @@ function App() {
             label={visibleTimestampReview.label} confidence={visibleTimestampReview.confidence}
             suggestedRawTime={visibleTimestampReview.suggestedRawTime} currentTime={currentTime}
             decodedRawTime={decodedReviewTime} frameStatus={framePresentation.status}
+            sourceFrameDurationSeconds={decodedReviewTime !== undefined && framePresentation.status === "available" ? framePresentation.durationSeconds : undefined}
             frameReady={reviewFrameReady} busy={videoAnalysisRunning} acceptLabel={visibleTimestampReview.acceptLabel}
             onReturn={() => reviewTimestamp(visibleTimestampReview)} onAccept={acceptReviewedTimestamp}
             onClose={closeTimestampReview}
@@ -3992,7 +4015,7 @@ function App() {
           </div>
         </details>
 
-        <Card id="results" title="Verified moments" className="full results-card">
+        <Card id="results" title="Timing markers" className="full results-card">
           <details className="results-details">
             <summary>
               <span><strong>Review or edit exact timing markers</strong><small>Automatic results stay untouched unless you change them here.</small></span>

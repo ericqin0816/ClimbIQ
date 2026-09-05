@@ -17,9 +17,26 @@ class FakeVideo extends EventTarget {
   element() { return this as unknown as HTMLVideoElement; }
 }
 
-afterEach(() => vi.useRealTimers());
+afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
 
 describe("presented video frame timestamps", () => {
+  it("reads a paused source frame without requiring a compositor callback", () => {
+    const close = vi.fn();
+    vi.stubGlobal("VideoFrame", class { timestamp = 2_833_333; duration = 33_333; close = close; });
+    const video = Object.assign(new FakeVideo(), { readyState: 2 });
+    const updates: FramePresentation[] = [];
+    const stop = observeVideoFramePresentation(video.element(), value => updates.push(value));
+    expect(updates.at(-1)).toMatchObject({ status: "available", mediaTime: 2.833333, method: "video-frame" });
+    expect(video.callback).toBeUndefined();
+    video.seeking = true; video.dispatchEvent(new Event("seeking"));
+    expect(updates.at(-1)?.status).toBe("pending");
+    video.seeking = false; video.dispatchEvent(new Event("seeked"));
+    expect(updates.at(-1)?.status).toBe("available");
+    stop(); const count = updates.length;
+    video.dispatchEvent(new Event("pause"));
+    expect(updates).toHaveLength(count);
+    expect(close).toHaveBeenCalledTimes(2);
+  });
   it("retains the decoded frame timestamp separately from the seek cursor", () => {
     const video = new FakeVideo(); const updates: FramePresentation[] = [];
     const stop = observeVideoFramePresentation(video.element(), value => updates.push(value));

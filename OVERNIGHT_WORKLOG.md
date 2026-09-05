@@ -283,3 +283,36 @@ before pushing verified checkpoints because the user also works from a Mac.
   and pose stages; cursor restored to 2.500 s, accepted markers preserved,
   active-run replacement blocked, rapid replacement and invalid-file recovery
   passed. The test uses a fresh isolated browser profile and no user library.
+
+## Source-frame review work (0.26.0 candidate)
+
+- Stopped-timer prototype found a plausible 15.890 s display-freeze cue in
+  original 8903, but failed compression/darkness stress checks: red holds could
+  imitate changing digits, giving 8.490 or 12.490 s proposals. The prototype
+  is NOT in the app; it is retained only in ignored local research files.
+- W3C WebCodecs specifies that `new VideoFrame(video)` inherits the current
+  playback frame's timestamp when no timestamp override is supplied:
+  https://www.w3.org/TR/webcodecs/#dom-videoframe-videoframe-image-init
+  This gives synchronous paused/offscreen frame timing without waiting on
+  compositor callbacks. Every temporary frame is closed immediately.
+- Actual 9199 checks: cursor 11.501 maps to source PTS 11.470; 7.130 maps to
+  7.101667; 17.480 maps to 17.471667. These identify displayed source frames,
+  not independently labeled physical events. Detector output is unchanged.
+- Native source-frame duration now supports Previous/Next Frame controls and
+  is shown in review details/saved notes. Unsupported browsers retain explicit
+  approximate stepping and cursor acceptance; the full no-API workflow passed.
+- Real browser frame audit: original HEVC/MOV, synthetic 15-fps H.264 and
+  variable-frame-rate H.264 passed 18 seeks each, repeated-pixel hashes and
+  adjacent-frame round trips. The 15-fps clip correctly gives the same source
+  frame at cursor 0.150 and 0.180 (PTS 0.133333, duration 0.066667).
+- Five-original full workflows passed with native snapshots enabled only while
+  idle/reviewing. All original accepted timing observations stayed consistent.
+  Mixed public 1745 can still select either unverified artifact cursor (0.250
+  or 1.017); neither is accepted. The underlying ranking sensitivity is open.
+- Frame-plan generation now refuses nonfinite/unrepresentable ranges and
+  oversized allocations instead of risking an infinite main-thread loop.
+- All five original recordings subsequently passed 18 native-frame audit seeks
+  and Previous/Next Frame round trips each. Together with the two synthetic
+  frame-rate clips, that is 126 successful seek/pixel checks. Unit checks:
+  458 tests in 46 files, plus typecheck/build. Live 0.25.1 also reproduced the
+  corrected refusal of the silent 9076 reset; Finish remains unaccepted.

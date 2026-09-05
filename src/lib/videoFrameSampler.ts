@@ -221,11 +221,14 @@ export async function sampleZoneMotion(
 }
 
 export function sampleFramesInRange(start: number, end: number, fps: number): number[] {
-  if (end < start || fps <= 0) {
+  if (![start, end, fps].every(Number.isFinite) || end < start || fps <= 0) {
     return [];
   }
 
   const step = 1 / fps;
+  // Invalid/imported ranges must not create an infinite UI-thread loop or an
+  // unbounded allocation. Refuse instead of silently truncating a video scan.
+  if (!Number.isFinite(step) || start + step <= start || (end - start) * fps > 100_000) return [];
   const times: number[] = [];
   for (let time = start; time <= end + step * 0.25; time += step) {
     times.push(roundTime(time));

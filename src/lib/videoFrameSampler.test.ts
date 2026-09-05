@@ -7,9 +7,24 @@ import {
   captureFrame,
   captureVideoPixels,
   seekTo,
+  sampleFramesInRange,
 } from "./videoFrameSampler";
 
 afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); });
+
+describe("bounded frame sampling plans", () => {
+  it("preserves normal frame grids", () => {
+    expect(sampleFramesInRange(0, 1, 5)).toEqual([0, 0.2, 0.4, 0.6, 0.8, 1]);
+  });
+  it("refuses nonfinite and non-progressing ranges", () => {
+    for (const values of [[0, Infinity, 30], [Infinity, Infinity, 30], [0, 1, Infinity], [NaN, 1, 30], [1e20, 1e20, 30], [0, 1, Number.MIN_VALUE]]) {
+      expect(sampleFramesInRange(...values as [number, number, number])).toEqual([]);
+    }
+  });
+  it("refuses excessive allocations instead of truncating the requested scan", () => {
+    expect(sampleFramesInRange(0, 1_000_000, 30)).toEqual([]);
+  });
+});
 
 describe("video seek readiness", () => {
   it("does not treat a matching cursor as decoded while a seek is still active", async () => {

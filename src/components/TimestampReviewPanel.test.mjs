@@ -40,4 +40,9 @@ describe("timestamp review panel", () => {
     expect(html).toContain("not the exact physical contact instant");
     expect(html).toContain("Approximate cursor time");
   });
+  it("reports source-frame duration without calling it event accuracy", () => {
+    const html = render({ decodedRawTime: 11.47, sourceFrameDurationSeconds: 1 / 15 });
+    expect(html).toContain("66.67");
+    expect(html).toContain("not a measured event-error bound");
+  });
 });

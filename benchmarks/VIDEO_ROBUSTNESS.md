@@ -68,6 +68,13 @@ settings. They require original 9199 and 9076, cancel three analysis stages,
 and verify cursor restoration, marker preservation, busy-state replacement
 blocking, rapid replacement, and invalid-file recovery.
 
+`npm run test:upload -- --frame-audit` also checks native frame timestamps,
+source-frame interval containment, repeated-pixel SHA-256 equality, and a
+Next/Previous Frame round trip. Set `CLIMBIQ_E2E_VIDEO` to one local recording.
+This is a decoder/player test, not a contact-accuracy study. Set both
+`CLIMBIQ_E2E_DISABLE_VIDEO_FRAME=1` and `CLIMBIQ_E2E_DISABLE_FRAME_CALLBACK=1`
+for a full timing-workflow test of the explicit cursor fallback.
+
 - **Consistent:** accepted boundary agrees with a reviewed original reference.
 - **Availability loss:** an originally accepted boundary is now missing/reviewed.
   This is a usability regression, not a wrong automatic measurement.

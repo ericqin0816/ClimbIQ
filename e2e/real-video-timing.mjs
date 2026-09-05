@@ -14,6 +14,7 @@ const appUrl = process.env.CLIMBIQ_E2E_URL ?? "http://127.0.0.1:5173/";
 const videoDirectory = path.resolve(process.env.CLIMBIQ_VIDEO_DIR ?? "node_modules/.climbiq-private-videos");
 const fullWorkflow = process.argv.includes("--full");
 const disableFrameCallback = process.env.CLIMBIQ_E2E_DISABLE_FRAME_CALLBACK === "1";
+const disableVideoFrame = process.env.CLIMBIQ_E2E_DISABLE_VIDEO_FRAME === "1";
 const fpsArgument = process.argv.find(value => value.startsWith("--fps="));
 const poseFps = fpsArgument ? Number(fpsArgument.slice(6)) : undefined;
 if (poseFps !== undefined && ![5, 10, 15].includes(poseFps)) throw new Error("--fps must be 5, 10, or 15.");
@@ -52,7 +53,7 @@ async function waitForDebugger() {
 async function openProtocol() {
   await waitForDebugger();
   const targetResponse = await fetch(
-    `http://127.0.0.1:${port}/json/new?${encodeURIComponent(disableFrameCallback ? "about:blank" : appUrl)}`,
+    `http://127.0.0.1:${port}/json/new?${encodeURIComponent(disableFrameCallback || disableVideoFrame ? "about:blank" : appUrl)}`,
     { method: "PUT" },
   );
   if (!targetResponse.ok) throw new Error(`Could not open ${appUrl}. Start the development server first.`);
@@ -70,9 +71,10 @@ async function openProtocol() {
   };
   await send("Runtime.enable");
   await send("Page.enable");
-  if (disableFrameCallback) {
+  if (disableFrameCallback || disableVideoFrame) {
     await send("Page.addScriptToEvaluateOnNewDocument", {
-      source: "Object.defineProperty(HTMLVideoElement.prototype, 'requestVideoFrameCallback', { value: undefined, configurable: true });",
+      source: (disableFrameCallback ? "Object.defineProperty(HTMLVideoElement.prototype, 'requestVideoFrameCallback', { value: undefined, configurable: true });" : "") +
+        (disableVideoFrame ? "Object.defineProperty(window, 'VideoFrame', { value: undefined, configurable: true });" : ""),
     });
     await send("Page.navigate", { url: appUrl });
   }
@@ -462,7 +464,7 @@ async function main() {
       return validateOutcome(outcome, expected?.trial, expected?.baselineStatus);
     });
     const failures = assertions.flatMap((assertion) => assertion.errors.map((error) => `${assertion.fileName}: ${error}`));
-    console.log(JSON.stringify({ appUrl, app, videoDirectory, fullWorkflow, disableFrameCallback, passed: failures.length === 0, assertions, outcomes }, null, 2));
+    console.log(JSON.stringify({ appUrl, app, videoDirectory, fullWorkflow, disableFrameCallback, disableVideoFrame, passed: failures.length === 0, assertions, outcomes }, null, 2));
     if (failures.length) process.exitCode = 1;
   } finally {
     protocol.socket.close();
