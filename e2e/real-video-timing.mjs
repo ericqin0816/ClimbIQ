@@ -362,10 +362,12 @@ async function verifySavedWorkflow({ evaluate, send }) {
       identityZone: saved.biomechanics.result.identityZone,
       calibration: saved.biomechanics.calibration,
       warnings: saved.biomechanics.result.warnings,
+      metrics: saved.biomechanics.result.metrics,
       frames: saved.biomechanics.result.frames.map(frame => ({
         rawTime: frame.rawTime, poseDetected: frame.poseDetected, poseSelected: frame.poseSelected,
         decodedFrameRawTime: frame.decodedFrameRawTime, sourceFrameDurationSeconds: frame.sourceFrameDurationSeconds,
         valid: frame.valid, imageCom: frame.imageCom, warning: frame.warning,
+        speedMps: frame.speedMps, verticalSpeedMps: frame.verticalSpeedMps,
       })),
     } : undefined,
     comparison: restored.comparison };

@@ -3,6 +3,12 @@ export interface SourceSampleTiming {
   sourceFrameDurationSeconds?: number;
 }
 
+/** Time of the measured pixels, not the later seek cursor. Legacy/imported
+ * samples without trustworthy source metadata retain their original time. */
+export function sourceSampleTime(frame: SourceSampleTiming & { rawTime: number }): number {
+  return sanitizeSourceSampleTiming(frame.rawTime, frame).decodedFrameRawTime ?? frame.rawTime;
+}
+
 /** Preserve source-frame metadata only when it can contain this sampling cursor.
  * A valid interval is provenance, not independent evidence of event accuracy. */
 export function sanitizeSourceSampleTiming(rawTime: number, value: SourceSampleTiming): SourceSampleTiming {

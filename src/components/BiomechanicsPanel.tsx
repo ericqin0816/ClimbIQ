@@ -10,7 +10,8 @@ import type {
   VideoMetadata,
   WallCalibration,
 } from "../types";
-import { isTrajectoryFrameExcluded } from "../lib/biomechanics";
+import { buildMetricChunks, isTrajectoryFrameExcluded } from "../lib/biomechanics";
+import { sourceSampleTime } from "../lib/sourceSampleTiming";
 import { analyzePoseVideo, PoseAnalysisCancelledError, type PoseAnalysisProgress } from "../lib/poseAnalysis";
 import { selectBiomechanicsResultCoveringRange } from "../lib/biomechanicsFreshness";
 import {
@@ -940,15 +941,9 @@ function WallTrajectory({ result, currentTime }: { result: BiomechanicsResult; c
   }
   const current = nearestFrame(usable, currentTime, 0.6 / result.settings.sampleFps);
   const peak = Math.max(1, ...usable.map((frame) => frame.speedMps ?? 0));
-  const segments = result.frames.slice(1).flatMap((frame, index) => {
-    const previous = result.frames[index];
-    if (!frame.smoothedWallCom || !previous.smoothedWallCom ||
-        isTrajectoryFrameExcluded(frame) || isTrajectoryFrameExcluded(previous) ||
-        frame.rawTime - previous.rawTime > 0.25) {
-      return [];
-    }
-    return [{ previous, frame }];
-  });
+  const segments = buildMetricChunks(result.frames).flatMap(chunk =>
+    chunk.slice(1).map((frame, index) => ({ previous: chunk[index], frame })),
+  );
 
   return (
     <figure className="wall-trajectory-figure">
@@ -1002,20 +997,7 @@ function VelocityChart({ result, currentTime }: { result: BiomechanicsResult; cu
   const minTime = result.startRawTime;
   const duration = Math.max(0.001, result.endRawTime - minTime);
   const maxSpeed = Math.max(1, ...usable.map((frame) => frame.speedMps ?? 0));
-  const chunks: BiomechanicsFrame[][] = [];
-  let chunk: BiomechanicsFrame[] | undefined;
-  for (const frame of result.frames) {
-    if (frame.speedMps === undefined || isTrajectoryFrameExcluded(frame)) {
-      chunk = undefined;
-      continue;
-    }
-    if (!chunk || frame.rawTime - chunk[chunk.length - 1].rawTime > 0.25) {
-      chunk = [frame];
-      chunks.push(chunk);
-    } else {
-      chunk.push(frame);
-    }
-  }
+  const chunks = buildMetricChunks(result.frames, true);
   const markerX = chartX(clamp(currentTime, result.startRawTime, result.endRawTime), minTime, duration);
 
   return (
@@ -1032,7 +1014,7 @@ function VelocityChart({ result, currentTime }: { result: BiomechanicsResult; cu
         {chunks.map((chunk) => (
           <polyline
             key={chunk[0].rawTime}
-            points={chunk.map((frame) => `${chartX(frame.rawTime, minTime, duration)},${chartY(frame.speedMps ?? 0, maxSpeed)}`).join(" ")}
+            points={chunk.map((frame) => `${chartX(clamp(sourceSampleTime(frame), minTime, result.endRawTime), minTime, duration)},${chartY(frame.speedMps ?? 0, maxSpeed)}`).join(" ")}
             className="speed-line"
           />
         ))}

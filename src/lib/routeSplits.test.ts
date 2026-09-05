@@ -1,11 +1,34 @@
 import { describe, expect, it } from "vitest";
 import type { BiomechanicsFrame, BiomechanicsResult } from "../types";
+import { RAW_COM_DISPLACEMENT_WARNING, REPEATED_COM_FRAME_WARNING } from "./biomechanics";
 import {
   analyzeRouteSplits,
   buildMonotonicRouteProgress,
 } from "./routeSplits";
 
 describe("COM-derived route splits", () => {
+  it("uses source-frame time for interpolated wall crossings", () => {
+    const frames=[{...sample(.04,4),decodedFrameRawTime:0,sourceFrameDurationSeconds:.05},
+      {...sample(.24,6),decodedFrameRawTime:.2,sourceFrameDurationSeconds:.05}];
+    const analysis=analyzeRouteSplits(makeResult(frames,0,.3));
+    expect(analysis.oneThird.rawTime).toBeCloseTo(.1,6);
+  });
+
+  it("will not interpolate a split through a rejected jump even inside a short gap", () => {
+    const frames=[sample(0,4),{...sample(.1,12),warning:RAW_COM_DISPLACEMENT_WARNING},sample(.2,6)];
+    const analysis=analyzeRouteSplits(makeResult(frames,0,.3));
+    expect(analysis.oneThird.available).toBe(false);
+    expect(analysis.oneThird.reason).toContain("untracked gap");
+  });
+
+  it("ignores repeated source evidence without treating it as a new tracking gap", () => {
+    const frames=[{...sample(0,4),decodedFrameRawTime:0,sourceFrameDurationSeconds:.1},
+      {...sample(.05,8),decodedFrameRawTime:0,sourceFrameDurationSeconds:.1,warning:REPEATED_COM_FRAME_WARNING},sample(.2,6)];
+    const analysis=analyzeRouteSplits(makeResult(frames,0,.3));
+    expect(analysis.usableFrames).toBe(2);
+    expect(analysis.oneThird.rawTime).toBeCloseTo(.1,6);
+  });
+
   it("returns equal thirds and an exact halfway crossing for constant pace", () => {
     const result = makeResult(
       Array.from({ length: 101 }, (_, index) => {

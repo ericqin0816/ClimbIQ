@@ -3,6 +3,8 @@ import type {
   BiomechanicsResult,
   Confidence,
 } from "../types";
+import { isTrajectoryFrameExcluded, REPEATED_COM_FRAME_WARNING } from "./biomechanics";
+import { sourceSampleTime } from "./sourceSampleTiming";
 
 export const STANDARD_SPEED_WALL_HEIGHT_METERS = 15;
 export const MAX_ROUTE_PROGRESS_GAP_SECONDS = 0.25;
@@ -72,16 +74,22 @@ export function buildMonotonicRouteProgress(
   }
 
   const byTime = new Map<number, number>();
+  const barriers: number[] = [];
   for (const frame of frames) {
     const point = frame.smoothedWallCom;
-    if (!frame.valid || frame.extrapolated || frame.warning?.includes("Implausible wall-plane speed") || !point ||
+    const time = sourceSampleTime(frame);
+    if (isTrajectoryFrameExcluded(frame)) {
+      if (!frame.warning?.includes(REPEATED_COM_FRAME_WARNING) && Number.isFinite(time)) barriers.push(time);
+      continue;
+    }
+    if (!frame.valid || !point ||
         !Number.isFinite(frame.rawTime) || !Number.isFinite(point.yMeters)) {
       continue;
     }
     const height = clamp(point.yMeters, 0, wallHeightMeters);
-    const existing = byTime.get(frame.rawTime);
+    const existing = byTime.get(time);
     if (existing === undefined || height > existing) {
-      byTime.set(frame.rawTime, height);
+      byTime.set(time, height);
     }
   }
 
@@ -90,7 +98,8 @@ export function buildMonotonicRouteProgress(
   let maximum = Number.NEGATIVE_INFINITY;
   let chunkId = 0;
   return ordered.map((sample, index) => {
-    if (index > 0 && sample.rawTime - ordered[index - 1].rawTime > MAX_ROUTE_PROGRESS_GAP_SECONDS + 1e-9) {
+    if (index > 0 && (sample.rawTime - ordered[index - 1].rawTime > MAX_ROUTE_PROGRESS_GAP_SECONDS + 1e-9 ||
+        barriers.some(time => time >= ordered[index - 1].rawTime && time <= sample.rawTime))) {
       chunkId += 1;
     }
     maximum = Math.max(maximum, sample.height);
@@ -109,7 +118,7 @@ export function analyzeRouteSplits(
 ): RouteSplitAnalysis {
   const samples = buildMonotonicRouteProgress(
     result.frames.filter((frame) =>
-      frame.rawTime >= result.startRawTime - 1e-9 && frame.rawTime <= result.endRawTime + 1e-9,
+      sourceSampleTime(frame) >= result.startRawTime - 1e-9 && sourceSampleTime(frame) <= result.endRawTime + 1e-9,
     ),
     wallHeightMeters,
   );

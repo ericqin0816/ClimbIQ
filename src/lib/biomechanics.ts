@@ -9,6 +9,7 @@ import type {
 } from "../types";
 import type { HomographyMatrix } from "./wallCalibration";
 import { projectImagePointToWall } from "./wallCalibration";
+import { sourceSampleTime, sanitizeSourceSampleTiming } from "./sourceSampleTiming";
 
 interface SpacePoint {
   x: number;
@@ -68,6 +69,8 @@ const DERIVED_FRAME_WARNINGS = [
   "COM lies outside the calibrated wall quadrilateral.",
   "Implausible raw wall-plane displacement; review pose and calibration.",
   "Implausible wall-plane speed; review pose and calibration.",
+  "Repeated source frame; excluded from independent COM measurements.",
+  "Non-increasing source-frame time; excluded from COM measurements.",
 ] as const;
 
 // Even world-class 15 m runs do not produce sustained 2D COM speeds near the
@@ -76,13 +79,18 @@ const DERIVED_FRAME_WARNINGS = [
 export const MAX_PLAUSIBLE_COM_SPEED_MPS = 5.5;
 export const RAW_COM_DISPLACEMENT_WARNING = "Implausible raw wall-plane displacement; review pose and calibration.";
 export const FITTED_COM_SPEED_WARNING = "Implausible wall-plane speed; review pose and calibration.";
+export const REPEATED_COM_FRAME_WARNING = "Repeated source frame; excluded from independent COM measurements.";
+export const NONINCREASING_COM_TIME_WARNING = "Non-increasing source-frame time; excluded from COM measurements.";
 
 /** True when a projected COM sample must not contribute to a path or speed chart. */
 export function isTrajectoryFrameExcluded(frame: BiomechanicsFrame): boolean {
   return Boolean(
     frame.extrapolated ||
     frame.warning?.includes(RAW_COM_DISPLACEMENT_WARNING) ||
-    frame.warning?.includes(FITTED_COM_SPEED_WARNING),
+    frame.warning?.includes(FITTED_COM_SPEED_WARNING) ||
+    // Source duplicates are observations of the same pixels, not extra motion.
+    // The cursor and pose remain available for inspection and export.
+    frame.warning?.includes(REPEATED_COM_FRAME_WARNING) || frame.warning?.includes(NONINCREASING_COM_TIME_WARNING),
   );
 }
 
@@ -152,6 +160,31 @@ export function applyTrajectoryKinematics(
   }
   const frames = Array.from(deduplicated.values()).sort((left, right) => left.rawTime - right.rawTime);
 
+  const sourceRepresentatives = new Map<number, BiomechanicsFrame>();
+  for (const frame of frames) {
+    const source = sanitizeSourceSampleTiming(frame.rawTime, frame).decodedFrameRawTime;
+    if (source === undefined) continue;
+    const previous = sourceRepresentatives.get(source);
+    // A second inference on identical pixels can be more complete. Keep one
+    // usable representative, not both, and never prefer invalid high mass.
+    const usable = (sample: BiomechanicsFrame) => Boolean(sample.valid && sample.wallCom &&
+      Number.isFinite(sample.wallCom.xMeters) && Number.isFinite(sample.wallCom.yMeters) &&
+      sample.wallCom.xMeters >= 0 && sample.wallCom.xMeters <= calibration.widthMeters &&
+      sample.wallCom.yMeters >= 0 && sample.wallCom.yMeters <= calibration.heightMeters);
+    if (!previous || (usable(frame) && !usable(previous)) ||
+        (usable(frame) === usable(previous) && frame.massCoverage > previous.massCoverage)) {
+      if (previous) previous.warning = appendWarning(previous.warning, REPEATED_COM_FRAME_WARNING);
+      sourceRepresentatives.set(source, frame);
+    } else frame.warning = appendWarning(frame.warning, REPEATED_COM_FRAME_WARNING);
+  }
+  let previousMeasurementTime = -Infinity;
+  for (const frame of frames) {
+    if (frame.warning?.includes(REPEATED_COM_FRAME_WARNING)) continue;
+    const time = sourceSampleTime(frame);
+    if (time <= previousMeasurementTime) frame.warning = appendWarning(frame.warning, NONINCREASING_COM_TIME_WARNING);
+    else previousMeasurementTime = time;
+  }
+
   for (const frame of frames) {
     frame.extrapolated = Boolean(frame.wallCom && (
       frame.wallCom.xMeters < -1e-6 || frame.wallCom.xMeters > calibration.widthMeters + 1e-6 ||
@@ -164,9 +197,15 @@ export function applyTrajectoryKinematics(
 
   const chunks = buildContinuousChunks(frames);
   for (const chunk of chunks) {
+    // A 5 Hz sampling grid can land on source intervals such as 0.173/0.207 s.
+    // A hard 0.200 s window would then erase speed at otherwise continuous
+    // samples. Include at least one observed interval, within this already
+    // validated chunk; never enlarge a fit across a tracking gap or rejection.
+    const fittingWindow = Math.max(settings.smoothingWindowSeconds,
+      ...chunk.slice(1).map((frame, index) => sourceSampleTime(frame) - sourceSampleTime(chunk[index])));
     for (const frame of chunk) {
-      const fittedX = localLinearFit(chunk, frame.rawTime, settings.smoothingWindowSeconds, (sample) => sample.wallCom?.xMeters);
-      const fittedY = localLinearFit(chunk, frame.rawTime, settings.smoothingWindowSeconds, (sample) => sample.wallCom?.yMeters);
+      const fittedX = localLinearFit(chunk, sourceSampleTime(frame), fittingWindow, (sample) => sample.wallCom?.xMeters);
+      const fittedY = localLinearFit(chunk, sourceSampleTime(frame), fittingWindow, (sample) => sample.wallCom?.yMeters);
       if (fittedX && fittedY) {
         frame.smoothedWallCom = { xMeters: fittedX.position, yMeters: fittedY.position };
         if (fittedX.velocity !== undefined && fittedY.velocity !== undefined) {
@@ -213,7 +252,7 @@ export function applyTrajectoryKinematics(
   const metricChunks = buildMetricChunks(frames);
   for (const smoothed of metricChunks) {
     if (smoothed.length >= 2) {
-      activeDuration += smoothed[smoothed.length - 1].rawTime - smoothed[0].rawTime;
+      activeDuration += sourceSampleTime(smoothed[smoothed.length - 1]) - sourceSampleTime(smoothed[0]);
       observedChordMeters += wallDistance(smoothed[0].smoothedWallCom!, smoothed[smoothed.length - 1].smoothedWallCom!);
       observedVerticalGainMeters += smoothed[smoothed.length - 1].smoothedWallCom!.yMeters - smoothed[0].smoothedWallCom!.yMeters;
       for (let index = 1; index < smoothed.length; index += 1) {
@@ -228,12 +267,7 @@ export function applyTrajectoryKinematics(
     ? Math.min(1, observedChordMeters / pathLengthMeters)
     : undefined;
   const averageSpeedMps = activeDuration > 0 && hasMeaningfulPath ? pathLengthMeters / activeDuration : undefined;
-  const speedValues = frames
-    .map((frame) => frame.speedMps)
-    .filter((value): value is number => value !== undefined && Number.isFinite(value));
-  const peakSpeedMps = settings.sampleFps >= 8 && speedValues.length >= 3
-    ? Math.max(...speedValues)
-    : undefined;
+  const peakSpeedMps = peakSpeedAtObservedCadence(metricChunks, settings.sampleFps);
 
   const warnings = [
     "Experimental wall-projected 2D COM estimate; it is not a 3D or clinical measurement.",
@@ -267,7 +301,13 @@ export function applyTrajectoryKinematics(
     warnings.push("Tracking contains gaps; path, gain, and efficiency use continuous observed spans only.");
   }
   if (peakSpeedMps === undefined) {
-    warnings.push("Peak speed is hidden because the sample rate or usable sample count is too low.");
+    warnings.push("Peak speed is hidden because the independent sample rate or usable sample count is too low.");
+  }
+  if (frames.some(frame => frame.warning?.includes(REPEATED_COM_FRAME_WARNING))) {
+    warnings.push("Repeated decoded frames were excluded from COM fitting, speed, path, and usable-frame coverage.");
+  }
+  if (frames.some(frame => frame.warning?.includes(NONINCREASING_COM_TIME_WARNING))) {
+    warnings.push("Non-increasing source timestamps were excluded from COM measurements; review the source video timing.");
   }
 
   let quality: BiomechanicsMetrics["quality"] = trackingCoverage >= 0.9 && validCoverage >= 0.85 && meanMassCoverage >= 0.92 &&
@@ -384,6 +424,8 @@ function buildContinuousChunks(frames: BiomechanicsFrame[]): BiomechanicsFrame[]
   const chunks: BiomechanicsFrame[][] = [];
   let current: BiomechanicsFrame[] | undefined;
   for (const frame of frames) {
+    if (frame.warning?.includes(REPEATED_COM_FRAME_WARNING)) continue;
+    if (frame.warning?.includes(NONINCREASING_COM_TIME_WARNING)) { current = undefined; continue; }
     if (!frame.valid || !frame.wallCom) {
       continue;
     }
@@ -394,7 +436,7 @@ function buildContinuousChunks(frames: BiomechanicsFrame[]): BiomechanicsFrame[]
 
     const previous = current?.[current.length - 1];
     if (previous?.wallCom) {
-      const elapsed = frame.rawTime - previous.rawTime;
+      const elapsed = sourceSampleTime(frame) - sourceSampleTime(previous);
       if (elapsed > 0.25) {
         current = undefined;
       } else if (elapsed > 1e-9 && wallDistance(previous.wallCom, frame.wallCom) / elapsed > MAX_PLAUSIBLE_COM_SPEED_MPS) {
@@ -418,11 +460,16 @@ function buildContinuousChunks(frames: BiomechanicsFrame[]): BiomechanicsFrame[]
  * Rebuilds the final path after fitting so a rejected sample is a hard visual
  * and metric boundary rather than being bridged by its two neighbors.
  */
-function buildMetricChunks(frames: BiomechanicsFrame[]): BiomechanicsFrame[][] {
+export function buildMetricChunks(frames: BiomechanicsFrame[], requireSpeed = false): BiomechanicsFrame[][] {
   const chunks: BiomechanicsFrame[][] = [];
   let current: BiomechanicsFrame[] | undefined;
   for (const frame of frames) {
+    if (frame.warning?.includes(REPEATED_COM_FRAME_WARNING)) continue;
     if (isTrajectoryFrameExcluded(frame)) {
+      current = undefined;
+      continue;
+    }
+    if (requireSpeed && (frame.speedMps === undefined || !Number.isFinite(frame.speedMps))) {
       current = undefined;
       continue;
     }
@@ -430,7 +477,7 @@ function buildMetricChunks(frames: BiomechanicsFrame[]): BiomechanicsFrame[][] {
       continue;
     }
     const previous = current?.[current.length - 1];
-    if (!current || !previous || frame.rawTime - previous.rawTime > 0.25) {
+    if (!current || !previous || sourceSampleTime(frame) - sourceSampleTime(previous) > 0.25) {
       current = [frame];
       chunks.push(current);
     } else {
@@ -440,6 +487,27 @@ function buildMetricChunks(frames: BiomechanicsFrame[]): BiomechanicsFrame[][] {
   return chunks;
 }
 
+/** A requested 15 fps does not establish 15 independent observations/sec.
+ * Peak values need at least three consecutive usable measurements at >=8 Hz. */
+function peakSpeedAtObservedCadence(chunks: BiomechanicsFrame[][], requestedFps: number): number | undefined {
+  if (requestedFps < 8) return undefined;
+  const peaks: number[] = [];
+  for (const chunk of chunks) {
+    let run: number[] = [];
+    let previousTime: number | undefined;
+    const flush = () => { if (run.length >= 3) peaks.push(Math.max(...run)); run = []; };
+    for (const frame of chunk) {
+      const time = sourceSampleTime(frame);
+      if (previousTime !== undefined && time - previousTime > 0.125 + 1e-6) flush();
+      if (frame.speedMps !== undefined && Number.isFinite(frame.speedMps)) run.push(frame.speedMps);
+      else flush();
+      previousTime = time;
+    }
+    flush();
+  }
+  return peaks.length ? Math.max(...peaks) : undefined;
+}
+
 function localLinearFit(
   frames: BiomechanicsFrame[],
   targetTime: number,
@@ -447,7 +515,7 @@ function localLinearFit(
   valueFor: (frame: BiomechanicsFrame) => number | undefined,
 ): { position: number; velocity?: number } | undefined {
   const window = Math.max(0.05, windowSeconds);
-  const neighbors = frames.filter((frame) => Math.abs(frame.rawTime - targetTime) <= window + 1e-9);
+  const neighbors = frames.filter((frame) => Math.abs(sourceSampleTime(frame) - targetTime) <= window + 1e-9);
   if (!neighbors.length) {
     return undefined;
   }
@@ -462,7 +530,7 @@ function localLinearFit(
     if (value === undefined || !Number.isFinite(value)) {
       continue;
     }
-    const tau = frame.rawTime - targetTime;
+    const tau = sourceSampleTime(frame) - targetTime;
     const sigma = Math.max(window / 2, 0.025);
     const weight = Math.exp(-0.5 * (tau / sigma) ** 2);
     s0 += weight;

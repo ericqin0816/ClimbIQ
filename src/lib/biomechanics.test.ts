@@ -6,6 +6,9 @@ import {
   computeImageCom,
   computeWallCom,
   DEFAULT_BIOMECHANICS_SETTINGS,
+  REPEATED_COM_FRAME_WARNING,
+  isTrajectoryFrameExcluded,
+  buildMetricChunks,
 } from "./biomechanics";
 import { buildWallCalibration, validateWallCalibration } from "./wallCalibration";
 
@@ -61,6 +64,90 @@ describe("weighted COM", () => {
 });
 
 describe("trajectory kinematics", () => {
+  it("does not erase continuous speed when native intervals straddle the requested smoothing window", () => {
+    const native=[0,.173333,.38,.586667,.793333];
+    const frames=native.map((time,index)=>({...frame(index*.2,1.5,1+time),decodedFrameRawTime:time,sourceFrameDurationSeconds:.035}));
+    const result=applyTrajectoryKinematics(frames,DEFAULT_BIOMECHANICS_SETTINGS,calibration);
+    result.frames.forEach(sample=>expect(sample.speedMps).toBeCloseTo(1,6));
+    expect(buildMetricChunks(result.frames,true)).toHaveLength(1);
+  });
+  it("fits actual source-frame timing without shifting the saved seek cursors", () => {
+    const times = [0, .08, .19, .28, .4];
+    const frames = times.map((time, index) => ({ ...frame(time + [0,.03,.01,.02,0][index], 1.5, 1 + 2*time),
+      decodedFrameRawTime: time, sourceFrameDurationSeconds: .04 }));
+    const result = applyTrajectoryKinematics(frames, {...DEFAULT_BIOMECHANICS_SETTINGS,smoothingWindowSeconds:.3},calibration);
+    expect(result.frames.map(sample => sample.rawTime)).toEqual(frames.map(sample => Math.round(sample.rawTime * 1000) / 1000));
+    result.frames.forEach(sample => expect(sample.speedMps).toBeCloseTo(2,6));
+    expect(result.metrics.averageSpeedMps).toBeCloseTo(2,6);
+    const cursorOnly = applyTrajectoryKinematics(frames.map(sample=>({...sample,decodedFrameRawTime:undefined})),
+      {...DEFAULT_BIOMECHANICS_SETTINGS,smoothingWindowSeconds:.3},calibration);
+    expect(cursorOnly.frames.some(sample=>Math.abs((sample.speedMps ?? 2)-2)>.05)).toBe(true);
+  });
+
+  it("does not turn repeated seeks into extra COM evidence or fake high-rate peak speed", () => {
+    const frames = Array.from({length:9},(_,index) => {
+      const source = Math.floor(index/3)*.2;
+      return {...frame(index/15,1.5,1+2*source),decodedFrameRawTime:source,sourceFrameDurationSeconds:.2};
+    });
+    const result=applyTrajectoryKinematics(frames,{...DEFAULT_BIOMECHANICS_SETTINGS,sampleFps:15,smoothingWindowSeconds:.3},calibration);
+    expect(result.frames).toHaveLength(9);
+    expect(result.frames.filter(sample=>sample.warning?.includes(REPEATED_COM_FRAME_WARNING))).toHaveLength(6);
+    expect(result.metrics.validFrames).toBe(3);
+    expect(result.metrics.validCoverage).toBeCloseTo(1/3);
+    expect(result.metrics.averageSpeedMps).toBeCloseTo(2,6);
+    expect(result.metrics.peakSpeedMps).toBeUndefined();
+    result.frames.filter(isTrajectoryFrameExcluded).forEach(sample=>expect(sample.speedMps).toBeUndefined());
+    expect(applyTrajectoryKinematics(result.frames,{...DEFAULT_BIOMECHANICS_SETTINGS,sampleFps:15,smoothingWindowSeconds:.3},calibration).metrics).toEqual(result.metrics);
+  });
+
+  it("prefers a usable duplicate over an invalid high-mass inference", () => {
+    const first={...frame(.01,1.5,1),decodedFrameRawTime:0,sourceFrameDurationSeconds:.2,valid:false,massCoverage:1};
+    const second={...frame(.08,1.5,1),decodedFrameRawTime:0,sourceFrameDurationSeconds:.2,massCoverage:.8};
+    const result=applyTrajectoryKinematics([first,second],DEFAULT_BIOMECHANICS_SETTINGS,calibration);
+    expect(isTrajectoryFrameExcluded(result.frames[0])).toBe(true);
+    expect(isTrajectoryFrameExcluded(result.frames[1])).toBe(false);
+    expect(result.metrics.validFrames).toBe(1);
+  });
+
+  it("uses source time when deciding whether a tracking gap can be bridged", () => {
+    const frames=[{...frame(.03,1,1),decodedFrameRawTime:0,sourceFrameDurationSeconds:.04},
+      {...frame(.27,1,1.27),decodedFrameRawTime:.27,sourceFrameDurationSeconds:.04}];
+    const result=applyTrajectoryKinematics(frames,DEFAULT_BIOMECHANICS_SETTINGS,calibration);
+    expect(result.metrics.pathLengthMeters).toBeUndefined();
+  });
+
+  it("rejects non-increasing mixed source times without manufacturing infinite speed", () => {
+    const frames=[frame(.10,1.5,1),{...frame(.11,1.5,1.1),decodedFrameRawTime:.09,sourceFrameDurationSeconds:.04},frame(.2,1.5,1.2)];
+    const result=applyTrajectoryKinematics(frames,DEFAULT_BIOMECHANICS_SETTINGS,calibration);
+    expect(result.frames[1].warning).toContain("Non-increasing source-frame time");
+    expect(result.frames[1].speedMps).toBeUndefined();
+    expect(result.metrics.validFrames).toBe(2);
+  });
+
+  it("does not choose an extrapolated high-mass duplicate over an in-wall measurement", () => {
+    const frames=[{...frame(.01,5,1),decodedFrameRawTime:0,sourceFrameDurationSeconds:.2},
+      {...frame(.08,1.5,1),decodedFrameRawTime:0,sourceFrameDurationSeconds:.2,massCoverage:.8}];
+    const result=applyTrajectoryKinematics(frames,DEFAULT_BIOMECHANICS_SETTINGS,calibration);
+    expect(result.metrics.validFrames).toBe(1);
+    expect(result.frames[1].smoothedWallCom).toBeDefined();
+  });
+
+  it("falls back safely on invalid imported source metadata", () => {
+    const frames=[0,.1,.2,.3].map(time=>({...frame(time,1.5,1+time),decodedFrameRawTime:time+20}));
+    const result=applyTrajectoryKinematics(frames,DEFAULT_BIOMECHANICS_SETTINGS,calibration);
+    expect(result.metrics.averageSpeedMps).toBeCloseTo(1,6);
+  });
+
+  it("shares source gaps and duplicate handling with path and speed charts", () => {
+    const samples=[{...frame(.03,1,1),decodedFrameRawTime:0,sourceFrameDurationSeconds:.1,smoothedWallCom:{xMeters:1,yMeters:1},speedMps:1},
+      {...frame(.06,1,1),decodedFrameRawTime:0,sourceFrameDurationSeconds:.1,warning:REPEATED_COM_FRAME_WARNING},
+      {...frame(.27,1,1.27),decodedFrameRawTime:.27,sourceFrameDurationSeconds:.1,smoothedWallCom:{xMeters:1,yMeters:1.27},speedMps:1}];
+    expect(buildMetricChunks(samples).map(chunk=>chunk.length)).toEqual([1,1]);
+    expect(buildMetricChunks(samples,true).map(chunk=>chunk.length)).toEqual([1,1]);
+    samples[2].decodedFrameRawTime=.2;
+    expect(buildMetricChunks(samples,true).map(chunk=>chunk.length)).toEqual([2]);
+  });
+
   it("returns zero speed for a stationary COM", () => {
     const frames = [0, 0.1, 0.2, 0.3].map((time) => frame(time, 1.5, 2));
     const result = applyTrajectoryKinematics(frames, DEFAULT_BIOMECHANICS_SETTINGS, calibration);
