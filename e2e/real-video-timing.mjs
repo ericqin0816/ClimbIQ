@@ -3,6 +3,7 @@ import path from "node:path";
 import { spawn } from "node:child_process";
 import { tmpdir } from "node:os";
 import { createProtocolClient } from "./cdp-client.mjs";
+import { closeTestBrowser } from "./browser-lifecycle.mjs";
 import { createReadStream } from "node:fs";
 import { createHash } from "node:crypto";
 import { analysisFailureFromOutcome, evaluateKnownVideoFailure } from "../scripts/lib/known-video-failures.mjs";
@@ -498,6 +499,7 @@ async function main() {
     console.log(JSON.stringify({ appUrl, app, videoDirectory, fullWorkflow, disableFrameCallback, disableVideoFrame, passed: failures.length === 0, assertions, safetyAssertions, outcomes }, null, 2));
     if (failures.length) process.exitCode = 1;
   } finally {
+    await closeTestBrowser(chrome, protocol.send);
     protocol.socket.close();
   }
 }

@@ -38,6 +38,7 @@ describe("timestamp review panel", () => {
     const html = render({ frameStatus: "unsupported" });
     expect(html).toContain('<details class="review-time-details">');
     expect(html).toContain("not the exact physical contact instant");
+    expect(html).toContain("may not enumerate every encoded frame");
     expect(html).toContain("Approximate cursor time");
   });
   it("reports source-frame duration without calling it event accuracy", () => {

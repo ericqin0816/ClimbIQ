@@ -3,6 +3,7 @@ import path from "node:path";
 import { tmpdir } from "node:os";
 import { createProtocolClient } from "./cdp-client.mjs";
 import { auditDecodedSourceFrames } from "./frame-audit.mjs";
+import { closeTestBrowser } from "./browser-lifecycle.mjs";
 
 const chromePath = process.env.CLIMBIQ_CHROME ?? (process.platform === "darwin"
   ? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
@@ -12,6 +13,7 @@ const appUrl = process.env.CLIMBIQ_E2E_URL ?? "http://127.0.0.1:5173/";
 const auditFrames = process.argv.includes("--frame-audit");
 const port = 9333;
 const profile = path.join(tmpdir(), `climbiq-e2e-${Date.now()}`);
+let protocolSend;
 
 const chrome = spawn(chromePath, [
   "--headless=new",
@@ -54,6 +56,7 @@ async function run() {
   });
 
   const { send } = createProtocolClient(socket);
+  protocolSend = send;
   const runtimeErrors = [];
   socket.addEventListener("message", (event) => {
     let message;
@@ -130,11 +133,12 @@ async function run() {
   if (runtimeErrors.length) throw new Error(`Browser runtime errors: ${runtimeErrors.join(' | ')}`);
 
   console.log(JSON.stringify({ status: "passed", hitTargetIsInput, ...snapshot, sameFileRetry: retryReady, frameAudit }, null, 2));
+  await closeTestBrowser(chrome, send);
   socket.close();
 }
 
 try {
   await run();
 } finally {
-  chrome.kill();
+  await closeTestBrowser(chrome, protocolSend);
 }

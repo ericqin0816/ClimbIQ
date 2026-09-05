@@ -91,7 +91,7 @@ const INITIAL_TIMESTAMPS: TimestampMarker[] = [
   marker("finishPad", "Finish Pad"),
 ];
 
-const APP_VERSION = "0.27.0";
+const APP_VERSION = "0.27.1";
 const SESSION_STORAGE_KEY = "climbiq.analysisSessions.v1";
 const AttemptComparisonPanel = lazy(() => import("./components/AttemptComparisonPanel"));
 const Hold10SecondPassPanel = lazy(() => import("./components/Hold10SecondPassPanel"));
@@ -1685,6 +1685,34 @@ function App() {
       return;
     }
 
+    // Preflight may replace lane calibration and clear its old Finish/COM.
+    // Until a replacement Start commits, cancellation must restore the whole
+    // prior evidence context rather than leave half of the old analysis gone.
+    const previousContext = pendingAutomaticContextRef.current;
+    const previousLaneCandidates = automaticLaneCandidatesRef.current;
+    const hadPreviousAnalysis = timestamps.some(marker => marker.rawTime !== null) || Boolean(startResult || finishResult || biomechanics.result);
+    const restorePreviousAnalysis = () => {
+      setTimestamps(timestamps);
+      setZones(zones);
+      setStartLightCalibration(startLightCalibration);
+      setStartDetectionProfile(startDetectionProfile);
+      setCalibrationStatus(calibrationStatus);
+      setBiomechanics(biomechanics);
+      setRouteAlignment(routeAlignment);
+      setStartResult(startResult);
+      setSuggestedStartRawTime(suggestedStartRawTime);
+      setMovementResult(movementResult);
+      setMovementPreviewFrames(movementPreviewFrames);
+      setFinishResult(finishResult);
+      setFinishStatus(finishStatus);
+      setStartEvidenceStatus(startEvidenceStatus);
+      setHold10SecondPass(hold10SecondPass);
+      setSecondPassStatus(secondPassStatus);
+      setTimestampReview(timestampReview);
+      pendingAutomaticContextRef.current = previousContext;
+      automaticLaneCandidatesRef.current = previousLaneCandidates;
+    };
+    let startReplacementCommitted = false;
     const abortController = new AbortController();
     autoAnalysisAbortRef.current = abortController;
     setAutoAnalysisRunning(true);
@@ -1768,6 +1796,7 @@ function App() {
             );
             return;
           }
+          startReplacementCommitted = true;
           acceptTimestamp(
             "startSignal",
             acceptedStart,
@@ -1797,10 +1826,14 @@ function App() {
         jumpTo(reviewSeekTarget);
       }
     } catch (error) {
+      if (!startReplacementCommitted) restorePreviousAnalysis();
       if (error instanceof PoseAnalysisCancelledError || abortController.signal.aborted) {
-        setAutoAnalysisStatus("Quick Analyze cancelled. Existing accepted results were kept.");
+        setAutoAnalysisStatus(startReplacementCommitted
+          ? "Quick Analyze cancelled. Completed stages remain on screen; unfinished stages may need another run."
+          : hadPreviousAnalysis ? "Quick Analyze cancelled. The previous analysis was restored because no replacement Start was committed."
+            : "Quick Analyze cancelled before a Start was committed.");
       } else {
-        setAutoAnalysisStatus(error instanceof Error ? `Quick Analyze stopped: ${error.message}` : "Quick Analyze stopped.");
+        setAutoAnalysisStatus(`${error instanceof Error ? `Quick Analyze stopped: ${error.message}` : "Quick Analyze stopped."}${!startReplacementCommitted && hadPreviousAnalysis ? " The previous analysis was restored." : ""}`);
       }
     } finally {
       autoAnalysisAbortRef.current = null;
@@ -3481,9 +3514,11 @@ function App() {
             </button>
             <span className="time-pill">Raw video time {currentTime.toFixed(3)}s</span>
             <button data-frame-step="previous" disabled={videoAnalysisRunning} onClick={() => nativeFrameStepsAvailable ? stepSourceFrame(-1) : stepVideo(-0.03)}
-              aria-label={nativeFrameStepsAvailable ? "Previous source frame" : "Back 0.03 seconds (approximate)"}>{nativeFrameStepsAvailable ? "← Frame" : "-0.03s"}</button>
+              aria-label={nativeFrameStepsAvailable ? "Previous decoded frame" : "Back 0.03 seconds (approximate)"}
+              title="Uses browser-reported frame timing; variable-rate seeking depends on the decoder.">{nativeFrameStepsAvailable ? "← Frame" : "-0.03s"}</button>
             <button data-frame-step="next" disabled={videoAnalysisRunning} onClick={() => nativeFrameStepsAvailable ? stepSourceFrame(1) : stepVideo(0.03)}
-              aria-label={nativeFrameStepsAvailable ? "Next source frame" : "Forward 0.03 seconds (approximate)"}>{nativeFrameStepsAvailable ? "Frame →" : "+0.03s"}</button>
+              aria-label={nativeFrameStepsAvailable ? "Next decoded frame" : "Forward 0.03 seconds (approximate)"}
+              title="Uses browser-reported frame timing; variable-rate seeking depends on the decoder.">{nativeFrameStepsAvailable ? "Frame →" : "+0.03s"}</button>
             <button disabled={videoAnalysisRunning} onClick={() => stepVideo(-0.1)}>-0.10s</button>
             <button disabled={videoAnalysisRunning} onClick={() => stepVideo(0.1)}>+0.10s</button>
             <input

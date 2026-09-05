@@ -42,6 +42,7 @@ export default function TimestampReviewPanel(props: TimestampReviewPanelProps) {
     </p>
     <details className="review-time-details"><summary>Timing details</summary>
       <p>Seek cursor: {props.currentTime.toFixed(3)}s. A native frame timestamp identifies the displayed source frame, not the exact physical contact instant. Without it, the paused cursor may fall between source frames. This provenance is saved with your marker.</p>
+      <p>Frame stepping uses browser-decoded frames and reported intervals. On variable-rate video, it may not enumerate every encoded frame.</p>
       {props.sourceFrameDurationSeconds !== undefined && <p>Source frame duration: {(props.sourceFrameDurationSeconds * 1000).toFixed(2)} ms. This is the frame’s presentation interval, not a measured event-error bound.</p>}
     </details>
     <div className="button-row timestamp-review-actions">

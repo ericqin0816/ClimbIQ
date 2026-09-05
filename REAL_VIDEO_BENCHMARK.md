@@ -2,7 +2,7 @@
 
 This benchmark records behavior on five private 1080 × 1920 phone recordings. The source videos stay outside the repository and are processed locally.
 
-## Current release snapshot: 0.26.0
+## Current release snapshot: 0.27.x
 
 - Five-original full workflows pass: two Starts and one Finish are automatically
   accepted; the other boundaries require review. These are acceptance counts,
@@ -143,7 +143,7 @@ This stress test supports the current precision-first policy: fixed-camera foota
 
 The complete `IMG_9199.MOV` run exposed the largest remaining data limitation: timing was stable at 7.130 s → 17.480 s across repeated runs, but visual route registration consistently found only 8 of the 10 matches required by policy, so Hold 10 contact could not be accepted automatically. COM tracking changed sharply with sample rate: 5 fps produced 42/52 usable frames (80.8%) and recovered every wall-height split, 10 fps produced only 43–45/104 (41.3–43.3%), and 15 fps failed identity selection. The measured 5 fps setting is now the phone-video default; 10/15 fps remain advanced options.
 
-With the improved 5 fps track, the review-only hand-height fallback found a continuous crossing at 11.515 s raw (4.385 s after Start). Reviewing and accepting that frame in the UI produced 4.385 s Start → Hold 10 and 5.965 s Hold 10 → Finish: 42.4% of the race before Hold 10 and 57.6% after, with the top phase taking 1.580 s longer. The independent 7.5 m COM-height crossing was 4.409 s, 0.024 s later; they remain separately labeled instead of treating that near-agreement as proof of contact. This remains a human-confirmed workflow rather than an automatic contact claim because Hold 10 itself was not visually registered.
+In the historical 5 fps workflow test, accepting the 11.515 s hand-height cursor produced 4.385 s Start → Hold 10 and 5.965 s Hold 10 → Finish. That was an explicit-acceptance UI test, not an independent human annotation. The nearby 4.409 s COM half-height crossing is a separate calculation; its agreement does not establish hand contact.
 
 ## Acceptance policy
 

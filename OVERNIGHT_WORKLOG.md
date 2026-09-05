@@ -353,3 +353,33 @@ before pushing verified checkpoints because the user also works from a Mac.
   one individual channel proposes 2.860 s at High while the mix gives 2.790 s
   at Medium. This is unverified diagnostic evidence; no channel-picking change
   has been shipped or described as improved accuracy.
+
+## Final release verification
+
+- 0.27.0 (`6ee5bf8`) pushed and GitHub verification passed. The complete final
+  30-copy run (`video-robustness-2026-09-05T12-12-45-711Z.json`) has zero workflow
+  errors, zero source timing drifts, and both known-failure guards held. All
+  available 9199 pose results preserved native sample timing through exports.
+- Browser shutdown now requests graceful close before using the test's own
+  process handle as a bounded fallback. Two orphaned utility workers from this
+  run were terminated after checking their exact test profiles and dead parents.
+  No user browser session or files were removed.
+- Frame-step tests now check three timeline positions, including the synthetic
+  15-to-30-fps transition. They pass round trips, but additional hidden-player
+  probes exposed decode-history-dependent frame duration/seek behavior. UI help
+  now explicitly says browser-decoded stepping may not enumerate every encoded
+  frame. Native PTS is a reported decoded-image timestamp, not a promise that a
+  requested seek reached every possible source frame.
+- 0.27.1 candidate passes 483 unit tests/49 files, typecheck and build. This
+  checkpoint adds browser-test shutdown and clarifies frame-step limitations;
+  detection and contact-policy code remain the same as the final 0.27.0 batch.
+- Final cancellation testing found another actual bug: a cancelled preflight
+  rerun cleared the prior accepted Finish while claiming old results were kept.
+  Before a replacement Start commits, cancellation/errors now restore the prior
+  timing, lane calibration, COM and review context. After commitment, completed
+  stages remain available. The original failing marker test now passes, and a
+  stronger full-unsaved-analysis test preserves COM text and all three Hold 10
+  previews too. The test selector was corrected to the actual labelled section
+  before that stronger replay; no application behavior was mocked to pass it.
+- Full production 0.27.0 replay passed all five originals and six public crops,
+  including native sample-metadata preservation and stale-export clearing.

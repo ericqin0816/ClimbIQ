@@ -134,7 +134,11 @@ The compact review workspace keeps the player and acceptance controls together o
 
 On browsers with `VideoFrame`, the player reads the current source-frame timestamp directly, including while paused or offscreen; compositor callbacks remain a fallback for older browsers. Previous/Next Frame uses that frame's boundary and duration instead of assuming 30 fps. When native frame duration is unavailable, the controls explicitly fall back to approximate 0.03 s cursor steps. Review details and the saved note include source-frame duration when available. This is a presentation interval, not an event-accuracy bound, and it does not change automatic detector timing.
 
+Browser seek behavior still matters: variable-rate test footage can return a decoded frame behind the requested cursor, and reported duration can vary with decode history. The controls navigate browser-decoded frames; they do not promise enumeration of every encoded frame. The panel keeps the actual reported frame timestamp separate from the requested cursor so this limitation is visible.
+
 Pose samples also retain `decodedFrameRawTime` and `sourceFrameDurationSeconds` when available, separately from their sampling cursor. Compact save/load preserves valid metadata; dataset JSON includes a `sourceFrameTimingAudit`. Repeated seeks into the same source image cannot count as separate Hold 10 dwell observations. Legacy samples without native metadata retain their existing interpretation, and malformed imported coordinates/validity flags cannot become valid COM measurements through JavaScript coercion.
+
+Cancelling or failing a rerun before it commits a replacement Start restores the previous analysis context, including its accepted Finish. After a new Start commits, completed stages remain available and unfinished stages may need another run. This prevents preflight lane-calibration changes from silently erasing prior timing on cancellation.
 
 ## Start Signal Detection
 

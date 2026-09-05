@@ -3,6 +3,7 @@ import { access } from "node:fs/promises";
 import path from "node:path";
 import { tmpdir } from "node:os";
 import { createProtocolClient } from "./cdp-client.mjs";
+import { closeTestBrowser } from "./browser-lifecycle.mjs";
 
 // Real browser interruption tests. No video pixels or user library are exported.
 const directory = path.resolve(process.env.CLIMBIQ_VIDEO_DIR ?? "node_modules/.climbiq-private-videos");
@@ -20,6 +21,7 @@ const chrome = spawn(chromePath, ["--headless=new", "--no-first-run", "--no-defa
 { stdio: "ignore", windowsHide: true });
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 let socket;
+let sendCommand;
 const report = { appUrl: url, isGroundTruthLabel: false, stages: [] };
 
 try {
@@ -35,6 +37,7 @@ try {
   socket = new WebSocket(target.webSocketDebuggerUrl);
   await new Promise((resolve, reject) => { socket.addEventListener("open", resolve, { once: true }); socket.addEventListener("error", reject, { once: true }); });
   const { send } = createProtocolClient(socket);
+  sendCommand = send;
   const errors = [];
   socket.addEventListener("message", event => {
     let message; try { message = JSON.parse(event.data); } catch { return; }
@@ -71,7 +74,8 @@ try {
   await until("Boolean(document.querySelector('input[accept=\"video/*\"]'))", "app load");
   report.version = await evaluate("document.querySelector('main[data-app-version]')?.dataset.appVersion");
 
-  for (const stage of ["start", "finish", "pose"]) {
+  const stages = process.argv.includes("--rerun-only") ? [] : ["start", "finish", "pose"];
+  for (const stage of stages) {
     console.error(`Testing ${stage} cancellation`);
     await upload(primary);
     await evaluate(`(async () => { const v = document.querySelector('video'); v.pause(); v.currentTime = 2.5;
@@ -101,6 +105,31 @@ try {
       replacementBlocked: true, markersRetained: true, status: after.status });
   }
 
+  // Establish a complete unsaved result, including COM and contact previews.
+  if (!stages.length) await upload(primary);
+  await evaluate("[...document.querySelectorAll('button')].find(b => b.textContent.includes('Run full analysis')).click()");
+  await until(`[...document.querySelectorAll('button')].some(b => b.textContent.includes('Analyzing climb') && b.disabled)`, "complete rerun starts");
+  await until(`!(${stateExpression}).busy`, "complete rerun", 150000);
+  const evidenceExpression = `({ com: document.getElementById('biomechanics-results-heading')?.closest('section')?.textContent ?? '',
+    hold10: document.querySelector('.hold10-second-pass')?.textContent ?? '', previews: document.querySelectorAll('.hold10-evidence-frames img').length })`;
+  const priorEvidence = await evaluate(evidenceExpression);
+  if (!priorEvidence.com || priorEvidence.previews !== 3) throw new Error("Rerun cancellation test did not establish complete prior evidence.");
+  // A rerun must not discard earlier timing before its replacement Start commits.
+  const priorAnalysis = await evaluate(stateExpression);
+  await evaluate("[...document.querySelectorAll('button')].find(b => b.textContent.includes('Run full analysis')).click()");
+  await until("/Verifying that the selected athlete launches/.test(document.querySelector('.quick-analysis-box .status-message')?.textContent ?? '')", "rerun preflight", 150000);
+  await evaluate("[...document.querySelectorAll('button')].find(b => b.textContent.trim() === 'Cancel').click()");
+  await until(`!(${stateExpression}).busy`, "rerun cancellation", 30000);
+  const cancelledRerun = await evaluate(stateExpression);
+  if (JSON.stringify(cancelledRerun.markers) !== JSON.stringify(priorAnalysis.markers)) {
+    report.rerunDiagnostic = { before: priorAnalysis.markers, after: cancelledRerun.markers, status: cancelledRerun.status };
+    throw new Error("Cancelling preflight discarded prior timing before a replacement Start was committed.");
+  }
+  report.cancelledRerunPreservedPriorTiming = true;
+  const restoredEvidence = await evaluate(evidenceExpression);
+  if (JSON.stringify(restoredEvidence) !== JSON.stringify(priorEvidence)) throw new Error("Cancelled preflight lost the prior COM or Hold 10 evidence.");
+  report.cancelledRerunPreservedPriorEvidence = true;
+
   // Rapid replacements deliberately race the first file's metadata callback.
   await upload(primary, false);
   await upload(replacement, false);
@@ -120,6 +149,7 @@ try {
   report.error = String(error);
   process.exitCode = 1;
 } finally {
+  await closeTestBrowser(chrome, sendCommand);
   socket?.close();
   chrome.kill();
   console.log(JSON.stringify(report, null, 2));

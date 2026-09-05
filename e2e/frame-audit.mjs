@@ -40,16 +40,25 @@ export async function auditDecodedSourceFrames() {
     }
     throw new Error("Source-frame step did not reach the adjacent decoded frame.");
   };
-  await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-  const original = frameTime();
-  const next = document.querySelector('[data-frame-step="next"]');
-  if (!next || next.getAttribute("aria-label") !== "Next source frame") throw new Error("Native frame-step controls are unavailable after a decoded seek.");
-  next.click();
-  const advanced = await waitForStep(1, original);
-  await new Promise(resolve => requestAnimationFrame(resolve));
-  document.querySelector('[data-frame-step="previous"]').click();
-  const returned = await waitForStep(-1, advanced);
-  if (returned !== original) throw new Error("Next/previous source-frame round trip did not return to the same frame.");
-  return { samples: rows.length, uniqueSourceFrames: byTimestamp.size, repeatedPixelsMatch: true, sourceFrameStepRoundTrip: true, rows,
+  const stepRoundTrips = [];
+  for (const target of [...new Set([0.15, 2.015, video.duration * 0.75])].filter(time => time < video.duration - 0.1)) {
+    await new Promise((resolve, reject) => {
+      const done = () => { clearTimeout(timer); video.removeEventListener("seeked", done); resolve(); };
+      const timer = setTimeout(() => { video.removeEventListener("seeked", done); reject(new Error("Frame-step setup seek timed out.")); }, 5000);
+      video.addEventListener("seeked", done); video.currentTime = target;
+    });
+    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    const original = frameTime();
+    const next = document.querySelector('[data-frame-step="next"]');
+    if (!next || next.getAttribute("aria-label") !== "Next decoded frame") throw new Error("Native frame-step controls are unavailable after a decoded seek.");
+    next.click();
+    const advanced = await waitForStep(1, original);
+    await new Promise(resolve => requestAnimationFrame(resolve));
+    document.querySelector('[data-frame-step="previous"]').click();
+    const returned = await waitForStep(-1, advanced);
+    if (returned !== original) throw new Error("Next/previous source-frame round trip did not return to the same frame.");
+    stepRoundTrips.push({ target, original, advanced, returned });
+  }
+  return { samples: rows.length, uniqueSourceFrames: byTimestamp.size, repeatedPixelsMatch: true, sourceFrameStepRoundTrip: true, stepRoundTrips, rows,
     interpretation: "Source-frame identity and seek containment, not event-detection accuracy." };
 }
