@@ -71,3 +71,22 @@ capture also waits for responsive layout and uses instant scrolling, preventing
 an in-progress smooth scroll from capturing a different section of the page.
 The user's unrelated local `src/styles.css` changes were not committed; live
 verification therefore checks the actual production styles independently.
+
+## Final deploy result
+
+- URL: [ClimbIQ](https://climbiq-detection-lab.vercel.app/)
+- Target: production
+- Status: ready, 0.28.1 verified
+- Code commit: `909d3cbe558c8a94237eb5e42fd0beb91da583d7`
+- Framework: React / Vite
+- Hosted build duration: not measured; GitHub verification passed
+- Entry asset: `/assets/index-ChZ2bZ8K.js`
+
+The complete live 0.28.1 guided-review test passed, including two-corner source
+mapping, rescan/cursor restoration, unchanged timing on thumbnail navigation,
+close cancellation, region save/reload, dataset export/re-import, explicit
+manual provenance and different-video cleanup. Desktop and phone assertions
+confirmed no horizontal overflow and labels below their thumbnails; both final
+screenshots were visually inspected. No browser runtime exceptions were reported.
+Provider runtime logs, drains and external monitoring were not inspected.
+Private media and screenshots remain outside Git.
