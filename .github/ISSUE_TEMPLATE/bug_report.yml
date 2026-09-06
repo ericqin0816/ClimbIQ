@@ -1,0 +1,32 @@
+name: Bug report
+description: Report a reproducible problem with analysis or the interface.
+body:
+  - type: markdown
+    attributes:
+      value: "Please do not post private videos or sharing links without permission. Diagnostic exports may contain filenames and athlete notes."
+  - type: input
+    id: environment
+    attributes:
+      label: App version and browser
+      placeholder: "Version shown in the app, browser version, operating system"
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce
+      description: "Include the selected race window and any manual zones or timing corrections."
+    validations:
+      required: true
+  - type: textarea
+    id: result
+    attributes:
+      label: Expected and actual result
+      description: "For timing issues, include raw video time and climb time. Say whether the reference is an official timer, frame review, or previous app output."
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence
+      description: "Add relevant diagnostics, a minimal synthetic example, or screenshots you have permission to share. Remove personal details first."
