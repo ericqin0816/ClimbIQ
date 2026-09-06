@@ -340,6 +340,14 @@ async function inspect(fixture) {
     return {
       rawTime: result.rawTime,
       confidence: result.confidence,
+      ...(!result.detected ? { failure: {
+        reason: result.reason,
+        debugReason: result.debug.failureReason,
+        calibration,
+        browser: navigator.userAgent,
+        candidates: result.candidates,
+        samples: result.debug.samples,
+      } } : {}),
       expected: fixture.expected,
       chromaticRecovery: Boolean(fixture.chromaticRecovery),
       uniqueDetectorFrames: new Set(result.debug.samples.map((s) => s.time))
