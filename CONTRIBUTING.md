@@ -63,6 +63,23 @@ Omit `--detail` for the standard discovery pass. This probe does not accept
 timestamps or produce accuracy labels; the full browser workflow still has to
 pass its artifact, launch, and Finish checks.
 
+For automatic finish-target review diagnostics:
+
+```bash
+node e2e/finish-pad-probe.mjs --start=2.9 --lane=0.73 --report=test-results/finish-target.json /path/to/clip.mov
+```
+
+The Start and normalized lower-lane x coordinate are explicit diagnostic inputs,
+not accepted labels. Add `--hands` to run experimental cropped hand tracking;
+it does not establish contact or change application timing. Reports can contain
+private close-ups and landmarks: keep them local.
+
+The Finish review suite also uses the generated control copy of IMG_9076.
+Generate it with `npm run benchmark:robustness -- --generate-only --variants=control-720 IMG_9076.MOV`
+or point `CLIMBIQ_RECOVERY_VIDEO` to that fixture. Use
+`node e2e/finish-review.mjs --automatic-only` to test just automatic localization,
+thumbnail navigation, saved-label separation, and replacement cleanup.
+
 A new automatic acceptance needs inspection just as a lost result does. Do not
 change a benchmark expectation only to make a test pass. Record why the output
 changed and distinguish a regression observation from an independently reviewed

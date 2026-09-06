@@ -75,6 +75,9 @@ export function finishPadChange(before: Uint8ClampedArray, after: Uint8ClampedAr
 export async function scanFinishPadReview(options: {
   video: HTMLVideoElement; zone: NormalizedZone; center: number; startSignal?: number | null;
   signal?: AbortSignal; onProgress?: (message: string) => void;
+  areaLabel?: "marked area" | "automatic target";
+  /** Automatic localization needs the whole approach, not just the peak change. */
+  overview?: boolean;
 }): Promise<FinishReviewScan> {
   const { video, signal } = options;
   const zone = normalizeFinishPadZone(options.zone);
@@ -104,7 +107,7 @@ export async function scanFinishPadReview(options: {
       previous = data; seen.add(key);
       if (decoded) nativeTimedFrames += 1;
     }
-    options.onProgress?.(`Inspecting marked pad: ${index + 1}/${times.length} frames…`);
+    options.onProgress?.(`Inspecting ${options.areaLabel ?? "marked area"}: ${index + 1}/${times.length} frames…`);
     if (index % 6 === 5) await new Promise<void>(resolve => setTimeout(resolve, 0));
   }
   if (samples.length < 3) throw new Error("Too few distinct frames to compare. Try a longer or higher-frame-rate recording.");
@@ -112,8 +115,12 @@ export async function scanFinishPadReview(options: {
   const hasChange = samples[peak].score >= 4;
   const centerIndex = hasChange ? peak : Math.floor(samples.length / 2);
   const first = Math.max(0, Math.min(samples.length - 5, centerIndex - 2));
+  const selected = options.overview
+    ? [...new Set([...Array.from({length:7}, (_, i) => Math.round((samples.length-1)*i/6)), centerIndex])]
+      .sort((a,b)=>a-b).map(index=>samples[index])
+    : samples.slice(first, first + 5);
   const frames: FinishReviewFrame[] = [];
-  for (const sample of samples.slice(first, first + 5)) {
+  for (const sample of selected) {
     check(); await seekTo(video, sample.cursorTime); check();
     const frame = captureFinishReviewFrame(video, finishReviewCrop(zone), 320);
     if (frame.timeSource !== "decoded-frame" || !frames.some(other => other.timeSource === "decoded-frame" && other.rawTime === frame.rawTime)) frames.push(frame);
@@ -121,6 +128,6 @@ export async function scanFinishPadReview(options: {
   return { ...window, sampledFrames: times.length, comparedFrames: samples.length, nativeTimedFrames, frames,
     suggestedRawTime: hasChange ? samples[peak].rawTime : undefined,
     reason: hasChange
-      ? "Largest local appearance change in the marked area. It may be an approaching hand, contact, a shadow or camera movement. Inspect the full video; no finish was accepted."
+      ? `Largest local appearance change in the ${options.areaLabel ?? "marked area"}. It may be an approaching hand, contact, a shadow or camera movement. Inspect the full video; no finish was accepted.`
       : "No clear local appearance change in this window. Nearby frames are shown for manual inspection; no finish was accepted." };
 }

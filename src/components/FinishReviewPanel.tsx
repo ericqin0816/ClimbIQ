@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { NormalizedZone } from "../types";
+import type { FinishPadRecovery } from "../lib/finishPadRecoveryScan";
 import { captureFinishReviewFrame, finishReviewCrop, normalizeFinishPadZone,
   type FinishReviewFrame, type FinishReviewScan } from "../lib/finishReview";
 import "./FinishReviewPanel.css";
@@ -13,6 +14,7 @@ interface Props {
   progress: string;
   zone?: NormalizedZone;
   contextZone?: NormalizedZone;
+  automaticRecovery?: FinishPadRecovery;
   onZone: (zone?: NormalizedZone) => void;
   onScan: (zone: NormalizedZone, center: number) => Promise<FinishReviewScan>;
   onCancel: () => void;
@@ -29,7 +31,10 @@ export default function FinishReviewPanel(props: Props) {
   const [scan, setScan] = useState<FinishReviewScan | null>(null);
   const generation = useRef(0);
   const zoneKey = JSON.stringify(props.zone ?? null);
-  const cropKey = JSON.stringify(props.zone ?? props.contextZone ?? null);
+  const automatic = props.automaticRecovery;
+  const cropZone = props.zone ?? automatic?.target ?? props.contextZone;
+  const cropKey = JSON.stringify(cropZone ?? null);
+  const displayedScan = scan ?? (!props.zone ? automatic?.review : undefined);
   const video = props.video;
   const ready = props.frameReady && !props.busy && Boolean(video?.paused && !video.seeking && video.readyState >= 2);
 
@@ -48,7 +53,7 @@ export default function FinishReviewPanel(props: Props) {
 
   useEffect(() => {
     if (!video || !ready) { setCloseup(null); return; }
-    try { setCloseup(captureFinishReviewFrame(video, finishReviewCrop(props.zone ?? props.contextZone))); }
+    try { setCloseup(captureFinishReviewFrame(video, finishReviewCrop(cropZone))); }
     catch { setCloseup(null); }
     // Coordinates, not parent object/function identity, control recapture.
   }, [video, props.currentTime, ready, cropKey]);
@@ -87,7 +92,7 @@ export default function FinishReviewPanel(props: Props) {
     {!selection && <>
       {ready && closeup ? <figure className="finish-closeup">
         <img src={closeup.imageUrl} alt={props.zone ? "Marked finish pad with surrounding context at the current video frame" : "Upper finish area at the current video frame"} />
-        <figcaption>{closeup.rawTime.toFixed(3)}s · {closeup.timeSource === "decoded-frame" ? "decoded frame" : "approximate cursor"} · {props.zone ? "marked area" : "unverified overview"}</figcaption>
+        <figcaption>{closeup.rawTime.toFixed(3)}s · {closeup.timeSource === "decoded-frame" ? "decoded frame" : "approximate cursor"} · {props.zone ? "marked area" : automatic?.target ? "automatic target · unverified" : "unverified overview"}</figcaption>
       </figure> : <p className="muted">Pause and wait for the frame to see a synchronized close-up.</p>}
       <div className="finish-review-buttons">
         <button disabled={!ready} onClick={() => markPad()}>{props.zone ? "Edit pad area" : "Mark finish pad"}</button>
@@ -95,7 +100,12 @@ export default function FinishReviewPanel(props: Props) {
         {props.zone && <button disabled={props.busy} onClick={() => { props.onZone(undefined); setScan(null); }}>Clear pad area</button>}
         {props.scanning && <button onClick={props.onCancel}>Cancel finish rescan</button>}
       </div>
-      <p className="finish-review-help">Mark the actual pad, not the scoreboard. Use a fixed-camera shot; re-mark after camera movement. A rescan inspects ±1.25 seconds without changing accepted timing.</p>
+      <p className="finish-review-help">{!props.zone && automatic?.target
+        ? "Check that the automatic crop contains the actual pad, not a scoreboard. Mark a different area if needed. Use fixed-camera footage."
+        : "Mark the actual pad, not the scoreboard. Use a fixed-camera shot; re-mark after camera movement. A rescan inspects ±1.25 seconds without changing accepted timing."}</p>
+      {!props.zone && automatic && <p className="finish-review-help" data-automatic-finish-review>{automatic.review
+        ? `Automatically located target. Approach window: ${automatic.review.start.toFixed(2)}–${automatic.review.end.toFixed(2)}s. Review required; no Finish was accepted.`
+        : automatic.reason}</p>}
     </>}
     {selection && <div className="finish-pad-selection">
       <p>Click two opposite corners around the pad, or enter percentages below. Frame: {selection.rawTime.toFixed(3)}s.</p>
@@ -126,13 +136,13 @@ export default function FinishReviewPanel(props: Props) {
     </div>}
     {props.scanning && <p role="status">{props.progress}</p>}
     {error && <p role="alert" className="error-message">{error}</p>}
-    {scan && <div className="finish-rescan-result">
-      <p>{scan.reason}</p>
-      <div className="finish-review-filmstrip">{scan.frames.map((frame, index) => <button key={`${frame.cursorTime}-${index}`} disabled={props.busy}
+    {displayedScan && <div className="finish-rescan-result">
+      <p>{displayedScan.reason}</p>
+      <div className="finish-review-filmstrip">{displayedScan.frames.map((frame, index) => <button key={`${frame.cursorTime}-${index}`} disabled={props.busy}
         onClick={() => props.onJump(frame.cursorTime)} aria-label={`Inspect finish close-up at ${frame.rawTime.toFixed(3)} seconds`}>
         <img src={frame.imageUrl} alt={`Nearby finish frame ${index + 1}`} /><span>{frame.rawTime.toFixed(3)}s</span>
       </button>)}</div>
-      <p className="muted">{scan.comparedFrames} compared samples · {scan.nativeTimedFrames} with native frame timing. Thumbnails navigate the full video; they never accept Finish.</p>
+      <p className="muted">{displayedScan.comparedFrames} compared samples · {displayedScan.nativeTimedFrames} with native frame timing. Thumbnails navigate the full video; they never accept Finish.</p>
     </div>}
   </div>;
 }

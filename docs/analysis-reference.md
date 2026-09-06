@@ -143,6 +143,27 @@ Upper-indicator timing refinement uses the same patch radius as discovery, with 
 
 ### Guided finish review
 
+When the ordinary lower/upper timing checks cannot accept Finish, a separate
+review-only pass searches for compact persistent green/blue upper targets in
+the selected lane. The search covers Start + 3 through Start + 30 seconds,
+bounded by the video. It samples nine source-detail frames (no upscaling), then
+looks for a sustained upward approach at 5 requested samples/s. A local scene
+continuity check must pass before the close-up strip is produced.
+
+For a supported approach, the app shows up to eight distinct source-frame
+close-ups spanning a 2.5-second window, including the strongest local appearance
+change. **Review finish / mark pad** opens this window without requiring you to
+draw a pad first. The target is explicitly unverified: colored holds, partial
+occlusion, unusual lane geometry, or camera movement can make it wrong or
+unavailable. The actual press may be hidden. The result never accepts Finish or
+overrides a verified light timestamp.
+
+Automatic target regions and preview images are transient, not saved user pad
+labels or exported ground truth. A manually marked area takes precedence.
+Saving the current session keeps the on-screen strip; loading a session or
+changing video/Start clears it. The experimental `--hands` finish-target probe
+is not used by the application and cannot accept timing.
+
 After Start is set, open **Review finish / mark pad** below the video (or open an existing finish suggestion). The full video stays beside a synchronized close-up on desktop; the views stack on phones. **Mark finish pad** opens an enlarged upper-wall image: choose two opposite corners around the actual pad, switch to the full frame if necessary, or enter the four corner percentages. **Use this pad area** saves a separate review region without changing the automatic lane-light calibration or accepted timestamps.
 
 Pause near the finish, then choose **Rescan near current frame**. It inspects up to 1.25 seconds on either side at 15 requested samples/s and shows up to five nearby frames around the largest local appearance change. An approaching hand, shadow, occlusion or camera movement can also cause that change; this is a navigation aid, not contact detection. If no clear change is found, it shows nearby frames without proposing a finish. Repeated decoded frames are not counted as separate native samples. Native timing limitations and cursor fallbacks remain explicit.

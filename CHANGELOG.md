@@ -3,6 +3,24 @@
 User-facing changes and their limits. Detailed experiments and regression
 observations are recorded in [benchmarks](benchmarks).
 
+## 0.28.10 — 2026-09-06
+
+- Added automatic upper-target localization when the ordinary Finish checks
+  remain unresolved. It follows the selected lane through perspective shifts
+  and looks for a persistent compact green/blue target.
+- Added a bounded first-approach review strip, with source-frame close-ups.
+  The strip includes the whole approach instead of centering only on a later
+  strongest change or highest belay position.
+- Kept automatic target suggestions separate from user-marked pad areas,
+  accepted timing, saved labels, and exports. Private preview frames remain
+  transient. Saving the current session keeps its on-screen review strip;
+  changing the video, Start, or loading a session clears it.
+
+This reduces setup for reviewing some angled recordings; it does not establish
+automatic pad contact. In the inspected footage, the reaching hand can be
+occluded at the target. Hand-proximity research remains diagnostic only, and
+Start/Finish acceptance thresholds are unchanged.
+
 ## 0.28.9 — 2026-09-06
 
 - Added a bounded higher-detail light search for uncertain Starts. It uses more

@@ -2,6 +2,7 @@ import { ChangeEvent, CSSProperties, DragEvent, lazy, PointerEvent, Suspense, us
 import "./components/SessionWorkflow.css";
 import TimestampReviewPanel from "./components/TimestampReviewPanel";
 import type { FinishReviewScan } from "./lib/finishReview";
+import type { FinishPadRecovery } from "./lib/finishPadRecoveryScan";
 import { readDecodedVideoFrameTime, sourceFrameStepTarget } from "./lib/decodedVideoFrame";
 import { summarizeSourceSampleTiming } from "./lib/sourceSampleTiming";
 import { useVideoFramePresentation } from "./lib/useVideoFramePresentation";
@@ -95,7 +96,7 @@ const INITIAL_TIMESTAMPS: TimestampMarker[] = [
   marker("finishPad", "Finish Pad"),
 ];
 
-const APP_VERSION = "0.28.9";
+const APP_VERSION = "0.28.10";
 const SESSION_STORAGE_KEY = "climbiq.analysisSessions.v1";
 const AttemptComparisonPanel = lazy(() => import("./components/AttemptComparisonPanel"));
 const FinishReviewPanel = lazy(() => import("./components/FinishReviewPanel"));
@@ -262,6 +263,9 @@ function App() {
   const [finishReviewRunning, setFinishReviewRunning] = useState(false);
   const [finishReviewProgress, setFinishReviewProgress] = useState("");
   const finishReviewAbortRef = useRef<AbortController | null>(null);
+  const [automaticFinishReview, setAutomaticFinishReview] = useState<{
+    source: string; start: number; recovery: FinishPadRecovery;
+  } | null>(null);
 
   useEffect(() => {
     return () => {
@@ -368,6 +372,9 @@ function App() {
     () => getTimestamp(timestamps, "finishPad").rawTime,
     [timestamps],
   );
+  useEffect(() => {
+    setAutomaticFinishReview(null);
+  }, [videoUrl, startSignalRaw]);
   const detectedFinishRawTime = finishResult?.detected && finishResult.rawTime !== undefined &&
       startSignalRaw !== null && finishResult.rawTime > startSignalRaw
     ? finishResult.rawTime
@@ -780,7 +787,8 @@ function App() {
 
   function openGuidedFinishReview() {
     if (videoAnalysisRunning || !videoRef.current || startSignalRaw === null) return;
-    const cursor = getTimestamp(timestamps, "finishPad")?.rawTime ?? finishResult?.rawTime ??
+    const cursor = getTimestamp(timestamps, "finishPad")?.rawTime ??
+      (activeFinishRecovery?.review ? activeFinishRecovery.review.start + .75 : undefined) ?? finishResult?.rawTime ??
       finishResult?.candidates?.[0]?.rawTime ?? finishSuggestion?.rawTime ??
       (currentTime > startSignalRaw ? currentTime : Math.min(videoRef.current.duration - 0.1, startSignalRaw + 8));
     reviewTimestamp({ kind: "finish", label: "Finish review — locate pad contact", suggestedRawTime: cursor,
@@ -2154,6 +2162,7 @@ function App() {
     onStatus?: (message: string) => void,
     laneCandidates: AnalysisLaneCandidate[] = [],
   ): Promise<AutomaticFinishOutcome | null> {
+    setAutomaticFinishReview(null);
     const officialDuration = Number(officialTotalTime);
     const expectedFinishTime = resolveOfficialFinishRawTime({
       startRawTime: acceptedStart,
@@ -2274,6 +2283,23 @@ function App() {
     }
     const upperAgreesWithOfficial = expectedFinishTime === undefined ||
       (upperFinish.result.rawTime !== undefined && Math.abs(upperFinish.result.rawTime - expectedFinishTime) <= 0.45);
+    if (!(upperFinish.result.detected && upperFinish.result.rawTime !== undefined && upperFinish.zone &&
+        upperFinish.result.confidence === "High" && upperAgreesWithOfficial)) {
+      // Review-only fallback. It cannot accept timing, override a verified
+      // Finish, or create a user-marked pad. Frames remain transient in memory.
+      const source = video.src;
+      try {
+        const { scanAutomaticFinishPad } = await import("./lib/finishPadRecoveryScan");
+        const recovery = await scanAutomaticFinishPad({video, startRawTime:acceptedStart,
+          laneHintZone:upperLaneCandidate.zone, signal, onProgress:onStatus});
+        if (signal?.aborted || video.src !== source) throw new PoseAnalysisCancelledError();
+        setAutomaticFinishReview({source, start:acceptedStart, recovery});
+      } catch (error) {
+        if (signal?.aborted || video.src !== source) throw new PoseAnalysisCancelledError();
+        // Optional close-up failure must not discard the ordinary review result.
+        console.warn("Automatic finish close-up unavailable", error);
+      }
+    }
     if (upperFinish.result.detected && upperFinish.result.rawTime !== undefined && upperFinish.zone) {
       setFinishResult(upperFinish.result);
       setZones((current) => ({ ...current, finishLight: upperFinish.zone }));
@@ -2988,6 +3014,7 @@ function App() {
     // the review prevents a frame accepted for one climb from mutating the
     // session that is about to be loaded or duplicated.
     closeTimestampReview();
+    setAutomaticFinishReview(null);
     const safeVideoMetadata = sanitizeVideoMetadata(session.videoMetadata);
     const currentVideoMatches = Boolean(
       videoUrl && metadata?.metadataLoaded && safeVideoMetadata && videoMetadataMatches(metadata, safeVideoMetadata),
@@ -3243,6 +3270,8 @@ function App() {
   const { hasSelectedVideo, hasLoadedVideo } = getVideoUiState(videoUrl, Boolean(metadata?.metadataLoaded));
   const acceptedMovementRawTime = getTimestamp(timestamps, "firstMovement").rawTime;
   const acceptedFinish = getTimestamp(timestamps, "finishPad");
+  const activeFinishRecovery = automaticFinishReview?.source === videoUrl &&
+    automaticFinishReview.start === startSignalRaw ? automaticFinishReview.recovery : undefined;
   const acceptedStart = getTimestamp(timestamps, "startSignal");
   const acceptedHold10 = getTimestamp(timestamps, "hold10");
   const calculatedClimbTime =
@@ -3598,6 +3627,7 @@ function App() {
             video={videoRef.current} currentTime={currentTime} frameReady={reviewFrameReady}
             busy={videoAnalysisRunning} scanning={finishReviewRunning} progress={finishReviewProgress}
             zone={zones.finishPad} contextZone={zones.finishLight}
+            automaticRecovery={activeFinishRecovery}
             onZone={zone => setZones(current => zone ? { ...current, finishPad: zone } : omitZone(current, "finishPad"))}
             onScan={rescanMarkedFinishPad} onCancel={() => finishReviewAbortRef.current?.abort()}
             onJump={jumpTo} /></Suspense>}</TimestampReviewPanel> : null}

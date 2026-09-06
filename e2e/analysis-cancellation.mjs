@@ -9,6 +9,7 @@ import { closeTestBrowser } from "./browser-lifecycle.mjs";
 const directory = path.resolve(process.env.CLIMBIQ_VIDEO_DIR ?? "node_modules/.climbiq-private-videos");
 const primary = path.join(directory, "IMG_9199.MOV");
 const replacement = path.join(directory, "IMG_9076.MOV");
+const recoveryVideo = path.resolve(process.env.CLIMBIQ_RECOVERY_VIDEO ?? "node_modules/.climbiq-robustness/IMG_9076--control-720.mp4");
 await Promise.all([access(primary), access(replacement)]);
 const url = process.env.CLIMBIQ_E2E_URL ?? "http://127.0.0.1:5173/";
 const chromePath = process.env.CLIMBIQ_CHROME ?? (process.platform === "darwin"
@@ -74,10 +75,11 @@ try {
   await until("Boolean(document.querySelector('input[accept=\"video/*\"]'))", "app load");
   report.version = await evaluate("document.querySelector('main[data-app-version]')?.dataset.appVersion");
 
-  const stages = process.argv.includes("--rerun-only") ? [] : ["start", "detail", "finish", "pose"];
+  const stages = process.argv.includes("--rerun-only") ? [] : process.argv.includes("--target-only")
+    ? ["target"] : ["start", "detail", "target", "finish", "pose"];
   for (const stage of stages) {
     console.error(`Testing ${stage} cancellation`);
-    await upload(stage === "detail" ? replacement : primary);
+    await upload(stage === "target" ? recoveryVideo : stage === "detail" ? replacement : primary);
     await evaluate(`(async () => { const v = document.querySelector('video'); v.pause(); v.currentTime = 2.5;
       if (v.seeking) await new Promise(r => v.addEventListener('seeked', r, { once: true })); })()`);
     const before = await evaluate(stateExpression);
@@ -85,6 +87,7 @@ try {
     await until("[...document.querySelectorAll('button')].some(b => b.textContent.includes('Analyzing climb') && b.disabled)", "analysis starts");
     const stagePattern = stage === "start" ? "Finding the start|Reading|Scanning lane"
       : stage === "detail" ? "Inspecting faint lane lights at higher detail"
+      : stage === "target" ? "Locating finish targets|Inspecting automatic target"
       : stage === "finish" ? "finish|return-color" : "Following the climber:";
     await until(`new RegExp(${JSON.stringify(stagePattern)}, 'i').test(document.querySelector('.quick-analysis-box .status-message')?.textContent ?? '')`, `${stage} phase`, 150000);
 
@@ -108,7 +111,7 @@ try {
   }
 
   // Establish a complete unsaved result, including COM and contact previews.
-  if (!stages.length) await upload(primary);
+  if (!stages.length || stages.at(-1) === "target") await upload(primary);
   await evaluate("[...document.querySelectorAll('button')].find(b => b.textContent.includes('Run full analysis')).click()");
   await until(`[...document.querySelectorAll('button')].some(b => b.textContent.includes('Analyzing climb') && b.disabled)`, "complete rerun starts");
   await until(`!(${stateExpression}).busy`, "complete rerun", 150000);

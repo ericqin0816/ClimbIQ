@@ -8,6 +8,7 @@ import { closeTestBrowser } from "./browser-lifecycle.mjs";
 const url = process.env.CLIMBIQ_E2E_URL ?? "http://127.0.0.1:5173/";
 const disableNative = process.env.CLIMBIQ_E2E_DISABLE_VIDEO_FRAME === "1";
 const directory = path.resolve(process.env.CLIMBIQ_VIDEO_DIR ?? "node_modules/.climbiq-private-videos");
+const recoveryVideo = path.resolve(process.env.CLIMBIQ_RECOVERY_VIDEO ?? "node_modules/.climbiq-robustness/IMG_9076--control-720.mp4");
 const chromePath = process.env.CLIMBIQ_CHROME ?? (process.platform === "darwin" ? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
   : process.platform === "win32" ? "C:/Program Files/Google/Chrome/Application/chrome.exe" : "/usr/bin/google-chrome");
 const port = 9336;
@@ -48,13 +49,15 @@ try {
   const click = name => evaluate(`(() => { const b = ${button(name)}; if (!b || b.disabled) throw new Error('Unavailable control: '+${JSON.stringify(name)}); b.click(); })()`);
   const upload = async name => {
     const node = await send("Runtime.evaluate", { expression: "document.querySelector('input[accept=\"video/*\"]')" });
-    await send("DOM.setFileInputFiles", { files: [path.join(directory, name)], objectId: node.result.objectId });
-    await until(`document.querySelector('.upload-copy strong')?.textContent === ${JSON.stringify(name)} && document.querySelector('.video-meta-line')?.textContent.includes('Ready')`, "video ready");
+    await send("DOM.setFileInputFiles", { files: [path.resolve(directory, name)], objectId: node.result.objectId });
+    await until(`document.querySelector('.upload-copy strong')?.textContent === ${JSON.stringify(path.basename(name))} && document.querySelector('.video-meta-line')?.textContent.includes('Ready')`, "video ready");
   };
   const markers = "JSON.stringify([...document.querySelectorAll('#results tbody tr')].map(r => [...r.querySelectorAll('td')].slice(0,5).map(c => c.textContent)))";
   const ready = `${button("Rescan near current frame")} && !${button("Rescan near current frame")}.disabled`;
   await until("Boolean(document.querySelector('input[accept=\"video/*\"]'))", "app");
   report.version = await evaluate("document.querySelector('main').dataset.appVersion");
+  report.screenshots = [];
+  if (!process.argv.includes("--automatic-only")) {
   await upload("IMG_9199.MOV"); await click("Run full analysis");
   await until(`${button("Run full analysis")} && !${button("Run full analysis")}.disabled`, "full analysis", 180000);
   const before = await evaluate(markers);
@@ -170,6 +173,39 @@ try {
   await click("Save Session");
   if (await evaluate("Boolean(JSON.parse(localStorage.getItem('climbiq.analysisSessions.v1'))[0].zones.finishPad)")) throw new Error("Pad area leaked to a different video.");
   report.replacementClearsPadArea = true;
+  }
+  // Exercise the real unresolved-Finish path. No imported Start, official total,
+  // or hand label is supplied: the app must localize its own review area.
+  await upload(recoveryVideo);
+  await click("Run full analysis");
+  await until(`${button("Run full analysis")} && !${button("Run full analysis")}.disabled`, "automatic target recovery", 180000);
+  const unresolved = await evaluate(markers);
+  const finishUnset = "[...document.querySelectorAll('#results tbody tr')].find(r=>r.textContent.includes('Finish Pad'))?.textContent.includes('Not set')";
+  if (!(await evaluate(finishUnset))) throw new Error("Automatic target review must not accept Finish.");
+  await click("Review finish / mark pad");
+  await until("document.querySelectorAll('.finish-review-filmstrip img').length >= 7", "automatic approach filmstrip");
+  await until("document.querySelector('.finish-closeup figcaption')?.textContent.includes('automatic target · unverified')", "automatic close-up provenance");
+  const autoText = await evaluate("document.querySelector('[data-automatic-finish-review]')?.textContent");
+  if (!autoText?.includes('Approach window:')) throw new Error("Automatic approach window was not shown.");
+  await evaluate("document.querySelector('.finish-review-filmstrip button').click()");
+  if (await evaluate(markers) !== unresolved) throw new Error("Automatic review thumbnail changed timing.");
+  await click("Save Session");
+  const automaticSaved = await evaluate("JSON.parse(localStorage.getItem('climbiq.analysisSessions.v1'))[0]");
+  if (automaticSaved.zones.finishPad || JSON.stringify(automaticSaved).includes('data:image/')) throw new Error("Automatic target or private frames leaked into persisted user labels.");
+  if (!(await evaluate("Boolean(document.querySelector('[data-automatic-finish-review]'))"))) throw new Error("Saving the current session cleared its automatic review strip.");
+  report.automaticTargetReview = { reason:autoText, finishAccepted:false, preservesUserPadProvenance:true };
+  await until("!document.querySelector('video').seeking && Boolean(document.querySelector('.finish-closeup img')?.naturalWidth)", "automatic thumbnail settles");
+  await send("Emulation.setDeviceMetricsOverride", { width:390, height:844, deviceScaleFactor:1, mobile:false });
+  await evaluate("document.querySelector('.finish-review-tools').scrollIntoView({block:'center',behavior:'instant'})");
+  await evaluate("new Promise(resolve=>requestAnimationFrame(resolve))");
+  if (await evaluate("document.documentElement.scrollWidth > innerWidth + 1")) throw new Error("Automatic filmstrip overflows on mobile.");
+  const automaticScreenshot = await send("Page.captureScreenshot", {format:"png"});
+  await mkdir("test-results", {recursive:true});
+  await writeFile("test-results/automatic-finish-review-mobile.png", Buffer.from(automaticScreenshot.data,"base64"));
+  report.screenshots.push("test-results/automatic-finish-review-mobile.png");
+  await upload("IMG_9199.MOV");
+  if (await evaluate("Boolean(document.querySelector('[data-automatic-finish-review]'))")) throw new Error("Automatic target evidence leaked to a replacement video.");
+  report.replacementClearsAutomaticTarget = true;
   if (errors.length) throw new Error(`Browser exceptions: ${errors.join(', ')}`);
   report.passed = true;
 } catch (error) { report.passed = false; report.error = String(error); process.exitCode = 1; }

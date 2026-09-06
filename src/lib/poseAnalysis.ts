@@ -458,7 +458,7 @@ export function buildPoseSampleTimes(start: number, end: number, fps: number): n
   return sampleFramesInRange(start, end, fps).filter((time) => time <= end + 1e-7);
 }
 
-async function loadVerifiedModel(signal?: AbortSignal): Promise<Uint8Array> {
+export async function loadVerifiedModel(signal?: AbortSignal): Promise<Uint8Array> {
   try {
     const response = await fetch(assetUrl(MODEL_RELATIVE_PATH), { signal });
     const contentType = response.headers.get("content-type")?.toLowerCase() ?? "";

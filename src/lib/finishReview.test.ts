@@ -52,6 +52,16 @@ describe("guided finish review", () => {
     await expect(scanFinishPadReview({ video, zone, center: 2, signal: controller.signal,
       onProgress: () => controller.abort() })).rejects.toThrow("cancelled");
   });
+  it("keeps the whole automatic approach window visible without accepting the strongest change", async () => {
+    const result = await scanFinishPadReview({ video:fakeVideo(true), zone, center:2,
+      startSignal:.5, areaLabel:"automatic target", overview:true });
+    expect(result.frames.length).toBeGreaterThanOrEqual(7);
+    expect(result.frames.length).toBeLessThanOrEqual(8);
+    expect(result.frames[0].rawTime).toBeLessThan(1);
+    expect(result.frames.at(-1)!.rawTime).toBeGreaterThanOrEqual(3);
+    expect(result.reason).toContain("automatic target");
+    expect(result).not.toHaveProperty("accepted");
+  });
 });
 
 function fakeVideo(native: boolean) {
