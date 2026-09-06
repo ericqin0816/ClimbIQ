@@ -38,7 +38,8 @@ recording. `CLIMBIQ_CHROME` can point to a nonstandard Chrome installation.
 The source-frame suite also needs FFmpeg (`CLIMBIQ_FFMPEG`). It generates small
 10/30/60 fps MP4s with known light-event frames, exercises five search phases,
 and runs the actual browser detectors. No private footage is needed. CI runs
-it on Ubuntu 24.04 with Chrome and FFmpeg; its JSON report is printed in the
+it three times on Ubuntu 24.04 with Chrome and FFmpeg to exercise intermittent
+decoder readiness; failures stop immediately. Its JSON report is printed in the
 workflow log. The generated files remain ignored under `node_modules/`.
 The timing runner uses debugging port 9334 by default; set `CLIMBIQ_E2E_PORT`
 to a different unused port when running another isolated replay concurrently.

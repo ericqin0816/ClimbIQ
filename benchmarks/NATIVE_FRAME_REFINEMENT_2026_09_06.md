@@ -125,7 +125,12 @@ resolve. This margin is not a timing-error claim or a change to accepted event
 timestamps. A permanently stale decoded frame still fails within 200 ms.
 
 The preview-branch check catches such platform differences before merging to
-main. The application continues to process private clips locally.
+main. CI runs the encoded suite three times, stopping on any failure rather
+than retrying until a pass. These are repeated trials, not additional distinct
+fixtures. Local follow-up: 652 unit tests across 64 files plus typecheck/build
+and the encoded suite pass. Both working originals retain 12.255 / 10.351-second
+totals with usable tracking. The application continues to process private
+clips locally.
 
 ## Local research not promoted
 
