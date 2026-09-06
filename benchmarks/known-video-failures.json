@@ -3,6 +3,16 @@
   "interpretation": "Specific reproduced failure fingerprints, not a complete labeled accuracy dataset. Tolerance identifies the old failure neighborhood, not an event-error bound. Media are private and remain outside Git.",
   "cases": [
     {
+      "id": "post-finish-broadcast-tones-are-not-start",
+      "fileName": "public-hunt-599-0000-0035.mp4",
+      "sha256": "599c77deea0dc06d0fbb5c01709c3f3d195e4f82e63f1d4c6b5868dbaf094d54",
+      "boundary": "start",
+      "rejectedRawTime": 7.14,
+      "toleranceSeconds": 0.1,
+      "evidence": "Audio-only analysis labeled a 553.8/601.3/1064.3 Hz sequence High at 7.14 s, after the lane B timer visibly stopped at 5.99 s. The full app's launch guard withheld acceptance. This timestamp must never be automatically accepted as race start.",
+      "isIndependentAccuracyLabel": false
+    },
+    {
       "id": "red-obstruction-is-not-finish",
       "fileName": "IMG_8903--dark-720.mp4",
       "sha256": "af873862084c3ae9ba29309ac918748b42af0137c20a6368b96e66a314029dfe",

@@ -1,8 +1,22 @@
 import { describe, it, expect } from "vitest";
-import { assessUserVideoReference } from "./user-video-reference.mjs";
+import { assessUserVideoReference, sourceFingerprintMatches } from "./user-video-reference.mjs";
 const reference = { id: "test", sourceSha256: "abc", expectedTotalSeconds: 12.24, referenceSource: "user-reported total",
   requiredHoldMarkers: [{ holdId: 8, x: 0.33, y: 0.35, radius: 0.012 }] };
 const outcome = { start: { rawTime: "9.400s" }, finish: { rawTime: "21.655s" }, routeMarkers: [{holdId:8,x:0.33,y:0.35}] };
+describe("benchmark source fingerprints", () => {
+  it("matches exact SHA-256 bytes regardless of hex case", () => {
+    expect(sourceFingerprintMatches("ab".repeat(32), "AB".repeat(32))).toBe(true);
+  });
+  it("rejects a different file with the same expected filename", () => {
+    expect(sourceFingerprintMatches("ab".repeat(32), "cd".repeat(32))).toBe(false);
+  });
+  it("rejects absent, malformed and shortened digests instead of skipping validation", () => {
+    for (const digest of [undefined, null, "", "abc", "g".repeat(64), "a".repeat(63), 123]) {
+      expect(sourceFingerprintMatches(digest, "a".repeat(64))).toBe(false);
+      expect(sourceFingerprintMatches("a".repeat(64), digest)).toBe(false);
+    }
+  });
+});
 describe("source-matched user feedback", () => {
   it("reports total error without manufacturing start/finish labels", () => {
     const result = assessUserVideoReference(reference, outcome, "abc", true);

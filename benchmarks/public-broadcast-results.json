@@ -6,9 +6,52 @@
     "publisher": "World Climbing",
     "url": "https://www.youtube.com/watch?v=RvZXoTVxGBs"
   },
-  "description": "Exploratory 720p race crops from a public broadcast. Clips stay outside Git. These moving-camera cases are reported separately from the fixed-phone regression baseline. Historical review cursors are unverified; rejection safety is asserted, while cursor changes are reported rather than pinned as exact labels.",
+  "description": "Exploratory 720p public race crops; per-trial source overrides identify additional broadcasts. Clips stay outside Git. These moving-camera cases are reported separately from the fixed-phone regression baseline. Historical review cursors are unverified; rejection safety is asserted, while cursor changes are reported rather than pinned as exact labels.",
   "verificationIntent": "rejection-safety-only",
   "trials": [
+    {
+      "id": "public-hunt-599-0000-0035.mp4",
+      "source": { "title": "First Sub-6 Seconds Run in Women's Speed Climbing! - 5.99 Seconds World Record by Emma Hunt (USA)", "publisher": "Simon Tran (repost credited to World Climbing)", "url": "https://www.youtube.com/watch?v=66FnK6L6roM" },
+      "sourceSha256": "599c77deea0dc06d0fbb5c01709c3f3d195e4f82e63f1d4c6b5868dbaf094d54",
+      "division": "women",
+      "layout": "four-lane",
+      "sourceStartSeconds": 0,
+      "durationSeconds": 35,
+      "verificationIntent": "rejection-safety-only",
+      "start": { "rawTime": 7.14, "status": "review", "reviewedCorrect": false, "reason": "An audio-only High suggestion occurs after the displayed race finish. The selected-lane launch audit prevents acceptance." },
+      "finish": { "status": "not-run" },
+      "scoreboardObservation": {
+        "cropRawTime": 7,
+        "onScreenRoundLabel": "WOMEN'S SPEED QUARTERS-FINALS / RACE 1",
+        "reviewMethod": "Assistant visual transcription of extracted source frame plus USA Climbing event report",
+        "officialResultSource": "https://usaclimbing.org/news/hunt-makes-history-team-usa-takes-four-medals-and-two-world-records-at-world-climbing-series-krakow/",
+        "isRawBoundaryLabel": false,
+        "selectedAthlete": "Emma Hunt",
+        "selectedLane": "B",
+        "totalSeconds": 5.99,
+        "note": "The race is visibly complete by this frame; its 5.99 s total is not an exact raw start/pad-contact label. Start preparation is partly omitted by the highlight edit, the camera moves upward, and later close-ups cannot define another start."
+      }
+    },
+    {
+      "id": "public-krakow-attempt-0750.mp4",
+      "source": { "title": "Speed finals | Kraków 2026", "publisher": "World Climbing", "url": "https://www.youtube.com/watch?v=-IUfPb99f78" },
+      "sourceSha256": "7abc8f12697a4f80db14bf0932b742f87e11a3e19fe18a56d8f1b8f2b8863cef",
+      "division": "men",
+      "layout": "four-lane",
+      "sourceStartSeconds": 750,
+      "durationSeconds": 25,
+      "verificationIntent": "rejection-safety-only",
+      "start": { "rawTime": 7.283, "status": "review", "reviewedCorrect": null, "reason": "Default opening window returned a non-verified cue; four athletes and camera movement require review." },
+      "finish": { "status": "not-run" },
+      "scoreboardObservation": {
+        "cropRawTime": 21,
+        "onScreenRoundLabel": "MEN'S SPEED QUALIFICATIONS / RACE 1",
+        "reviewMethod": "Assistant visual transcription of extracted source frame, not detector output",
+        "isRawBoundaryLabel": false,
+        "laneTotalsSeconds": { "A": 5.12, "B": 4.89, "C": 5.19, "D": 5.17 },
+        "note": "Total-only graphic readings; no lane has been selected for automatic accuracy scoring. Graphic latency and exact start/pad frames are unverified. The on-screen round caption differs from the video's general title."
+      }
+    },
     {
       "id": "public-chamonix-race-0590-attempt.mp4",
       "division": "women",

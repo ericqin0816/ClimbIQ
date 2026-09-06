@@ -68,7 +68,7 @@ async function run() {
 
   const evaluate = async (expression, returnByValue = true) => {
     const response = await send("Runtime.evaluate", { expression, returnByValue, awaitPromise: true });
-    if (response.exceptionDetails) throw new Error(response.exceptionDetails.text);
+    if (response.exceptionDetails) throw new Error(response.exceptionDetails.exception?.description ?? response.exceptionDetails.text);
     return returnByValue ? response.result.value : response.result;
   };
 

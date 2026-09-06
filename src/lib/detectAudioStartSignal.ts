@@ -61,10 +61,21 @@ export async function detectAudioStartSignal({
   }
 
   onProgress?.("Decoding the local audio track…");
-  const bytes = await file.arrayBuffer();
-  checkCancelled(signal);
-  const context = new AudioContextConstructor();
+  let context: AudioContext | undefined;
   try {
+    const bytes = await file.arrayBuffer();
+    checkCancelled(signal);
+    try {
+      // decodeAudioData resamples PCM to the context rate. Request the rate we
+      // actually analyze so whole-track PCM does not stay at 44.1/48 kHz. This
+      // reduces the decoded buffer, not the encoded input or decoder workspace.
+      context = new AudioContextConstructor({ sampleRate: TARGET_SAMPLE_RATE });
+    } catch (error) {
+      if (!(error instanceof Error) || error.name !== "NotSupportedError") throw error;
+      // Older implementations may not accept an 8 kHz context. The existing
+      // resampler below remains responsible for bringing this fallback to 8 kHz.
+      context = new AudioContextConstructor();
+    }
     const decoded = await context.decodeAudioData(bytes);
     checkCancelled(signal);
     if (!decoded.numberOfChannels || !decoded.length) {
@@ -85,16 +96,14 @@ export async function detectAudioStartSignal({
     );
     return analyzeBeepSequence(mono, TARGET_SAMPLE_RATE, searchStart);
   } catch (error) {
-    if (signal?.aborted) {
-      throw error;
-    }
+    checkCancelled(signal);
     return emptyAudioResult(
       error instanceof Error
         ? `The audio track could not be analyzed: ${error.message}`
         : "The audio track could not be analyzed.",
     );
   } finally {
-    void context.close().catch(() => undefined);
+    if (context) void context.close().catch(() => undefined);
   }
 }
 

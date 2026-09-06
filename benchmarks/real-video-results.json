@@ -16,6 +16,7 @@
     },
     {
       "id": "IMG_8903.MOV",
+      "sourceSha256": "eb7bbcb91565cee5b7242f69f085442d260e85ef12cd399fbd21eb60c37ef08c",
       "durationSeconds": 26.75,
       "start": { "rawTime": 4.29, "status": "accepted", "source": "Fused start detection", "confidence": "High", "reviewedCorrect": true, "firstMovementRawTime": 4.39, "firstMovementConfidence": "High", "reactionSeconds": 0.1 },
       "finish": { "rawTime": 14.29, "status": "review", "confidence": "Medium", "reviewedCorrect": true,
@@ -25,6 +26,7 @@
     },
     {
       "id": "IMG_9075.MOV",
+      "sourceSha256": "12a1189c069d832b6bcb1f38176786a7abd0cbb88da234bc9c0d1e53881602e5",
       "durationSeconds": 30.44,
       "start": { "rawTime": 8.45, "status": "review", "confidence": "High", "reviewedCorrect": false, "manualRawTime": 8.9 },
       "finish": { "rawTime": 17.333, "status": "review", "confidence": "Medium" },
@@ -33,6 +35,7 @@
     },
     {
       "id": "IMG_9076.MOV",
+      "sourceSha256": "4b9c8ce7367b0c64970a8df5a0474e385e3e27c7d3eb28f8977bd0b3186f3e8a",
       "durationSeconds": 33.74,
       "start": { "rawTime": 2.79, "status": "review", "confidence": "Medium", "reviewedCorrect": false },
       "finish": { "status": "not-run" },
@@ -41,6 +44,7 @@
     },
     {
       "id": "IMG_9077.MOV",
+      "sourceSha256": "e6fdd0a8db01396342d8ba5a95474d8b4e3f17459f83d9da30dbfeb9c3b571e1",
       "durationSeconds": 26.15,
       "start": { "rawTime": 5.25, "status": "review", "confidence": "High", "reviewedCorrect": false },
       "finish": { "status": "not-run" },
@@ -49,6 +53,7 @@
     },
     {
       "id": "IMG_9199.MOV",
+      "sourceSha256": "c906a632d57519e75a8ea95da28a1059a613b7bdb0d63781681b6c71ece8ec26",
       "durationSeconds": 32.17,
       "start": { "rawTime": 7.13, "status": "accepted", "source": "Fused start detection", "confidence": "High", "reviewedCorrect": true, "firstMovementRawTime": 7.23, "firstMovementConfidence": "Medium", "reactionSeconds": 0.1 },
       "finish": { "rawTime": 17.48, "status": "accepted", "source": "Finish light detection", "confidence": "High", "reviewedCorrect": true },

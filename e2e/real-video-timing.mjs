@@ -7,7 +7,7 @@ import { closeTestBrowser } from "./browser-lifecycle.mjs";
 import { createReadStream } from "node:fs";
 import { createHash } from "node:crypto";
 import { analysisFailureFromOutcome, evaluateKnownVideoFailure } from "../scripts/lib/known-video-failures.mjs";
-import { assessUserVideoReference } from "../scripts/lib/user-video-reference.mjs";
+import { assessUserVideoReference, sourceFingerprintMatches } from "../scripts/lib/user-video-reference.mjs";
 
 const defaultChromePath = process.platform === "darwin"
   ? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
@@ -20,6 +20,7 @@ const videoDirectory = path.resolve(process.env.CLIMBIQ_VIDEO_DIR ?? "node_modul
 const fullWorkflow = process.argv.includes("--full");
 const disableFrameCallback = process.env.CLIMBIQ_E2E_DISABLE_FRAME_CALLBACK === "1";
 const disableVideoFrame = process.env.CLIMBIQ_E2E_DISABLE_VIDEO_FRAME === "1";
+const rejectAnalysisAudioRate = process.env.CLIMBIQ_E2E_REJECT_AUDIO_RATE === "1";
 const fpsArgument = process.argv.find(value => value.startsWith("--fps="));
 const poseFps = fpsArgument ? Number(fpsArgument.slice(6)) : undefined;
 if (poseFps !== undefined && ![5, 10, 15].includes(poseFps)) throw new Error("--fps must be 5, 10, or 15.");
@@ -59,7 +60,7 @@ async function waitForDebugger() {
 async function openProtocol() {
   await waitForDebugger();
   const targetResponse = await fetch(
-    `http://127.0.0.1:${port}/json/new?${encodeURIComponent(disableFrameCallback || disableVideoFrame ? "about:blank" : appUrl)}`,
+    `http://127.0.0.1:${port}/json/new?${encodeURIComponent(disableFrameCallback || disableVideoFrame || rejectAnalysisAudioRate ? "about:blank" : appUrl)}`,
     { method: "PUT" },
   );
   if (!targetResponse.ok) throw new Error(`Could not open ${appUrl}. Start the development server first.`);
@@ -77,10 +78,20 @@ async function openProtocol() {
   };
   await send("Runtime.enable");
   await send("Page.enable");
-  if (disableFrameCallback || disableVideoFrame) {
+  if (disableFrameCallback || disableVideoFrame || rejectAnalysisAudioRate) {
     await send("Page.addScriptToEvaluateOnNewDocument", {
       source: (disableFrameCallback ? "Object.defineProperty(HTMLVideoElement.prototype, 'requestVideoFrameCallback', { value: undefined, configurable: true });" : "") +
-        (disableVideoFrame ? "Object.defineProperty(window, 'VideoFrame', { value: undefined, configurable: true });" : ""),
+        (disableVideoFrame ? "Object.defineProperty(window, 'VideoFrame', { value: undefined, configurable: true });" : "") +
+        (rejectAnalysisAudioRate ? `(() => {
+          const NativeContext = window.AudioContext;
+          window.__climbiqAudioContextRequests = [];
+          window.AudioContext = new Proxy(NativeContext, { construct(target, args) {
+            const rate = args[0]?.sampleRate ?? null;
+            window.__climbiqAudioContextRequests.push(rate);
+            if (rate === 8000) throw new DOMException('Test: requested sample rate unsupported', 'NotSupportedError');
+            return Reflect.construct(target, args);
+          }});
+        })();` : ""),
     });
     await send("Page.navigate", { url: appUrl });
   }
@@ -137,6 +148,7 @@ async function uploadFile(protocol, filePath) {
 async function runTiming(protocol, fileName) {
   const { evaluate } = protocol;
   await uploadFile(protocol, path.join(videoDirectory, fileName));
+  if (rejectAnalysisAudioRate) await evaluate("window.__climbiqAudioContextRequests = []");
   if (poseFps !== undefined) {
     await evaluate(`(() => {
       const select = [...document.querySelectorAll('select')].find(s => [...s.options].some(o => o.textContent.includes('5 fps')));
@@ -210,6 +222,7 @@ async function runTiming(protocol, fileName) {
       status: document.querySelector('.quick-analysis-box .status-message')?.textContent.trim() ?? '',
       summary: document.querySelector('.run-summary')?.innerText ?? '',
       timingPrecisionNote: document.querySelector('.timing-precision-note')?.textContent ?? '',
+      audioContextRequests: window.__climbiqAudioContextRequests,
       routeMarkers: [...document.querySelectorAll('.video-route-hold')].map(group => ({
         holdId: Number(group.querySelector('text')?.textContent),
         x: Number(group.querySelector('circle')?.getAttribute('cx')) / document.querySelector('video').videoWidth,
@@ -217,6 +230,9 @@ async function runTiming(protocol, fileName) {
       })),
     };
   })()`);
+  if (rejectAnalysisAudioRate && (!outcome.audioContextRequests?.includes(8000) || !outcome.audioContextRequests?.includes(null))) {
+    throw new Error(`${fileName}: the requested-rate rejection did not exercise native default-rate fallback.`);
+  }
   if (outcome.routeMarkers.some(marker => !Number.isInteger(marker.holdId) || marker.holdId < 1 || marker.holdId > 20 ||
       !Number.isFinite(marker.x) || !Number.isFinite(marker.y)) ||
       new Set(outcome.routeMarkers.map(marker => marker.holdId)).size !== outcome.routeMarkers.length) {
@@ -522,6 +538,11 @@ async function main() {
       const hash = createHash("sha256");
       for await (const chunk of createReadStream(path.join(videoDirectory, outcome.fileName))) hash.update(chunk);
       outcome.sourceSha256 = hash.digest("hex");
+      const expectedSource = expectedById.get(outcome.fileName)?.trial.sourceSha256;
+      if (expectedSource !== undefined) {
+        outcome.sourceIdentityMatchesReference = sourceFingerprintMatches(expectedSource, outcome.sourceSha256);
+        if (!outcome.sourceIdentityMatchesReference) failures.push(`${outcome.fileName}: source checksum does not match its regression reference.`);
+      }
       for (const reference of userReferences.reports.filter(reference => reference.sourceFileName === outcome.fileName)) {
         const assertion = assessUserVideoReference(reference, outcome, outcome.sourceSha256, fullWorkflow);
         userReferenceAssertions.push(assertion);
@@ -535,7 +556,7 @@ async function main() {
       safetyAssertions.push(result);
       if (result.failed) failures.push(`${testCase.fileName}: ${result.reason}`);
     }
-    const report = { appUrl, app, videoDirectory, fullWorkflow, disableFrameCallback, disableVideoFrame, passed: failures.length === 0, assertions, safetyAssertions, userReferenceAssertions, outcomes };
+    const report = { appUrl, app, videoDirectory, fullWorkflow, disableFrameCallback, disableVideoFrame, rejectAnalysisAudioRate, passed: failures.length === 0, assertions, safetyAssertions, userReferenceAssertions, outcomes };
     if (reportFile) {
       await mkdir(path.dirname(path.resolve(reportFile)), { recursive: true });
       await writeFile(reportFile, JSON.stringify(report, null, 2) + "\n", { flag: "wx" });
@@ -581,7 +602,7 @@ function validateOutcome(outcome, expected, baselineStatus = "unbaselined") {
     }
   } else if (expected.start?.status === "review") {
     if (acceptedStart !== null) errors.push(`Start was automatically accepted at ${acceptedStart.toFixed(3)}s but review was expected.`);
-    if (baselineStatus === "research-compared" && expected.start.reviewedCorrect == null) {
+    if (baselineStatus === "research-compared" && expected.start.reviewedCorrect !== true) {
       // Broadcasts are a rejection-safety cohort, not exact start labels.
       // Keep cursor changes visible, but do not force a camera-cut timestamp
       // to remain the selected suggestion after better evidence filtering.

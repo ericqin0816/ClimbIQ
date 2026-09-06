@@ -1,3 +1,10 @@
+/** Optional benchmark fingerprints must be genuine SHA-256 digests, not filenames. */
+export function sourceFingerprintMatches(expected, actual) {
+  return typeof expected === "string" && typeof actual === "string" &&
+    /^[a-f0-9]{64}$/i.test(expected) && /^[a-f0-9]{64}$/i.test(actual) &&
+    expected.toLowerCase() === actual.toLowerCase();
+}
+
 /** Match user feedback to exact source bytes; never borrow labels by filename alone. */
 export function assessUserVideoReference(reference, outcome, sha256, fullWorkflow) {
   const errors = [];

@@ -41,23 +41,45 @@ export async function auditDecodedSourceFrames() {
     throw new Error("Source-frame step did not reach the adjacent decoded frame.");
   };
   const stepRoundTrips = [];
+  const waitForNativeControls = async target => {
+    const started = performance.now();
+    let next;
+    // A fixed number of animation frames does not guarantee React has published
+    // the seek's native metadata, especially during concurrent video tests.
+    // Wait for the user-visible contract; a persistent mismatch still fails.
+    while (performance.now() - started < 2000) {
+      next = document.querySelector('[data-frame-step="next"]');
+      const previous = document.querySelector('[data-frame-step="previous"]');
+      if (!video.seeking && next && !next.disabled && next.getAttribute('aria-label') === 'Next decoded frame' &&
+          previous && !previous.disabled && previous.getAttribute('aria-label') === 'Previous decoded frame') {
+        return performance.now() - started;
+      }
+      await new Promise(resolve => setTimeout(resolve, 20));
+    }
+    const frame = new VideoFrame(video);
+    let native;
+    try { native = { timestamp: frame.timestamp, duration: frame.duration }; } finally { frame.close(); }
+    throw new Error(`Native frame-step controls are unavailable after a decoded seek: ${JSON.stringify({
+      target, cursor: video.currentTime, paused: video.paused, seeking: video.seeking,
+      native, control: next?.outerHTML, display: document.querySelector('.time-pill')?.textContent,
+    })}`);
+  };
   for (const target of [...new Set([0.15, 2.015, video.duration * 0.75])].filter(time => time < video.duration - 0.1)) {
     await new Promise((resolve, reject) => {
       const done = () => { clearTimeout(timer); video.removeEventListener("seeked", done); resolve(); };
       const timer = setTimeout(() => { video.removeEventListener("seeked", done); reject(new Error("Frame-step setup seek timed out.")); }, 5000);
       video.addEventListener("seeked", done); video.currentTime = target;
     });
-    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    const controlReadyWaitMs = await waitForNativeControls(target);
     const original = frameTime();
     const next = document.querySelector('[data-frame-step="next"]');
-    if (!next || next.getAttribute("aria-label") !== "Next decoded frame") throw new Error("Native frame-step controls are unavailable after a decoded seek.");
     next.click();
     const advanced = await waitForStep(1, original);
-    await new Promise(resolve => requestAnimationFrame(resolve));
+    await waitForNativeControls(target);
     document.querySelector('[data-frame-step="previous"]').click();
     const returned = await waitForStep(-1, advanced);
     if (returned !== original) throw new Error("Next/previous source-frame round trip did not return to the same frame.");
-    stepRoundTrips.push({ target, original, advanced, returned });
+    stepRoundTrips.push({ target, original, advanced, returned, controlReadyWaitMs });
   }
   return { samples: rows.length, uniqueSourceFrames: byTimestamp.size, repeatedPixelsMatch: true, sourceFrameStepRoundTrip: true, stepRoundTrips, rows,
     interpretation: "Source-frame identity and seek containment, not event-detection accuracy." };
