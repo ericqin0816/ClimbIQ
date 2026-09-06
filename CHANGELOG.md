@@ -3,6 +3,16 @@
 User-facing changes and their limits. Detailed experiments and regression
 observations are recorded in [benchmarks](benchmarks).
 
+## 0.28.12 — 2026-09-06
+
+- Added a bounded native-decoder readiness check after video seeks. A delayed
+  decoder must not supply an old frame for calibration at a new cursor.
+- Preserved small variable-frame-rate boundary gaps for the native walker to
+  resolve, without counting a repeated frame as fresh timing evidence.
+- Enabled CI on `codex/` preview branches so cross-platform changes can be
+  verified before moving production. Encoded-fixture failures now include
+  calibration and source-sample diagnostics.
+
 ## 0.28.11 — 2026-09-06
 
 - Replaced rounded seek grids with bounded native-frame traversal for short

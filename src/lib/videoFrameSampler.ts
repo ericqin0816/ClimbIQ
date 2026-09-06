@@ -113,7 +113,9 @@ export async function waitForDecodedSeek(video: HTMLVideoElement): Promise<void>
       const duration = frame.duration === null ? undefined : frame.duration / 1e6;
       if (!Number.isFinite(timestamp) || timestamp < 0 || duration === undefined ||
           !Number.isFinite(duration) || duration <= 0 || duration > 1) return;
-      ready = timestamp <= cursor + 0.0001 && cursor < timestamp + duration + 0.0001;
+      // VFR metadata can end a few milliseconds before the next PTS. The
+      // native walker resolves those small gaps with deduplicated forward seeks.
+      ready = timestamp <= cursor + 0.0001 && cursor < timestamp + duration + 0.005;
     } finally { frame.close(); }
     if (ready) return;
     if (Date.now() >= deadline) throw new Error("Decoded video frame did not catch up to the seek cursor.");

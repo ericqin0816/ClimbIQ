@@ -106,6 +106,27 @@ existing body-audit policy, and retains dark IMG_9199 at 7.033 / 17.467. The
 fallback replay passes both working-original workflow checks; without native
 VideoFrame timing, 12.24 remains 12.283 seconds, not the native path's 12.255.
 
+## Cross-platform readiness follow-up (0.28.12)
+
+The first Linux CI runs exposed a seek/readback race that did not reproduce in
+the local Windows synthetic suite: the before/after calibration samples could
+both read green, although the ensuing native scan correctly read blue at the
+event. A separate run briefly fell back to cursor sampling at one search phase.
+No expected event time or fixture assertion was relaxed to hide these failures.
+
+A bounded readiness check now waits when readable native metadata still refers
+to a distant earlier frame after a seek. Native objects are closed on every
+path; unavailable support/duration retains the existing fallback. The first
+strict candidate passed Linux CI but stopped on a VFR boundary in IMG_9199:
+cursor 17.4701, source PTS 17.436667, reported duration 0.033333. The source
+walker already handles small gaps between reported duration and the next PTS;
+the readiness check therefore allows a 5 ms boundary margin for that walker to
+resolve. This margin is not a timing-error claim or a change to accepted event
+timestamps. A permanently stale decoded frame still fails within 200 ms.
+
+The preview-branch check catches such platform differences before merging to
+main. The application continues to process private clips locally.
+
 ## Local research not promoted
 
 Widening/recalibrating a lower-light crop did not give consistent improvements.

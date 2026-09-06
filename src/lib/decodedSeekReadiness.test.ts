@@ -5,6 +5,15 @@ afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); });
 const video = () => ({src:"blob:readiness",currentTime:2.5}) as HTMLVideoElement;
 
 describe("decoded seek readiness", () => {
+  it("allows a small VFR duration-to-next-PTS gap for the native walker to resolve", async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal("VideoFrame", class { timestamp=17436667; duration=33333; close() {} });
+    const target=video();target.currentTime=17.4701;
+    await Promise.all([
+      expect(waitForDecodedSeek(target)).resolves.toBeUndefined(),
+      vi.advanceTimersByTimeAsync(210),
+    ]);
+  });
   it("waits out an old native frame instead of calibrating the new cursor from it", async () => {
     vi.useFakeTimers();
     let calls=0;
