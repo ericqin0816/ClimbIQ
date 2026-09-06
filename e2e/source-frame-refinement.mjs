@@ -259,6 +259,20 @@ async function inspect(fixture) {
       afterStartRGB: fixture.kind === "start" ? final : initial,
       colorDelta: computeColorDistance(initial, final),
     };
+    let calibrationReadback;
+    if (calibration.colorDelta < 20 && typeof VideoFrame === "function") {
+      const native = new VideoFrame(video);
+      try {
+        const canvas = document.createElement("canvas");
+        canvas.width = canvas.height = 16;
+        const context = canvas.getContext("2d", {willReadFrequently:true});
+        context.drawImage(native,48,48,16,16,0,0,16,16);
+        const pixels = context.getImageData(0,0,16,16).data;
+        calibrationReadback = {cursor:video.currentTime,nativeTime:native.timestamp/1e6,
+          nativePixel:Array.from(pixels.slice(0,4)),
+          repeated:(await sampleZoneOpponentColor(video,2.5,zone)).averageRgb};
+      } finally { native.close(); }
+    }
     const runDetector = async (start,sensitivity="medium") =>
       fixture.kind === "start"
         ? await detectStartSignal({
@@ -344,6 +358,7 @@ async function inspect(fixture) {
         reason: result.reason,
         debugReason: result.debug.failureReason,
         calibration,
+        calibrationReadback,
         browser: navigator.userAgent,
         candidates: result.candidates,
         samples: result.debug.samples,
