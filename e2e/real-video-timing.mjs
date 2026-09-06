@@ -7,7 +7,7 @@ import { closeTestBrowser } from "./browser-lifecycle.mjs";
 import { createReadStream } from "node:fs";
 import { createHash } from "node:crypto";
 import { analysisFailureFromOutcome, evaluateKnownVideoFailure } from "../scripts/lib/known-video-failures.mjs";
-import { assessUserVideoReference, sourceFingerprintMatches } from "../scripts/lib/user-video-reference.mjs";
+import { assessUserVideoReference, isUnverifiedReviewCursor, sourceFingerprintMatches } from "../scripts/lib/user-video-reference.mjs";
 
 const defaultChromePath = process.platform === "darwin"
   ? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
@@ -602,8 +602,8 @@ function validateOutcome(outcome, expected, baselineStatus = "unbaselined") {
     }
   } else if (expected.start?.status === "review") {
     if (acceptedStart !== null) errors.push(`Start was automatically accepted at ${acceptedStart.toFixed(3)}s but review was expected.`);
-    if (baselineStatus === "research-compared" && expected.start.reviewedCorrect !== true) {
-      // Broadcasts are a rejection-safety cohort, not exact start labels.
+    if (isUnverifiedReviewCursor(expected.start, baselineStatus)) {
+      // Broadcasts and explicitly unverified private cursors are not exact labels.
       // Keep cursor changes visible, but do not force a camera-cut timestamp
       // to remain the selected suggestion after better evidence filtering.
       observations.push({ kind: "unverified-review-cursor", historicalRawTime: expected.start.rawTime,

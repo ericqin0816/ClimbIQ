@@ -54,6 +54,7 @@
     },
     {
       "id": "public-chamonix-race-0590-attempt.mp4",
+      "sourceSha256": "4418ea8bf44c41c96d80e99f8413d320776e55922acf204811ef20238f91e0fe",
       "division": "women",
       "sourceStartSeconds": 590,
       "durationSeconds": 19,
@@ -79,6 +80,7 @@
     },
     {
       "id": "public-chamonix-attempt-702.mp4",
+      "sourceSha256": "cc6ad421b72163e00f4d636205009d2062902936017a83717e094cf3093e9c99",
       "division": "women",
       "sourceStartSeconds": 702,
       "durationSeconds": 25,
@@ -87,6 +89,7 @@
     },
     {
       "id": "public-chamonix-attempt-816.mp4",
+      "sourceSha256": "e5325da30186c3f0ba163c0c4f05c59e11024cd28c3040b7bcc02dda20cf5ff3",
       "division": "women",
       "sourceStartSeconds": 816,
       "durationSeconds": 25,
@@ -95,6 +98,7 @@
     },
     {
       "id": "public-chamonix-attempt-1552.mp4",
+      "sourceSha256": "6fa9c92c070bcdd120548f7397bb81ecc62846df20238e6245c773520a8e9176",
       "division": "men",
       "sourceStartSeconds": 1552,
       "durationSeconds": 23,
@@ -108,6 +112,7 @@
     },
     {
       "id": "public-chamonix-attempt-1652.mp4",
+      "sourceSha256": "34d3554380da57f120455777a2dc6c80dfe2aae61a89226684be7f711b548afa",
       "division": "men",
       "sourceStartSeconds": 1652,
       "durationSeconds": 23,
@@ -116,6 +121,7 @@
     },
     {
       "id": "public-chamonix-attempt-1745.mp4",
+      "sourceSha256": "057e222777f7817a7f19cc9cd9b0f2f4c7891261b21aead8029c823f1c223ae7",
       "division": "men",
       "sourceStartSeconds": 1745,
       "durationSeconds": 23,

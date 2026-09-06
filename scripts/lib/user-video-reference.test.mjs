@@ -1,8 +1,23 @@
 import { describe, it, expect } from "vitest";
-import { assessUserVideoReference, sourceFingerprintMatches } from "./user-video-reference.mjs";
+import { assessUserVideoReference, isUnverifiedReviewCursor, sourceFingerprintMatches } from "./user-video-reference.mjs";
 const reference = { id: "test", sourceSha256: "abc", expectedTotalSeconds: 12.24, referenceSource: "user-reported total",
   requiredHoldMarkers: [{ holdId: 8, x: 0.33, y: 0.35, radius: 0.012 }] };
 const outcome = { start: { rawTime: "9.400s" }, finish: { rawTime: "21.655s" }, routeMarkers: [{holdId:8,x:0.33,y:0.35}] };
+describe("review cursor regression policy", () => {
+  it("reports explicitly unverified private cursor changes without treating them as target labels", () => {
+    expect(isUnverifiedReviewCursor({ reviewedCorrect: false }, "compared")).toBe(true);
+  });
+  it("continues to pin established private regression observations", () => {
+    expect(isUnverifiedReviewCursor({ reviewedCorrect: true }, "compared")).toBe(false);
+    expect(isUnverifiedReviewCursor({}, "compared")).toBe(false);
+  });
+  it("keeps unknown and explicitly false public cursors observational", () => {
+    for (const reviewedCorrect of [undefined, null, false]) {
+      expect(isUnverifiedReviewCursor({ reviewedCorrect }, "research-compared")).toBe(true);
+    }
+    expect(isUnverifiedReviewCursor({ reviewedCorrect: true }, "research-compared")).toBe(false);
+  });
+});
 describe("benchmark source fingerprints", () => {
   it("matches exact SHA-256 bytes regardless of hex case", () => {
     expect(sourceFingerprintMatches("ab".repeat(32), "AB".repeat(32))).toBe(true);

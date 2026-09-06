@@ -1,0 +1,290 @@
+diff --git a/README.md b/README.md
+index d989592..3fb6359 100644
+--- a/README.md
++++ b/README.md
+@@ -150,6 +150,8 @@ The original local video's audio track is decoded on-device for the known start
+ 
+ Audio decoding requests the detector's 8 kHz sample rate, with a default-rate fallback for browsers that reject it. In local Chrome tests this reduced decoded PCM allocation about 5.5-fold without changing the six original user-video decisions; it is not a whole-app memory or speed guarantee. Decoding still reads the complete encoded file. File, device and codec failures return missing audio evidence, while cancellation remains an explicit cancellation. The detector's overlapping 20 ms windows are not sample-accurate event labels. See [audio experiment and limitations](benchmarks/AUDIO_DECODE_2026_09_05.md); with a local dev server running, `npm run test:audio-browser` checks the real browser decoder using synthetic audio.
+ 
++Weak preparation-tone fragments and materially mismatched preparation pitches cannot authorize an audio-only clock. This confidence check happens after choosing the earliest pattern: it does not silently substitute a later stronger tone. `npm run test:audio-browser -- --references` additionally tests checksummed real sources, including a post-finish broadcast false cue. See [confidence tests and discarded alternatives](benchmarks/AUDIO_CONFIDENCE_2026_09_05.md). Audio confidence is not a measured timing-error bound; independent scene and athlete-launch checks remain required.
++
+ Before accepting that clock, Quick Analyze performs both a lane-local body audit and a full-frame continuity audit. The selected athlete must produce a new, reliable launch immediately after the proposed cue, the image cannot contain a broadcast cut/reframe, and a valid-race reaction cannot fall below World Climbing's 0.100 s false-start boundary. A cue is sent to frame review when motion was already underway, the first sample is suspiciously strong, no launch is found, the reaction is physically invalid, or the launch is implausibly delayed. Light/audio still provide the precise clock; body motion and scene continuity act as false-acceptance guards.
+ 
+ ## First Movement Detection
+diff --git a/benchmarks/audio-confidence-references.json b/benchmarks/audio-confidence-references.json
+new file mode 100644
+index 0000000..eacf180
+--- /dev/null
++++ b/benchmarks/audio-confidence-references.json
+@@ -0,0 +1,34 @@
++{
++  "version": 1,
++  "interpretation": "Source-matched audio confidence regressions, not independently labeled event accuracy. False or weak cues may disappear; their historical cursors are not pinned as correct times.",
++  "trials": [
++    {
++      "id": "12.24.mov",
++      "sourceSha256": "b981cc57f8d3d4fe9c57e4e6414f23457ad8bc7eb7cbec5a95c969707d21b333",
++      "expectedConfidence": "High",
++      "expectedRawTime": 9.4,
++      "purpose": "Preserve the user-reference clip's well-supported preparation tones and final cue."
++    },
++    {
++      "id": "IMG_8903.MOV",
++      "sourceSha256": "eb7bbcb91565cee5b7242f69f085442d260e85ef12cd399fbd21eb60c37ef08c",
++      "expectedConfidence": "High",
++      "expectedRawTime": 4.29,
++      "purpose": "Preserve a short final cue when both preparation tones have sustained support."
++    },
++    {
++      "id": "IMG_9077.MOV",
++      "sourceSha256": "e6fdd0a8db01396342d8ba5a95474d8b4e3f17459f83d9da30dbfeb9c3b571e1",
++      "maximumConfidence": "Medium",
++      "historicalRawTime": 5.25,
++      "purpose": "Four/five-frame preparation fragments cannot authorize the clock; this is not a confirmed real start."
++    },
++    {
++      "id": "public-hunt-599-0000-0035.mp4",
++      "sourceSha256": "599c77deea0dc06d0fbb5c01709c3f3d195e4f82e63f1d4c6b5868dbaf094d54",
++      "maximumConfidence": "Medium",
++      "historicalRawTime": 7.14,
++      "purpose": "Post-finish broadcast tones must not be called an authoritative audio start, even when the full app's body guard would catch the error."
++    }
++  ]
++}
+diff --git a/e2e/audio-decoding.mjs b/e2e/audio-decoding.mjs
+index b7b96f9..d304c6c 100644
+--- a/e2e/audio-decoding.mjs
++++ b/e2e/audio-decoding.mjs
+@@ -1,8 +1,12 @@
+ import { spawn } from "node:child_process";
+ import path from "node:path";
+ import { tmpdir } from "node:os";
++import { readFile } from "node:fs/promises";
++import { createReadStream } from "node:fs";
++import { createHash } from "node:crypto";
+ import { createProtocolClient } from "./cdp-client.mjs";
+ import { closeTestBrowser } from "./browser-lifecycle.mjs";
++import { sourceFingerprintMatches } from "../scripts/lib/user-video-reference.mjs";
+ 
+ // Tests the browser's real codec/resampling path, not a mocked AudioContext.
+ // This imports source modules from a local Vite server; it is not a production
+@@ -44,6 +48,43 @@ try {
+     await delay(100);
+   }
+   const report = await evaluate(`(${browserAudioStudy.toString()})()`);
++  if (process.argv.includes("--references")) {
++    const references = JSON.parse(await readFile(new URL("../benchmarks/audio-confidence-references.json", import.meta.url), "utf8"));
++    if (!Array.isArray(references.trials) || !references.trials.length) throw new Error("No audio confidence references were configured.");
++    const directory = path.resolve(process.env.CLIMBIQ_VIDEO_DIR ?? "node_modules/.climbiq-private-videos");
++    const confidenceRank = { None: 0, Low: 1, Medium: 2, High: 3 };
++    const referenceOutcomes = [];
++    const node = await send("Runtime.evaluate", { expression: `(() => {
++      const input = document.createElement('input'); input.type = 'file'; input.id = 'audio-reference-input';
++      input.hidden = true; document.body.append(input); return input;
++    })()` });
++    for (const reference of references.trials) {
++      const policies = [reference.expectedConfidence, reference.maximumConfidence].filter(value => value !== undefined);
++      if (!policies.length || policies.some(value => !Object.hasOwn(confidenceRank, value))) throw new Error("Invalid audio reference confidence policy.");
++      if (typeof reference.id !== "string" || /[\\/:]/.test(reference.id) || reference.id !== path.basename(reference.id)) throw new Error("Invalid audio reference filename.");
++      const filename = path.join(directory, reference.id);
++      const hash = createHash("sha256");
++      for await (const chunk of createReadStream(filename)) hash.update(chunk);
++      const sourceSha256 = hash.digest("hex");
++      if (!sourceFingerprintMatches(reference.sourceSha256, sourceSha256)) throw new Error(`${reference.id}: audio reference checksum mismatch.`);
++      await send("DOM.setFileInputFiles", { files: [filename], objectId: node.result.objectId });
++      const result = await evaluate(`(async () => {
++        const file = document.querySelector('#audio-reference-input').files[0];
++        const { detectAudioStartSignal } = await import('/src/lib/detectAudioStartSignal.ts');
++        const r = await detectAudioStartSignal({ file, searchStart: 0, searchEnd: 12 });
++        return { found:r.found, rawTime:r.rawTime, confidence:r.confidence, reason:r.reason };
++      })()`);
++      let passed = Object.hasOwn(confidenceRank, result.confidence);
++      if (reference.expectedConfidence !== undefined) passed &&= result.confidence === reference.expectedConfidence;
++      if (reference.maximumConfidence !== undefined) passed &&= Object.hasOwn(confidenceRank, reference.maximumConfidence) &&
++        confidenceRank[result.confidence] <= confidenceRank[reference.maximumConfidence];
++      if (reference.expectedRawTime !== undefined) passed &&= result.found && Number.isFinite(result.rawTime) &&
++        Number.isFinite(reference.expectedRawTime) && Math.abs(result.rawTime - reference.expectedRawTime) <= 0.04;
++      referenceOutcomes.push({ fileName: reference.id, sourceSha256, isGroundTruthLabel: false, ...result, passed });
++    }
++    report.referenceOutcomes = referenceOutcomes;
++    report.passed &&= referenceOutcomes.every(outcome => outcome.passed);
++  }
+   console.log(JSON.stringify({ appUrl, isGroundTruthLabel: false, ...report }, null, 2));
+   if (!report.passed) process.exitCode = 1;
+ } finally {
+@@ -66,6 +107,8 @@ async function browserAudioStudy() {
+     { id: "absolute-window-offset", rate: 44100, channels: 1, searchStart: 1.25, expected: 4 },
+     { id: "out-of-band-alias-trap", rate: 44100, channels: 1, frequencies: [8554, 8554, 9108], expected: null },
+     { id: "same-pitch-is-not-official", rate: 48000, channels: 2, frequencies: [554, 554, 554], expected: null },
++    { id: "mismatched-preparation-pitches", rate: 44100, channels: 1, frequencies: [554, 601, 1064], expected: null },
++    { id: "brief-preparation-fragments", rate: 48000, channels: 2, durations: [0.05, 0.05, 0.14], expected: null },
+     { id: "silence", rate: 44100, channels: 1, silence: true, expected: null },
+     { id: "invalid-codec", invalid: true, expected: null },
+   ];
+@@ -87,7 +130,7 @@ async function browserAudioStudy() {
+       passed: outcomes.every(outcome => outcome.passed), outcomes };
+   } finally { window.AudioContext = NativeContext; }
+ 
+-  function wave({ rate, channels, frequencies = [554, 554, 1108], silence = false }) {
++  function wave({ rate, channels, frequencies = [554, 554, 1108], durations = [0.14, 0.14, 0.14], silence = false }) {
+     const frames = rate * 5, byteLength = frames * channels * 2;
+     const bytes = new ArrayBuffer(44 + byteLength), data = new DataView(bytes);
+     const word = (offset, value) => { for (let index = 0; index < value.length; index++) data.setUint8(offset + index, value.charCodeAt(index)); };
+@@ -100,7 +143,7 @@ async function browserAudioStudy() {
+       let sample = 0;
+       for (let beep = 0; beep < 3; beep++) {
+         const t = time - (beep + 2);
+-        if (t >= 0 && t < 0.14) sample += 0.7 * Math.min(1, t / 0.005, (0.14 - t) / 0.005) * Math.sin(2 * Math.PI * frequencies[beep] * t);
++        if (t >= 0 && t < durations[beep]) sample += 0.7 * Math.min(1, t / 0.005, (durations[beep] - t) / 0.005) * Math.sin(2 * Math.PI * frequencies[beep] * t);
+       }
+       for (let channel = 0; channel < channels; channel++) data.setInt16(44 + (index * channels + channel) * 2, Math.round(sample * 32767), true);
+     }
+diff --git a/package-lock.json b/package-lock.json
+index fde6cfe..fb62cd0 100644
+--- a/package-lock.json
++++ b/package-lock.json
+@@ -1,12 +1,12 @@
+ {
+   "name": "climbiq-detection-lab",
+-  "version": "0.28.6",
++  "version": "0.28.7",
+   "lockfileVersion": 3,
+   "requires": true,
+   "packages": {
+     "": {
+       "name": "climbiq-detection-lab",
+-      "version": "0.28.6",
++      "version": "0.28.7",
+       "dependencies": {
+         "@mediapipe/tasks-vision": "0.10.35",
+         "@vitejs/plugin-react": "^5.1.2",
+diff --git a/package.json b/package.json
+index df15a0c..f7d5134 100644
+--- a/package.json
++++ b/package.json
+@@ -1,7 +1,7 @@
+ {
+   "name": "climbiq-detection-lab",
+   "private": true,
+-  "version": "0.28.6",
++  "version": "0.28.7",
+   "type": "module",
+   "engines": {
+     "node": "22.x"
+diff --git a/src/App.tsx b/src/App.tsx
+index d2d69a1..87e9dd5 100644
+--- a/src/App.tsx
++++ b/src/App.tsx
+@@ -93,7 +93,7 @@ const INITIAL_TIMESTAMPS: TimestampMarker[] = [
+   marker("finishPad", "Finish Pad"),
+ ];
+ 
+-const APP_VERSION = "0.28.6";
++const APP_VERSION = "0.28.7";
+ const SESSION_STORAGE_KEY = "climbiq.analysisSessions.v1";
+ const AttemptComparisonPanel = lazy(() => import("./components/AttemptComparisonPanel"));
+ const FinishReviewPanel = lazy(() => import("./components/FinishReviewPanel"));
+diff --git a/src/lib/detectAudioStartSignal.test.ts b/src/lib/detectAudioStartSignal.test.ts
+index c516181..6a038c7 100644
+--- a/src/lib/detectAudioStartSignal.test.ts
++++ b/src/lib/detectAudioStartSignal.test.ts
+@@ -171,6 +171,50 @@ describe("audio final-beep detection", () => {
+     expect(result.matchedPattern).not.toBe("two-same-then-different");
+   });
+ 
++  it.each([585, 601])("keeps mismatched 554/%s Hz preparation tones below authoritative confidence", (secondPitch) => {
++    const result = analyzeBeepSequence(synthesize(5, [
++      { time: 0.8, frequency: 554 },
++      { time: 1.8, frequency: secondPitch },
++      { time: 2.8, frequency: 1064 },
++    ]), SAMPLE_RATE);
++    expect(result.found).toBe(true);
++    expect(result.confidence).toBe("Medium");
++    expect(result.reason).toContain("audio alone requires review");
++  });
++
++  it("does not authorize the clock from very short preparation-tone fragments", () => {
++    const result = analyzeBeepSequence(synthesize(5, [
++      { time: 0.8, frequency: 554, duration: 0.05 },
++      { time: 1.8, frequency: 554, duration: 0.05 },
++      { time: 2.8, frequency: 1108, duration: 0.14 },
++    ]), SAMPLE_RATE);
++    expect(result.found).toBe(true);
++    expect(result.confidence).toBe("Medium");
++  });
++
++  it("demotes weak early evidence without silently choosing a later stronger clock", () => {
++    const result = analyzeBeepSequence(synthesize(8, [
++      { time: 0.8, frequency: 554, duration: 0.05 },
++      { time: 1.8, frequency: 554, duration: 0.05 },
++      { time: 2.8, frequency: 1108, duration: 0.14 },
++      { time: 4.8, frequency: 554, duration: 0.2 },
++      { time: 5.8, frequency: 554, duration: 0.2 },
++      { time: 6.8, frequency: 1108, duration: 0.14 },
++    ]), SAMPLE_RATE);
++    expect(result.rawTime).toBeCloseTo(2.8, 1);
++    expect(result.confidence).toBe("Medium");
++  });
++
++  it("tolerates small pitch-estimation error with sustained preparation evidence", () => {
++    const result = analyzeBeepSequence(synthesize(5, [
++      { time: 0.8, frequency: 554, duration: 0.2 },
++      { time: 1.8, frequency: 568, duration: 0.2 },
++      { time: 2.8, frequency: 1108, duration: 0.08 },
++    ]), SAMPLE_RATE);
++    expect(result.confidence).toBe("High");
++    expect(result.rawTime).toBeCloseTo(2.8, 1);
++  });
++
+   it("does not promote a too-fast octave pattern to high confidence", () => {
+     const result = analyzeBeepSequence(synthesize(4, [
+       { time: 0.8, frequency: 554 },
+diff --git a/src/lib/detectAudioStartSignal.ts b/src/lib/detectAudioStartSignal.ts
+index ac8309d..8733679 100644
+--- a/src/lib/detectAudioStartSignal.ts
++++ b/src/lib/detectAudioStartSignal.ts
+@@ -3,6 +3,10 @@ import type { Confidence } from "../types";
+ const TARGET_SAMPLE_RATE = 8_000;
+ const FRAME_SECONDS = 0.02;
+ const HOP_SECONDS = 0.01;
++// Confidence policy, not a timing-system specification: a few speech-like
++// fragments or noticeably different pitches must not authorize the clock.
++const MAX_STRONG_PREPARATION_PITCH_ERROR = 0.04;
++const MIN_STRONG_PREPARATION_FRAMES = 6;
+ 
+ export interface AudioToneSegment {
+   startTime: number;
+@@ -182,7 +186,10 @@ export function analyzeBeepSequence(
+     : undefined;
+   if (pitchCoded) {
+     const finalBeep = pitchCoded.sequence[pitchCoded.sequence.length - 1];
+-    const confidence: Confidence = pitchCoded.samePitchError <= 0.08 &&
++    const confidence: Confidence = pitchCoded.samePitchError <= MAX_STRONG_PREPARATION_PITCH_ERROR &&
++        pitchCoded.sequence.slice(0, 2).every(segment =>
++          (segment.qualifiedFrames ?? 0) >= MIN_STRONG_PREPARATION_FRAMES && segment.duration >= 0.08,
++        ) &&
+         pitchCoded.finalPitchDifference >= 0.18 &&
+         isOfficialStartProtocol(pitchCoded.sequence, pitchCoded.finalPitchRatio) &&
+         pitchCoded.regularity >= 0.72
+@@ -192,7 +199,7 @@ export function analyzeBeepSequence(
+       found: true,
+       rawTime: roundMetric(finalBeep.startTime),
+       confidence,
+-      reason: `Detected ${pitchCoded.sequence.length - 1} matching-pitch countdown beeps followed by the different-pitch start beep.`,
++      reason: `Detected ${pitchCoded.sequence.length - 1} matching-pitch countdown beeps followed by the different-pitch start beep.${confidence === "High" ? "" : " The pitch pattern is approximate or weakly supported, so audio alone requires review."}`,
+       matchedPattern: "two-same-then-different",
+       sequence: pitchCoded.sequence,
+       segments,
+@@ -326,8 +333,10 @@ function findPitchCodedStartSequence(
+   }
+   // The official cue is an approximately octave-up final beep. Prefer the
+   // earliest such complete protocol: later crowd/music tones can be cleaner and
+-  // louder, but they cannot retroactively become the race start. Other pitch
+-  // changes remain available as Medium-confidence review evidence.
++  // louder, but they cannot retroactively become the race start. Stronger
++  // confidence eligibility is checked AFTER selecting this earliest pattern:
++  // discarding a weak early match here merely promoted a later false broadcast
++  // cue in testing. Other pitch changes remain Medium review evidence.
+   const officialMatches = matches.filter((match) =>
+     isOfficialStartProtocol(match.sequence, match.finalPitchRatio),
+   );

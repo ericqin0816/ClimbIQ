@@ -5,6 +5,12 @@ export function sourceFingerprintMatches(expected, actual) {
     expected.toLowerCase() === actual.toLowerCase();
 }
 
+/** Never turn an explicitly unverified review cursor into a target time to fit. */
+export function isUnverifiedReviewCursor(start, baselineStatus) {
+  return start?.reviewedCorrect === false ||
+    (baselineStatus === "research-compared" && start?.reviewedCorrect !== true);
+}
+
 /** Match user feedback to exact source bytes; never borrow labels by filename alone. */
 export function assessUserVideoReference(reference, outcome, sha256, fullWorkflow) {
   const errors = [];
