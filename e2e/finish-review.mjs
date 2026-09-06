@@ -140,6 +140,31 @@ try {
   const reviewed = await evaluate("JSON.parse(localStorage.getItem('climbiq.analysisSessions.v1'))[0].timestamps.find(m => m.id === 'finishPad')");
   if (reviewed.acceptanceMode !== "frame-review" || !reviewed.note.includes("user-marked finish-pad area")) throw new Error("Manual acceptance lost pad-review provenance.");
   report.explicitAcceptanceProvenance = true;
+  // A deliberately unrelated manual body region must not reuse the old lane
+  // light. This is a negative routing test, not an athlete-location label.
+  await send("Emulation.setDeviceMetricsOverride", { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false });
+  await evaluate("document.querySelector('#review-tools').open = true; document.querySelector('#zones details').open = true");
+  await click("Capture Current Frame for Zone Setup");
+  await until("Boolean(document.querySelector('.zone-frame')?.naturalWidth)", "manual lane frame");
+  await evaluate("(() => { const s = document.querySelector('#zones select'); s.value = 'startBody'; s.dispatchEvent(new Event('change', {bubbles:true})); document.querySelector('.zone-overlay').scrollIntoView({block:'center',behavior:'instant'}); })()");
+  const manualRegion = await evaluate(`(() => { const z = JSON.parse(localStorage.getItem('climbiq.analysisSessions.v1'))[0].zones.startLight;
+    if (!z) throw new Error('Missing original light for lane exclusion test');
+    const x = (z.x1 + z.x2) / 2 > .5 ? .02 : .9;
+    const r = document.querySelector('.zone-overlay').getBoundingClientRect();
+    return {x1:r.left+x*r.width,x2:r.left+(x+.06)*r.width,y1:r.top+.6*r.height,y2:r.top+.85*r.height}; })()`);
+  await send("Input.dispatchMouseEvent", { type:"mousePressed", x:manualRegion.x1, y:manualRegion.y1, button:"left", clickCount:1 });
+  await evaluate("new Promise(resolve => requestAnimationFrame(resolve))");
+  await send("Input.dispatchMouseEvent", { type:"mouseMoved", x:manualRegion.x2, y:manualRegion.y2, button:"left", buttons:1 });
+  await evaluate("new Promise(resolve => requestAnimationFrame(resolve))");
+  await send("Input.dispatchMouseEvent", { type:"mouseReleased", x:manualRegion.x2, y:manualRegion.y2, button:"left", clickCount:1 });
+  await click("Save Session");
+  const manualBody = await evaluate("JSON.parse(localStorage.getItem('climbiq.analysisSessions.v1'))[0].zones.startBody");
+  if (!manualBody || manualBody.label.startsWith('Automatic lane') || manualBody.x2 - manualBody.x1 > .08) throw new Error("Manual lane test failed to replace the body region.");
+  const beforeExcludedFinish = await evaluate(markers);
+  await click("Find finish automatically");
+  await until("document.querySelector('#finish')?.textContent.includes('selected lane-light region is unavailable') || document.body.textContent.includes('selected lane-light region is unavailable')", "excluded lane refusal");
+  if (await evaluate(markers) !== beforeExcludedFinish) throw new Error("Excluded lane retry changed explicitly reviewed timing.");
+  report.manualBodyLaneExcludesStaleLight = true;
   await upload("IMG_9076.MOV");
   if (await evaluate("Boolean(document.querySelector('[data-finish-review-tools]'))")) throw new Error("Old finish review leaked to a replacement video.");
   await click("Save Session");

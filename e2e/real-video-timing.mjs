@@ -298,6 +298,12 @@ async function verifySavedWorkflow({ evaluate, send }) {
   const validFrames = saved.biomechanics?.result?.metrics?.validFrames ?? 0;
   const savedNativeFrames = saved.biomechanics?.result?.frames?.filter(frame => Number.isFinite(frame.decodedFrameRawTime)).length ?? 0;
   const timingDataset = await captureDatasetExport(evaluate);
+  const laneAudit = timingDataset.startLaneEvidenceAudit;
+  if (!laneAudit || laneAudit.isGroundTruthLabel !== false || !Array.isArray(laneAudit.entries) ||
+      laneAudit.entries.filter(entry => entry.selected).length > 1 ||
+      laneAudit.entries.some(entry => entry.selected && !entry.eligible)) {
+    throw new Error('Dataset export lost or misrepresented the start-lane evidence ledger.');
+  }
   const sourceFrameTimingAudit = timingDataset.sourceFrameTimingAudit;
   const observationIntervals = saved.timestamps.filter(marker => marker.observationIntervalSeconds !== undefined)
     .map(marker => ({ id: marker.id, seconds: marker.observationIntervalSeconds }));
@@ -385,6 +391,7 @@ async function verifySavedWorkflow({ evaluate, send }) {
     secondPassRetryPassed,
     manualReviewWorkflow,
     sourceFrameTimingAudit,
+    startLaneEvidenceAudit: timingDataset.startLaneEvidenceAudit,
     validFrames, requestedFrames: saved.biomechanics?.result?.metrics?.requestedFrames ?? 0,
     sampleFps: saved.biomechanics?.result?.settings?.sampleFps,
     trackingDiagnostics: saved.biomechanics?.result ? {

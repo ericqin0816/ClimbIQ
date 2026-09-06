@@ -3,6 +3,8 @@ import type { Confidence } from "../types";
 const TARGET_SAMPLE_RATE = 8_000;
 const FRAME_SECONDS = 0.02;
 const HOP_SECONDS = 0.01;
+const MAX_STRONG_PREPARATION_PITCH_ERROR = 0.04;
+const MIN_STRONG_PREPARATION_FRAMES = 6;
 
 export interface AudioToneSegment {
   startTime: number;
@@ -30,6 +32,8 @@ interface AudioFrameFeature {
 export interface AudioStartResult {
   found: boolean;
   rawTime?: number;
+  /** A protocol-shaped cue can guide visual search without authorizing a clock. */
+  searchHintTime?: number;
   confidence: Confidence;
   reason: string;
   matchedPattern?: "two-same-then-different" | "regular-countdown" | "single-prominent-beep";
@@ -182,7 +186,10 @@ export function analyzeBeepSequence(
     : undefined;
   if (pitchCoded) {
     const finalBeep = pitchCoded.sequence[pitchCoded.sequence.length - 1];
-    const confidence: Confidence = pitchCoded.samePitchError <= 0.08 &&
+    const confidence: Confidence = pitchCoded.samePitchError <= MAX_STRONG_PREPARATION_PITCH_ERROR &&
+        pitchCoded.sequence.slice(0, 2).every(segment =>
+          (segment.qualifiedFrames ?? 0) >= MIN_STRONG_PREPARATION_FRAMES && segment.duration >= 0.08,
+        ) &&
         pitchCoded.finalPitchDifference >= 0.18 &&
         isOfficialStartProtocol(pitchCoded.sequence, pitchCoded.finalPitchRatio) &&
         pitchCoded.regularity >= 0.72
@@ -191,8 +198,10 @@ export function analyzeBeepSequence(
     return {
       found: true,
       rawTime: roundMetric(finalBeep.startTime),
+      searchHintTime: isOfficialStartProtocol(pitchCoded.sequence, pitchCoded.finalPitchRatio)
+        ? roundMetric(finalBeep.startTime) : undefined,
       confidence,
-      reason: `Detected ${pitchCoded.sequence.length - 1} matching-pitch countdown beeps followed by the different-pitch start beep.`,
+      reason: `Detected ${pitchCoded.sequence.length - 1} matching-pitch countdown beeps followed by the different-pitch start beep.${confidence === "High" ? "" : " The pitch pattern is approximate or weakly supported, so audio alone requires review."}`,
       matchedPattern: "two-same-then-different",
       sequence: pitchCoded.sequence,
       segments,

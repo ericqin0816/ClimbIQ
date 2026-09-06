@@ -113,6 +113,18 @@ try {
   const evidenceExpression = `({ com: document.getElementById('biomechanics-results-heading')?.closest('section')?.textContent ?? '',
     hold10: document.querySelector('.hold10-second-pass')?.textContent ?? '', previews: document.querySelectorAll('.hold10-evidence-frames img').length })`;
   const priorEvidence = await evaluate(evidenceExpression);
+  const captureLaneLedger = () => evaluate(`(() => {
+    const original = navigator.clipboard.writeText; let captured;
+    Object.defineProperty(navigator.clipboard, 'writeText', { configurable:true, value:async text => { captured = text; } });
+    try {
+      const button = [...document.querySelectorAll('button')].find(b => b.textContent.trim() === 'Copy JSON');
+      if (!button) throw new Error('Copy JSON control is missing.');
+      for (let parent = button.parentElement; parent; parent = parent.parentElement) if (parent.tagName === 'DETAILS') parent.open = true;
+      button.click(); return JSON.parse(captured).startLaneEvidenceAudit;
+    } finally { Object.defineProperty(navigator.clipboard, 'writeText', { configurable:true, value:original }); }
+  })()`);
+  const priorLaneLedger = await captureLaneLedger();
+  if (!priorLaneLedger?.entries?.length || !priorLaneLedger.activeLightLaneId) throw new Error('No prior lane evidence was established.');
   if (!priorEvidence.com || priorEvidence.previews !== 3) throw new Error("Rerun cancellation test did not establish complete prior evidence.");
   // A rerun must not discard earlier timing before its replacement Start commits.
   const priorAnalysis = await evaluate(stateExpression);
@@ -129,6 +141,8 @@ try {
   const restoredEvidence = await evaluate(evidenceExpression);
   if (JSON.stringify(restoredEvidence) !== JSON.stringify(priorEvidence)) throw new Error("Cancelled preflight lost the prior COM or Hold 10 evidence.");
   report.cancelledRerunPreservedPriorEvidence = true;
+  if (JSON.stringify(await captureLaneLedger()) !== JSON.stringify(priorLaneLedger)) throw new Error('Cancelled preflight lost prior lane identities or evidence.');
+  report.cancelledRerunPreservedLaneEvidence = true;
 
   // Rapid replacements deliberately race the first file's metadata callback.
   await upload(primary, false);
@@ -141,6 +155,9 @@ try {
   const invalid = await evaluate(stateExpression);
   if (invalid.source !== replaced.source || invalid.fileName !== replaced.fileName || !(await evaluate("Boolean(document.querySelector('.upload-error')?.textContent)"))) throw new Error("Invalid replacement destroyed the valid recording or did not report an error.");
   report.rapidReplacementPassed = true;
+  const replacedLedger = await captureLaneLedger();
+  if (replacedLedger?.entries?.length || replacedLedger?.activeLightLaneId) throw new Error('Lane evidence leaked into a replacement video.');
+  report.replacementClearedLaneEvidence = true;
   report.invalidReplacementPreservedVideo = true;
   if (errors.length) throw new Error(`Browser exceptions: ${errors.join(' | ')}`);
   report.passed = true;

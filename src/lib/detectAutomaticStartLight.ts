@@ -96,7 +96,7 @@ interface AutomaticStartLightOptions {
 export interface GreenBlueAnalysisOptions {
   /** Climber's start-position zone; the lane light sits below and near it. */
   startBodyZone?: NormalizedZone;
-  /** Exact audio cue, when available, boosts the lane transition at that time. */
+  /** Protocol-shaped search hint; does not make a lane or clock authoritative. */
   expectedStartTime?: number;
 }
 
@@ -110,9 +110,8 @@ export async function detectAutomaticStartLight({
   signal,
   onProgress,
 }: AutomaticStartLightOptions): Promise<AutomaticStartLightResult> {
-  // Exact protocol audio is authoritative and narrows expensive pixel scanning
-  // to the relevant few seconds. If audio is unavailable, discovery still scans
-  // the complete user clip as a visual-only fallback.
+  // Protocol shape guides where to sample, independently of the confidence
+  // required to accept its clock. With no hint, scan the selected user window.
   const discoveryStart = expectedStartTime === undefined
     ? searchStart
     : Math.max(searchStart, expectedStartTime - 2.2);

@@ -4,6 +4,23 @@ import { analyzeBeepSequence, resampleMixedChannels } from "./detectAudioStartSi
 const SAMPLE_RATE = 8_000;
 
 describe("audio final-beep detection", () => {
+  it("retains a search hint without authorizing a mismatched-pitch clock", () => {
+    const result = analyzeBeepSequence(synthesize(5, [
+      { time: 0.8, frequency: 554 }, { time: 1.8, frequency: 585 }, { time: 2.8, frequency: 1064 },
+    ]), SAMPLE_RATE);
+    expect(result.confidence).toBe("Medium");
+    expect(result.searchHintTime).toBe(result.rawTime);
+    expect(result.reason).toContain("audio alone requires review");
+  });
+  it("retains the earliest weak protocol hint instead of reselecting a later cue", () => {
+    const result = analyzeBeepSequence(synthesize(8, [
+      { time: .8, frequency:554, duration:.05 }, { time:1.8, frequency:554, duration:.05 }, { time:2.8, frequency:1108 },
+      { time:4.8, frequency:554 }, { time:5.8, frequency:554 }, { time:6.8, frequency:1108 },
+    ]), SAMPLE_RATE);
+    expect(result.confidence).toBe("Medium");
+    expect(result.rawTime).toBeCloseTo(2.8, 1);
+    expect(result.searchHintTime).toBe(result.rawTime);
+  });
   it("selects the different-pitch final beep after matching countdown tones", () => {
     const audio = synthesize(5, [
       { time: 0.5, frequency: 554 },
@@ -17,6 +34,7 @@ describe("audio final-beep detection", () => {
     expect(result.rawTime).toBeCloseTo(3.5, 1);
     expect(result.confidence).toBe("High");
     expect(result.sequence).toHaveLength(3);
+    expect(result.searchHintTime).toBe(result.rawTime);
     expect(result.matchedPattern).toBe("two-same-then-different");
   });
 
@@ -43,6 +61,7 @@ describe("audio final-beep detection", () => {
 
     expect(result.matchedPattern).not.toBe("two-same-then-different");
     expect(result.confidence).toBe("Low");
+    expect(result.searchHintTime).toBeUndefined();
   });
 
   it("does not treat three arbitrary rising pitches as the exact signature", () => {

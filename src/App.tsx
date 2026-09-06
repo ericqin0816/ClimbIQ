@@ -42,6 +42,8 @@ import {
   type RouteAlignmentResult,
 } from "./lib/routeAlignment";
 import { fuseStartEvidence, type FusedStartDecision, type StartEvidence } from "./lib/startSignalFusion";
+import { associateStartLanes, startLaneId, type AnalysisLaneCandidate, type StartLaneEvidence } from "./lib/startLaneEvidence";
+import { prepareFinishLaneCandidates } from "./lib/finishLaneEvidence";
 import { assessAutomaticStartBodyAudit } from "./lib/startBodyAudit";
 import { deriveAutomaticStartBodyZone, resolveAnalysisBodyZone } from "./lib/startRegion";
 import { applyTimestampAcceptance, clearMarkerTimestamp, recalculateTimestampClimbs, sanitizeTimestampSequence, sanitizeAcceptanceMode, timestampAcceptanceAudit } from "./lib/timestampIntegrity";
@@ -93,7 +95,7 @@ const INITIAL_TIMESTAMPS: TimestampMarker[] = [
   marker("finishPad", "Finish Pad"),
 ];
 
-const APP_VERSION = "0.28.6";
+const APP_VERSION = "0.28.8";
 const SESSION_STORAGE_KEY = "climbiq.analysisSessions.v1";
 const AttemptComparisonPanel = lazy(() => import("./components/AttemptComparisonPanel"));
 const FinishReviewPanel = lazy(() => import("./components/FinishReviewPanel"));
@@ -147,14 +149,6 @@ interface PendingAutomaticAnalysisContext {
   analysisLightZone?: NormalizedZone;
   analysisLightCalibration?: StartLightCalibration;
   analysisLaneCandidates?: AnalysisLaneCandidate[];
-}
-
-interface AnalysisLaneCandidate {
-  zone: NormalizedZone;
-  calibration: StartLightCalibration;
-  label: string;
-  startRawTime: number;
-  score: number;
 }
 
 interface AutomaticFinishOutcome {
@@ -1440,9 +1434,7 @@ function App() {
       searchStart,
       searchEnd,
       startBodyZone: trustedBodyZone,
-      expectedStartTime: audioStart.matchedPattern === "two-same-then-different" && audioStart.confidence === "High"
-        ? audioStart.rawTime
-        : undefined,
+      expectedStartTime: audioStart.searchHintTime,
       signal,
       onProgress: (processed, total) => {
         onStatus(`Scanning lane lights: ${processed}/${total} frames…`);
@@ -1509,16 +1501,13 @@ function App() {
     onStatus("Comparing lane lights, final beep, and body motion…");
     const motionProbeZone = trustedBodyZone ??
       (automaticLight.zone ? deriveAutomaticStartBodyZone(automaticLight.zone) : undefined);
-    const exactAudioTime = audioStart.matchedPattern === "two-same-then-different" &&
-        audioStart.confidence === "High"
-      ? audioStart.rawTime
-      : undefined;
+    const motionSearchHintTime = audioStart.searchHintTime;
     const motionStart = motionProbeZone
       ? await detectMotionBasedStartEstimate({
           video,
           zone: motionProbeZone,
-          searchStart: exactAudioTime === undefined ? searchStart : Math.max(searchStart, exactAudioTime - 0.25),
-          searchEnd: exactAudioTime === undefined ? searchEnd : Math.min(searchEnd, exactAudioTime + 0.9),
+          searchStart: motionSearchHintTime === undefined ? searchStart : Math.max(searchStart, motionSearchHintTime - 0.25),
+          searchEnd: motionSearchHintTime === undefined ? searchEnd : Math.min(searchEnd, motionSearchHintTime + 0.9),
           reactionOffset: reactionTimeOffset,
           sensitivity: startSensitivity,
         })
@@ -1578,10 +1567,7 @@ function App() {
         Math.abs(left.result.rawTime! - decision.rawTime!) - Math.abs(right.result.rawTime! - decision.rawTime!) ||
         (right.lane?.score ?? 0) - (left.lane?.score ?? 0),
       );
-    const supportingColorRecords = reviewColorRecords.filter(record => record.automaticVoteAllowed !== false);
-    const closestColorRecord = supportingColorRecords[0];
-    const analysisLaneCandidates = deduplicateAnalysisLaneCandidates(
-      supportingColorRecords.flatMap((record): AnalysisLaneCandidate[] => {
+    const laneEvidence = colorRecords.flatMap((record): StartLaneEvidence[] => {
         const zone = record.lane?.zone ??
           (record.label === "saved start-light zone" ? zones.startLight : undefined);
         const candidateCalibration = record.result.debug.calibration ?? record.lane?.calibration ??
@@ -1595,9 +1581,14 @@ function App() {
           label: record.label,
           startRawTime: record.result.rawTime!,
           score: record.lane?.score ?? 0,
+          confidence: record.result.confidence,
+          automaticVoteAllowed: record.automaticVoteAllowed,
+          artifactReason: record.artifactReason,
         }];
-      }),
-    );
+      });
+    const laneAssociation = associateStartLanes(laneEvidence, decision, audioStart.searchHintTime, trustedBodyZone);
+    const closestColorRecord = colorRecords.find(record => record.label === laneAssociation.selected?.label);
+    const analysisLaneCandidates = laneAssociation.candidates;
     automaticLaneCandidatesRef.current = analysisLaneCandidates;
     // A discovered lane is safe to use for athlete tracking only when that
     // color cue actually supports the fused start decision. The detector may
@@ -1639,6 +1630,10 @@ function App() {
       debug: {
         ...baseResult.debug,
         detectionMethod: "Fused lane-light, final-beep, and motion evidence",
+        laneEvidence: laneAssociation.audit,
+        laneAssociationTime: laneAssociation.associationTime,
+        audioSearchHintTime: audioStart.searchHintTime,
+        audioConfidence: audioStart.confidence,
         selectedCandidateTime: decision.rawTime,
         selectedCandidateReason: decision.reason,
         detectedRawTime: decision.rawTime,
@@ -2160,16 +2155,11 @@ function App() {
       videoDuration: video.duration,
       officialTotalSeconds: officialDuration,
     });
-    const primaryCandidate: AnalysisLaneCandidate[] = lightZone
-      ? [{
-          zone: lightZone,
-          calibration: lightCalibration ?? {},
-          label: "selected lane light",
-          startRawTime: acceptedStart,
-          score: Number.MAX_SAFE_INTEGER,
-        }]
-      : [];
-    const candidates = deduplicateAnalysisLaneCandidates([...primaryCandidate, ...laneCandidates]).slice(0, 3);
+    const trustedBodyZone = zones.startBody && !zones.startBody.label.startsWith("Automatic lane")
+      ? zones.startBody : undefined;
+    const candidates = prepareFinishLaneCandidates(
+      lightZone, lightCalibration, acceptedStart, laneCandidates, trustedBodyZone,
+    );
     if (!candidates.length) {
       const missing = await detectFinishSignal({
         video,
@@ -2743,6 +2733,15 @@ function App() {
         startEvidence: startEvidenceStatus || null,
         automaticAnalysis: autoAnalysisStatus || null,
         finishAnalysis: finishStatus || null,
+      },
+      startLaneEvidenceAudit: {
+        scope: "current-analysis-only",
+        isGroundTruthLabel: false,
+        audioSearchHintTime: startResult?.debug.audioSearchHintTime ?? null,
+        audioConfidence: startResult?.debug.audioConfidence ?? null,
+        associationTime: startResult?.debug.laneAssociationTime ?? null,
+        entries: startResult?.debug.laneEvidence ?? [],
+        activeLightLaneId: zones.startLight ? startLaneId(zones.startLight) : null,
       },
       biomechanics,
       athleteNotes: sessionNotes.trim(),
@@ -5457,23 +5456,6 @@ function videoMetadataMatches(actual: VideoMetadata, expected: VideoMetadata): b
   const durationTolerance = Math.max(0.1, Math.abs(expected.duration) * 0.005);
   const durationMatches = !expected.duration || Math.abs(actual.duration - expected.duration) <= durationTolerance;
   return dimensionsMatch && durationMatches;
-}
-
-function deduplicateAnalysisLaneCandidates(candidates: AnalysisLaneCandidate[]): AnalysisLaneCandidate[] {
-  const unique: AnalysisLaneCandidate[] = [];
-  for (const candidate of candidates) {
-    const centerX = (candidate.zone.x1 + candidate.zone.x2) / 2;
-    const centerY = (candidate.zone.y1 + candidate.zone.y2) / 2;
-    const duplicate = unique.some((existing) => {
-      const existingX = (existing.zone.x1 + existing.zone.x2) / 2;
-      const existingY = (existing.zone.y1 + existing.zone.y2) / 2;
-      return Math.hypot(centerX - existingX, centerY - existingY) < 0.035;
-    });
-    if (!duplicate) {
-      unique.push(candidate);
-    }
-  }
-  return unique;
 }
 
 function normalizedZonesEqual(left?: NormalizedZone, right?: NormalizedZone): boolean {

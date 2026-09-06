@@ -74,6 +74,11 @@ export interface ZonePixelRect {
 }
 
 export interface StartSignalDebug {
+  /** Per-patch evidence retained independently of the selected clock's confidence. */
+  laneEvidence?: import("./lib/startLaneEvidence").StartLaneAudit[];
+  laneAssociationTime?: number;
+  audioSearchHintTime?: number;
+  audioConfidence?: Confidence;
   zoneExists: boolean;
   normalizedZone?: NormalizedZone;
   pixelZone?: ZonePixelRect;
