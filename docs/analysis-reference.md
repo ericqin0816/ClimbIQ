@@ -6,23 +6,6 @@ Implementation details and operating instructions for ClimbIQ. For a first run,
 start with the project overview. Detector confidence is a decision rule, not a
 measured accuracy percentage.
 
-## What It Does
-
-- Detects the official start protocol from synchronized audio and timing-light evidence.
-- Finds first movement and finish timing while keeping every suggested timestamp reviewable frame by frame.
-- Tracks the selected athlete through a standardized 15 m speed wall with MediaPipe Pose Landmarker.
-- Estimates a 2D wall-projected center-of-mass path, speed, efficiency, route sections, and Hold 10 contact.
-- Compares two saved attempts across total time, reaction, reviewed Hold 10 phases, and trustworthy wall thirds.
-- Moves a complete saved-attempt library between browsers or computers with a merge-safe JSON backup.
-- Processes videos entirely in the browser; videos are never uploaded or stored by ClimbIQ.
-- Exports portable JSON datasets and Obsidian-ready training notes.
-
-## Why This Project Exists
-
-ClimbIQ Detection Lab is a working proof of the core video-detection and biomechanics engine for a larger ClimbIQ product. Its purpose is to show that a local speed-climbing video can be sampled frame by frame and converted into useful, inspectable performance data.
-
-This repository focuses on the analysis engine and local attempt comparison. Athlete profiles, native mobile apps, backend services, cloud storage, and an AI coach are intentionally outside the current scope.
-
 ## Compare Saved Attempts
 
 Save at least two timed sessions, then open **Attempt comparison**. Choose the older run as the baseline and the newer run as the candidate. ClimbIQ compares only measurements available in both sessions: total time, first movement, reviewed Start → Hold 10 and Hold 10 → Finish phases, and medium/high-confidence COM wall thirds. A negative time means the newer attempt was faster.
@@ -32,27 +15,6 @@ Low-confidence values remain visible for review but never receive a gained/lost 
 Small differences are displayed as **Below threshold**, not proof of improvement or equality. Comparison uses conservative display rules: at least 0.100 s for accepted timing, 0.200 s when body-motion estimates define a boundary, and two pose sample intervals for COM sections (0.400 s at 5 fps). Recorded boundary observation intervals can increase those thresholds; for example, a 200 ms Finish observation raises the total-time comparison floor to at least 400 ms. These thresholds are policy choices, not validated accuracy bounds or confidence intervals. Both endpoints' confidence limits the section confidence, and legacy markers without interval metadata do not gain verified precision.
 
 Saved COM timing and athlete identity must pass the same freshness check as the main analysis and have valid wall calibration. Corrected or mismatched results withhold both wall splits and the old tracking-quality badge until reanalysis. Session imports and reloads sanitize stored biomechanics before comparison. The panel works without reopening either video.
-
-## Built With
-
-- React 19, TypeScript, and Vite
-- MediaPipe Pose Landmarker running on-device with WebAssembly
-- `HTMLVideoElement`, Canvas, and Web Audio APIs for local media analysis
-- Vitest for deterministic detection and biomechanics tests
-- Vercel for the public web deployment
-
-## Why Web First
-
-This lab uses a real `HTMLVideoElement` plus the Canvas API. That keeps frame extraction direct and testable:
-
-- load a local video file with an object URL
-- seek to raw video times
-- draw video frames to canvas
-- read pixel data
-- run simple detection logic locally
-- copy a debug report when detection fails
-
-Starting with Expo or React Native would add video and canvas constraints before the core detection engine is proven.
 
 ## Timing Does Not Depend on Pose
 
@@ -70,7 +32,7 @@ Quick Analyze runs MediaPipe Pose Landmarker locally after it has an accepted fi
 
 Before automatic wall calibration, ClimbIQ compares robust fixed-scene edges near the start and finish. Frame-wide translation that is materially better explained by a shifted image is treated as camera movement; timing remains available, but COM, metre-per-second output, route registration, and Hold 10 splits pause rather than using one invalid homography for a panned or tilted recording. Local athlete motion and exposure changes are trimmed out of this check.
 
-For more precise metre and m/s output, the **Center of Mass** panel still supports a manual four-corner calibration:
+If automatic wall geometry needs correction, the **Center of Mass** panel supports a manual four-corner calibration:
 
 1. Capture a frame showing the complete standardized speed lane.
 2. Mark bottom-left, bottom-right, top-right, and top-left lane corners.
@@ -78,7 +40,7 @@ For more precise metre and m/s output, the **Center of Mass** panel still suppor
 4. Analyze the accepted Start-to-Finish range at 5, 10, or 15 fps, or let Quick Analyze run it automatically.
 5. Review the synchronized skeleton, wall-projected center-of-mass path, speed chart, quality rating, and frame table.
 
-Both automatic and manual lane geometry solve a perspective transform from intrinsic video coordinates to the standardized 3 m × 15 m wall plane. Manual corners provide the higher-accuracy metric scale. Pose joints are projected into wall coordinates before segment centers and whole-body center of mass are calculated.
+Both automatic and manual lane geometry solve a perspective transform from intrinsic video coordinates to the standardized 3 m × 15 m wall plane. Manual corners replace automatic estimates with user-specified geometry; they do not independently verify the scale. Pose joints are projected into wall coordinates before segment centers and whole-body center of mass are calculated.
 
 The COM calculation uses the 12-segment mass and segment-center ratios published by Pandurevic et al. for an adult-male reference population. The result is labeled as an estimated 2D wall projection. It is not a 3D, force, or clinical measurement and may not match every athlete's body proportions.
 
@@ -137,6 +99,21 @@ Pose samples also retain `decodedFrameRawTime` and `sourceFrameDurationSeconds` 
 Cancelling or failing a rerun before it commits a replacement Start restores the previous analysis context, including its accepted Finish. After a new Start commits, completed stages remain available and unfinished stages may need another run. This prevents preflight lane-calibration changes from silently erasing prior timing on cancellation.
 
 ## Start Signal Detection
+
+When the standard discovery image lacks a High-confidence refined visual cue,
+ClimbIQ can retry once with more source pixels, up to a 960 × 640 raster without
+upscaling. It keeps the same search window and confidence thresholds. A detail
+pass replaces the first pass only if its refined visual evidence is stronger;
+equal-strength alternatives do not replace working evidence. Unguided windows
+longer than 12 seconds skip this extra pass.
+
+The recovery pass checks blue-directed chromaticity as well as RGB distance so
+an earlier shadow does not become the onset of a later blue light. This extra
+check is specific to recovery; the standard scan remains unchanged. In a selected
+recovery pass, reliable visual patches outrank weak reflections. Weaker patches
+stay in diagnostics but cannot serve as alternate Finish sensors. Standard-pass
+lane ordering and fallback behavior remain unchanged. More pixels can recover a Start without proving a
+Finish, so Finish and COM may still require review.
 
 Before fusion, visual cues are checked for camera cuts and context-poor patches along the bottom edge of landscape footage. Such cues remain inspectable but cannot supply automatic clock votes or shift a valid cue's accepted time. These safeguards do not make edited broadcast footage a validated input format.
 
@@ -213,13 +190,13 @@ git pull --ff-only origin main
 
 Git synchronizes the app, but browser-saved attempts remain local to that computer. In **Attempt comparison**, choose **Export saved library** on the first computer and **Import session or library** on the second. Import merges by session ID: the newer saved copy wins, local-only attempts remain, and an analysis already open on screen is never silently replaced.
 
-Private videos are intentionally excluded from Git. You can upload a downloaded Drive video directly in the app. To run the repeatable timing benchmark on the Mac, put clips in `node_modules/.climbiq-private-videos/` or set `CLIMBIQ_VIDEO_DIR` to their local folder. The benchmark runner supports the standard macOS Google Chrome location and uses the macOS temporary directory for its isolated profile; set `CLIMBIQ_CHROME` only if Chrome lives somewhere else.
+Private videos are intentionally excluded from Git. You can upload a downloaded Drive video directly in the app. For the repeatable timing benchmark, keep original clips outside the project and set `CLIMBIQ_VIDEO_DIR` to their local folder. The default `node_modules/.climbiq-private-videos/` folder is for disposable copies; `npm ci` replaces `node_modules`. The runner supports the standard macOS Google Chrome location and uses the macOS temporary directory for its isolated profile; set `CLIMBIQ_CHROME` only if Chrome lives somewhere else.
 
 For a full meet replay, open **Review & advanced tools** and enter the absolute source-time window for one race (for example, ignore before `590` and stop the start search at `610`). ClimbIQ analyzes one attempt at a time and limits automatic finish search to 30 seconds after the accepted start so later races and timer resets cannot leak into the result. Edited multi-camera footage is intentionally sent to review when the frame composition changes at the cue.
 
 ### Real-video timing regression
 
-Keep private test clips outside Git in `node_modules/.climbiq-private-videos/`, start the development server, then run:
+Set `CLIMBIQ_VIDEO_DIR` to the local folder containing your recordings, start the development server, then run:
 
 ```bash
 npm run benchmark:timing
@@ -307,7 +284,7 @@ Suggested workflow:
 
 ## JSON Dataset Export
 
-Use **Copy JSON** or **Download JSON** to export structured machine-readable attempt data. This is the source of truth for future model improvement.
+Use **Copy JSON** or **Download data** to export structured attempt data for review and debugging. An export records the app's analysis; it is not automatically a ground-truth training label.
 
 The dataset JSON includes:
 

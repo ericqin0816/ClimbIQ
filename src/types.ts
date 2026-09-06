@@ -79,6 +79,7 @@ export interface StartSignalDebug {
   laneAssociationTime?: number;
   audioSearchHintTime?: number;
   audioConfidence?: Confidence;
+  detailRecovery?: { attempted: boolean; selected: boolean; reason: string };
   zoneExists: boolean;
   normalizedZone?: NormalizedZone;
   pixelZone?: ZonePixelRect;

@@ -136,6 +136,7 @@ function weightedTime(cluster: StartEvidence[]): number {
   const colorItems = cluster.filter((item) => item.kind === "color");
   const reliableColorItems = colorItems.filter((item) => item.confidence === "High" || item.confidence === "Medium");
   const highAudioItems = cluster.filter((item) => item.kind === "audio" && item.confidence === "High");
+  const reliableAudioItems = cluster.filter((item) => item.kind === "audio" && item.confidence !== "Low" && item.confidence !== "None");
   const nonMotion = cluster.filter((item) => item.kind !== "motion");
   // One faint/coarse light cannot override the exact pitch-coded audio time. Two
   // agreeing lanes, or any refined Medium/High light, remain frame-accurate anchors.
@@ -143,6 +144,8 @@ function weightedTime(cluster: StartEvidence[]): number {
     ? highAudioItems
     : reliableColorItems.length
       ? reliableColorItems
+      : reliableAudioItems.length
+        ? reliableAudioItems
       : colorItems.length >= 2
       ? colorItems
       : colorItems.length

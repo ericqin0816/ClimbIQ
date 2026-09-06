@@ -16,9 +16,11 @@ check the complete flow at desktop and phone widths.
 
 ## Testing with recordings
 
-Place recordings in `node_modules/.climbiq-private-videos/`, or set
-`CLIMBIQ_VIDEO_DIR` to a local folder. These files are not distributed with the
-repository. The browser runner uses a separate temporary Chrome profile.
+Keep original recordings outside the project and set `CLIMBIQ_VIDEO_DIR` to
+their local folder. The runner defaults to `node_modules/.climbiq-private-videos/`
+for disposable test copies only: `npm ci` replaces `node_modules`, so never keep
+your only copy there. Recordings are not distributed with the repository. The
+browser runner uses a separate temporary Chrome profile.
 
 With the development server running:
 
@@ -32,6 +34,8 @@ npm run test:audio-browser
 The cancellation and Finish review suites expect the named private fixtures in
 their scripts. The audio suite generates synthetic signals and needs no private
 recording. `CLIMBIQ_CHROME` can point to a nonstandard Chrome installation.
+The timing runner uses debugging port 9334 by default; set `CLIMBIQ_E2E_PORT`
+to a different unused port when running another isolated replay concurrently.
 
 Use `--report=test-results/run.json` with the timing runner to retain a local
 report. `--full` includes tracking, saving, reloading, comparison, and review
@@ -47,6 +51,17 @@ npm run benchmark:compare -- before.json after.json --tolerance=0.01
 Set `CLIMBIQ_FFMPEG` to a local FFmpeg executable for transformations; the
 Windows fallback path is a local development dependency, not a bundled tool.
 Reports pair source and transformed-file checksums before comparing outputs.
+
+To inspect every discovered start-light patch and its local motion evidence,
+use the diagnostic probe with a local Vite server:
+
+```bash
+node e2e/start-lane-probe.mjs --detail --report=test-results/lanes.json /path/to/clip.mov
+```
+
+Omit `--detail` for the standard discovery pass. This probe does not accept
+timestamps or produce accuracy labels; the full browser workflow still has to
+pass its artifact, launch, and Finish checks.
 
 A new automatic acceptance needs inspection just as a lost result does. Do not
 change a benchmark expectation only to make a test pass. Record why the output

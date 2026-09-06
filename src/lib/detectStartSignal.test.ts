@@ -16,6 +16,28 @@ const CALIBRATION: RequiredCalibration = {
 };
 
 describe("calibrated green-departure timing", () => {
+  it("ignores additive gray brightening before a real recovery-pass hue change", () => {
+    const brighter = {r:40,g:230,b:44};
+    const samples = makeSamples([GREEN,GREEN,GREEN,brighter,brighter,brighter,BLUE,BLUE,BLUE]);
+    expect(findVerifiedGreenDeparture(samples,CALIBRATION,2,true)?.onsetIndex).toBe(6);
+  });
+  it("does not backdate blue onset to a sustained neutral darkening", () => {
+    const before = {r:105,g:108,b:89}, after = {r:99,g:84,b:112};
+    const colors = [before,before,before,{r:103,g:105,b:87},{r:103,g:105,b:87},
+      {r:104,g:106,b:87},{r:101,g:97,b:90},after,after,after];
+    const calibration = {beforeStartRGB:before,afterStartRGB:after,colorDelta:computeColorDistance(before,after)};
+    const samples = makeSamples(colors).map(sample => ({...sample,
+      distanceToBefore:computeColorDistance(sample.averageRgb,before),
+      distanceToAfter:computeColorDistance(sample.averageRgb,after)}));
+    expect(findVerifiedGreenDeparture(samples,calibration,2,true)?.onsetIndex).toBe(6);
+  });
+
+  it("ignores exposure scaling before the real hue transition", () => {
+    const dim = {r:10,g:105,b:12};
+    const samples = makeSamples([GREEN,GREEN,GREEN,dim,dim,dim,BLUE,BLUE,BLUE]);
+    expect(findVerifiedGreenDeparture(samples,CALIBRATION,2,true)?.onsetIndex).toBe(6);
+  });
+
   it("marks the first intermediate frame and uses later blue only as verification", () => {
     const samples = makeSamples([
       GREEN,

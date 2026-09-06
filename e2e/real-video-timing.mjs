@@ -28,7 +28,8 @@ const reportFile = process.argv.find(value => value.startsWith("--report="))?.sl
 const commandLineFiles = process.argv.slice(2).filter((value) => value !== "--full" && !value.startsWith("--fps=") && !value.startsWith("--report=")).map((value) => value.trim()).filter(Boolean);
 const environmentFiles = process.env.CLIMBIQ_BENCHMARK_FILES?.split(",").map((value) => value.trim()).filter(Boolean);
 const requestedFiles = commandLineFiles.length ? commandLineFiles : environmentFiles;
-const port = 9334;
+const port = Number(process.env.CLIMBIQ_E2E_PORT ?? 9334);
+if (!Number.isInteger(port) || port < 1024 || port > 65535) throw new Error("CLIMBIQ_E2E_PORT must be an integer from 1024 to 65535.");
 const profile = path.join(process.env.TMPDIR ?? process.env.TEMP ?? tmpdir(), `climbiq-timing-${Date.now()}`);
 const delay = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 

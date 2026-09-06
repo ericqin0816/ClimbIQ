@@ -44,6 +44,7 @@ export interface GreenBlueDiscovery {
 export interface AutomaticStartLightResult extends GreenBlueDiscovery {
   result?: StartSignalDetectionResult;
   laneResults?: StartSignalDetectionResult[];
+  detailRecovery?: { attempted: boolean; selected: boolean; reason: string };
 }
 
 export interface GreenBlueLaneCandidate {
@@ -89,8 +90,11 @@ interface AutomaticStartLightOptions {
   searchEnd: number;
   startBodyZone?: NormalizedZone;
   expectedStartTime?: number;
+  /** Diagnostic/refinement pass: retain more source pixels, never upscale. */
+  detailPass?: boolean;
+  allowDetailRetry?: boolean;
   signal?: AbortSignal;
-  onProgress?: (processed: number, total: number) => void;
+  onProgress?: (processed: number, total: number, detailPass?: boolean) => void;
 }
 
 export interface GreenBlueAnalysisOptions {
@@ -100,13 +104,50 @@ export interface GreenBlueAnalysisOptions {
   expectedStartTime?: number;
 }
 
+/** Retry only when more source pixels can strengthen an uncertain visual cue.
+ * Confidence thresholds, time windows, and subsequent scene/body audits stay
+ * unchanged. Equal-strength alternatives cannot replace the standard pass.
+ */
+export async function detectAutomaticStartLight(options: AutomaticStartLightOptions): Promise<AutomaticStartLightResult> {
+  const standard = await detectStartLightPass(options);
+  if (!options.allowDetailRetry || options.detailPass ||
+      (options.expectedStartTime === undefined && options.searchEnd - options.searchStart > 12) ||
+      !shouldRetryStartLightDetail(standard, options.video.videoWidth, options.video.videoHeight, options.expectedStartTime)) return standard;
+  checkCancelled(options.signal);
+  const detailed = await detectStartLightPass({ ...options, detailPass: true,
+    onProgress: (processed, total) => options.onProgress?.(processed, total, true) });
+  checkCancelled(options.signal);
+  const selected = preferDetailedStartLight(standard, detailed, options.expectedStartTime);
+  return { ...(selected ? detailed : standard), detailRecovery: { attempted: true, selected,
+    reason: selected ? "A higher-detail source-pixel scan recovered stronger visual start evidence."
+      : "The higher-detail scan did not strengthen the visual cue; the original evidence was retained." } };
+}
+
+function visualStrength(result: AutomaticStartLightResult, hint?: number): number {
+  return Math.max(0, ...(result.laneResults ?? (result.result ? [result.result] : [])).filter(candidate =>
+    candidate.detected && Number.isFinite(candidate.rawTime) && candidate.rawTime! >= 0 &&
+    (hint === undefined || Math.abs(candidate.rawTime! - hint) <= 0.38),
+  ).map(candidate => candidate.confidence === "High" ? 3 : candidate.confidence === "Medium" ? 2 : candidate.confidence === "Low" ? 1 : 0));
+}
+
+export function shouldRetryStartLightDetail(result: AutomaticStartLightResult, width: number, height: number, hint?: number): boolean {
+  return Number.isFinite(width) && Number.isFinite(height) && width > 0 && height > 0 &&
+    (width > DISCOVERY_MAX_WIDTH || height > DISCOVERY_MAX_HEIGHT) && visualStrength(result, hint) < 3;
+}
+
+export function preferDetailedStartLight(standard: AutomaticStartLightResult, detailed: AutomaticStartLightResult, hint?: number): boolean {
+  const strength = visualStrength(detailed, hint);
+  return strength >= 2 && strength > visualStrength(standard, hint);
+}
+
 /** Locates a fixed light that is green before start and remains blue afterward. */
-export async function detectAutomaticStartLight({
+async function detectStartLightPass({
   video,
   searchStart,
   searchEnd,
   startBodyZone,
   expectedStartTime,
+  detailPass = false,
   signal,
   onProgress,
 }: AutomaticStartLightOptions): Promise<AutomaticStartLightResult> {
@@ -124,7 +165,7 @@ export async function detectAutomaticStartLight({
     return emptyDiscovery("The start search window is too short to locate a green-to-blue light.");
   }
 
-  const frames = await captureDiscoveryFrames(video, times, signal, onProgress);
+  const frames = await captureDiscoveryFrames(video, times, signal, onProgress, detailPass ? 2 : 1);
   checkCancelled(signal);
   const discovery = analyzeGreenBlueFrames(frames, { startBodyZone, expectedStartTime });
   if (!discovery.found || !discovery.zone || !discovery.calibration || discovery.transitionTime === undefined) {
@@ -152,6 +193,7 @@ export async function detectAutomaticStartLight({
       calibration: lane.calibration,
       fps: 30,
       colorSamplingMode: "opponent",
+      requireChromaticDeparture: detailPass,
       signal,
     });
     checkCancelled(signal);
@@ -596,8 +638,9 @@ async function captureDiscoveryFrames(
   times: number[],
   signal?: AbortSignal,
   onProgress?: (processed: number, total: number) => void,
+  resolutionScale = 1,
 ): Promise<DownsampledColorFrame[]> {
-  const scale = Math.min(1, DISCOVERY_MAX_WIDTH / video.videoWidth, DISCOVERY_MAX_HEIGHT / video.videoHeight);
+  const scale = Math.min(1, DISCOVERY_MAX_WIDTH * resolutionScale / video.videoWidth, DISCOVERY_MAX_HEIGHT * resolutionScale / video.videoHeight);
   const width = Math.max(32, Math.round(video.videoWidth * scale));
   const height = Math.max(24, Math.round(video.videoHeight * scale));
   const canvas = document.createElement("canvas");

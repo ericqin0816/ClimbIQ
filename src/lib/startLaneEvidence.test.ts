@@ -14,6 +14,29 @@ const decision = (records: StartLaneEvidence[], time = 2.85): FusedStartDecision
 });
 
 describe("independent start-lane evidence association", () => {
+  it("prefers verified visual support over a weak reflection closest to the beep", () => {
+    const reflection = {...lane("reflection", .8), confidence:"Low" as const};
+    const sensor = {...lane("sensor", .7, 2.95), confidence:"Medium" as const};
+    for (const confidence of ["High", "Medium"] as const) {
+      const result = associateStartLanes([reflection,sensor], {...decision([reflection,sensor]), confidence}, 2.85, undefined, true);
+      expect(result.selected?.label).toBe("sensor");
+      expect(result.candidates.map(c => c.startRawTime)).toEqual([2.95]);
+      expect(result.audit.find(c => c.label === "reflection")).toMatchObject({eligible:false,selected:false});
+    }
+  });
+  it("keeps standard-pass ordering and fallback availability when no new pixels recovered a cue", () => {
+    const faint = {...lane("faint", .2), confidence:"Low" as const};
+    const strong = lane("strong", .7, 2.95);
+    const result = associateStartLanes([faint,strong], decision([faint,strong]), 2.85);
+    expect(result.selected?.label).toBe("faint");
+    expect(result.candidates.map(c=>c.label)).toEqual(["faint","strong"]);
+  });
+  it("retains faint-only lane evidence without manufacturing a stronger visual vote", () => {
+    const faint = {...lane("faint", .7), confidence:"Low" as const};
+    const result = associateStartLanes([faint], decision([faint]), 2.85);
+    expect(result.candidates).toHaveLength(1);
+    expect(result.candidates[0].confidence).toBe("Low");
+  });
   it("retains lane identity and order when audio demotion moves the clock", () => {
     const records = [lane("left", 0.2), lane("right", 0.7, 2.917)];
     const high = associateStartLanes(records, decision(records, 2.85), 2.85);

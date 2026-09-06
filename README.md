@@ -86,6 +86,7 @@ Private videos are deliberately excluded from Git. See the
 
 ## Documentation
 
+- [Changelog](CHANGELOG.md): release changes and remaining limitations.
 - [Analysis reference](docs/analysis-reference.md): detector behavior, calibration, review tools, saved sessions, and exports.
 - [Benchmark methodology](REAL_VIDEO_BENCHMARK.md): regression observations, label provenance, and known failures.
 - [Demo guide](COLLEGE_DEMO.md): a short walkthrough with results and limitations to discuss.

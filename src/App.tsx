@@ -95,7 +95,7 @@ const INITIAL_TIMESTAMPS: TimestampMarker[] = [
   marker("finishPad", "Finish Pad"),
 ];
 
-const APP_VERSION = "0.28.8";
+const APP_VERSION = "0.28.9";
 const SESSION_STORAGE_KEY = "climbiq.analysisSessions.v1";
 const AttemptComparisonPanel = lazy(() => import("./components/AttemptComparisonPanel"));
 const FinishReviewPanel = lazy(() => import("./components/FinishReviewPanel"));
@@ -1435,9 +1435,10 @@ function App() {
       searchEnd,
       startBodyZone: trustedBodyZone,
       expectedStartTime: audioStart.searchHintTime,
+      allowDetailRetry: true,
       signal,
-      onProgress: (processed, total) => {
-        onStatus(`Scanning lane lights: ${processed}/${total} frames…`);
+      onProgress: (processed, total, detailPass) => {
+        onStatus(`${detailPass ? "Inspecting faint lane lights at higher detail" : "Scanning lane lights"}: ${processed}/${total} frames…`);
       },
     });
     const automaticLaneCandidates = automaticLight.laneCandidates ?? [];
@@ -1544,6 +1545,9 @@ function App() {
       });
     }
     const decision = fuseStartEvidence(evidence);
+    if (automaticLight.detailRecovery?.selected) {
+      decision.reason += ` ${automaticLight.detailRecovery.reason}`;
+    }
     if (!decision.found || decision.rawTime === undefined) {
       return {
         decision,
@@ -1586,7 +1590,7 @@ function App() {
           artifactReason: record.artifactReason,
         }];
       });
-    const laneAssociation = associateStartLanes(laneEvidence, decision, audioStart.searchHintTime, trustedBodyZone);
+    const laneAssociation = associateStartLanes(laneEvidence, decision, audioStart.searchHintTime, trustedBodyZone, automaticLight.detailRecovery?.selected);
     const closestColorRecord = colorRecords.find(record => record.label === laneAssociation.selected?.label);
     const analysisLaneCandidates = laneAssociation.candidates;
     automaticLaneCandidatesRef.current = analysisLaneCandidates;
@@ -1634,6 +1638,7 @@ function App() {
         laneAssociationTime: laneAssociation.associationTime,
         audioSearchHintTime: audioStart.searchHintTime,
         audioConfidence: audioStart.confidence,
+        detailRecovery: automaticLight.detailRecovery,
         selectedCandidateTime: decision.rawTime,
         selectedCandidateReason: decision.reason,
         detectedRawTime: decision.rawTime,

@@ -11,6 +11,27 @@ it("does not average an excluded artifact into an otherwise accepted light clock
 });
 
 describe("start signal fusion", () => {
+  it("keeps a reliable cue cluster from being dragged away by earlier weak reflections", () => {
+    const result = fuseStartEvidence([
+      {kind:"color",rawTime:2.45,confidence:"Low",reason:"edge reflection"},
+      {kind:"color",rawTime:2.65,confidence:"Low",reason:"weak patch"},
+      {kind:"audio",rawTime:2.85,confidence:"Medium",reason:"approximate protocol"},
+      {kind:"color",rawTime:2.967,confidence:"Medium",reason:"refined visual transition"},
+    ]);
+    expect(result.autoAccept).toBe(true);
+    expect(result.rawTime).toBe(2.967);
+  });
+
+  it("does not promote weak reflections plus Medium audio without a reliable visual cue", () => {
+    const result = fuseStartEvidence([
+      {kind:"color",rawTime:2.45,confidence:"Low",reason:"edge reflection"},
+      {kind:"color",rawTime:2.65,confidence:"Low",reason:"weak patch"},
+      {kind:"audio",rawTime:2.85,confidence:"Medium",reason:"approximate protocol"},
+    ]);
+    expect(result.autoAccept).toBe(false);
+    expect(result.rawTime).toBe(2.85);
+  });
+
   it("keeps an artifact cursor inspectable without allowing correlated visual votes to accept it", () => {
     const result = fuseStartEvidence([
       { kind: "color", rawTime: 1, confidence: "High", reason: "first patch", automaticVoteAllowed: false, artifactReason: "Camera cut." },

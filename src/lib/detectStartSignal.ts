@@ -28,6 +28,7 @@ interface DetectStartSignalOptions {
   calibration?: StartLightCalibration;
   fps?: number;
   colorSamplingMode?: "average" | "opponent";
+  requireChromaticDeparture?: boolean;
   signal?: AbortSignal;
 }
 
@@ -60,6 +61,7 @@ export async function detectStartSignal({
   calibration,
   fps = 10,
   colorSamplingMode = "average",
+  requireChromaticDeparture = false,
   signal,
 }: DetectStartSignalOptions): Promise<StartSignalDetectionResult> {
   const threshold = SENSITIVITY_THRESHOLDS[sensitivity];
@@ -153,6 +155,7 @@ export async function detectStartSignal({
       calibration: effectiveCalibration as RequiredCalibration,
       manualReviewOnly: profile === "manual",
       blockedMode: profile === "blocked" || lightVisibility === "blocked",
+      requireChromaticDeparture,
     });
     debug.detectionMethod = "Calibrated light transition";
     debug.topCandidates = calibratedResult.candidates;
@@ -346,6 +349,7 @@ export function findVerifiedGreenDeparture(
   samples: StartSignalDebug["samples"],
   calibration: RequiredCalibration,
   requiredBlueFrames: number,
+  requireChromaticDeparture = false,
 ): VerifiedGreenDeparture | undefined {
   const minAfterAdvantage = Math.max(0.35, calibration.colorDelta * 0.06);
   const blueDistanceLimit = calibration.colorDelta * 0.72;
@@ -376,18 +380,33 @@ export function findVerifiedGreenDeparture(
     calibration.colorDelta * 0.035,
     baselineDistance + Math.max(0.45, baselineDeviation * 4),
   );
+  // A shadow can increase RGB distance for several frames before the real
+  // light changes. Require movement toward blue in chromaticity as well:
+  // combine signed opponent change (rejects additive gray shifts) with its
+  // brightness-normalized counterpart (rejects simple exposure scaling).
+  const opponent = (rgb: RGB) => (rgb.b - rgb.g) / Math.max(1, rgb.r + rgb.g + rgb.b);
+  const beforeOpponent = opponent(calibration.beforeStartRGB);
+  const opponentSpan = opponent(calibration.afterStartRGB) - beforeOpponent;
+  if (requireChromaticDeparture && opponentSpan <= 0) return undefined;
+  const minimumOpponentShift = Math.max(0.006, opponentSpan * 0.035);
+  const rawOpponent = (rgb: RGB) => rgb.b - rgb.g;
+  const minimumRawShift = Math.max(0.75, (rawOpponent(calibration.afterStartRGB) - rawOpponent(calibration.beforeStartRGB)) * 0.035);
+  const hasDeparted = (sample: StartSignalDebug["samples"][number]) =>
+    (sample.distanceToBefore ?? 0) >= departureThreshold &&
+    (!requireChromaticDeparture || (opponent(sample.averageRgb) - beforeOpponent >= minimumOpponentShift &&
+      rawOpponent(sample.averageRgb) - rawOpponent(calibration.beforeStartRGB) >= minimumRawShift));
 
   for (let index = 2; index <= confirmationIndex; index += 1) {
     const previousStable = [samples[index - 2], samples[index - 1]].every((sample) =>
-      (sample.distanceToBefore ?? Infinity) < departureThreshold,
+      !hasDeparted(sample),
     );
-    if (!previousStable || (samples[index].distanceToBefore ?? 0) < departureThreshold) {
+    if (!previousStable || !hasDeparted(samples[index])) {
       continue;
     }
     const lookAheadEnd = Math.min(confirmationIndex + 1, index + 3);
     const departureFrames = samples
       .slice(index, lookAheadEnd)
-      .filter((sample) => (sample.distanceToBefore ?? 0) >= departureThreshold)
+      .filter(hasDeparted)
       .length;
     if (departureFrames >= Math.min(2, lookAheadEnd - index)) {
       return {
@@ -415,6 +434,7 @@ function detectCalibratedTransition({
   calibration,
   manualReviewOnly,
   blockedMode,
+  requireChromaticDeparture,
 }: {
   samples: StartSignalDebug["samples"];
   searchStart: number;
@@ -423,10 +443,11 @@ function detectCalibratedTransition({
   calibration: RequiredCalibration;
   manualReviewOnly: boolean;
   blockedMode: boolean;
+  requireChromaticDeparture: boolean;
 }): { selected?: DetectionCandidate; candidates: DetectionCandidate[]; failureReason?: string } {
   const candidates = new Map<string, DetectionCandidate>();
   const minAfterAdvantage = Math.max(0.35, calibration.colorDelta * 0.06);
-  const verified = findVerifiedGreenDeparture(samples, calibration, requiredFrames);
+  const verified = findVerifiedGreenDeparture(samples, calibration, requiredFrames, requireChromaticDeparture);
   if (verified) {
     const onset = samples[verified.onsetIndex];
     const confirmation = samples[verified.confirmationIndex];

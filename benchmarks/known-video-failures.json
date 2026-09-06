@@ -3,6 +3,16 @@
   "interpretation": "Specific reproduced failure fingerprints, not a complete labeled accuracy dataset. Tolerance identifies the old failure neighborhood, not an event-error bound. Media are private and remain outside Git.",
   "cases": [
     {
+      "id": "weak-window-reflection-is-not-finish",
+      "fileName": "IMG_9076--control-720.mp4",
+      "sha256": "6e353b90d4fbe221bae0c448cf7db7dd42b10a6d43b7073e9ebffacedba0d939",
+      "boundary": "finish",
+      "rejectedRawTime": 31.433,
+      "toleranceSeconds": 0.15,
+      "evidence": "A development candidate recovered the real start light, then used a Low-confidence window-reflection fallback to accept Finish at 31.433 s, long after the climb was complete. Weak patches must not replace stronger verified lane evidence during Finish search.",
+      "isIndependentAccuracyLabel": false
+    },
+    {
       "id": "post-finish-broadcast-tones-are-not-start",
       "fileName": "public-hunt-599-0000-0035.mp4",
       "sha256": "599c77deea0dc06d0fbb5c01709c3f3d195e4f82e63f1d4c6b5868dbaf094d54",

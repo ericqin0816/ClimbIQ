@@ -74,20 +74,22 @@ try {
   await until("Boolean(document.querySelector('input[accept=\"video/*\"]'))", "app load");
   report.version = await evaluate("document.querySelector('main[data-app-version]')?.dataset.appVersion");
 
-  const stages = process.argv.includes("--rerun-only") ? [] : ["start", "finish", "pose"];
+  const stages = process.argv.includes("--rerun-only") ? [] : ["start", "detail", "finish", "pose"];
   for (const stage of stages) {
     console.error(`Testing ${stage} cancellation`);
-    await upload(primary);
+    await upload(stage === "detail" ? replacement : primary);
     await evaluate(`(async () => { const v = document.querySelector('video'); v.pause(); v.currentTime = 2.5;
       if (v.seeking) await new Promise(r => v.addEventListener('seeked', r, { once: true })); })()`);
     const before = await evaluate(stateExpression);
     await evaluate("[...document.querySelectorAll('button')].find(b => b.textContent.includes('Run full analysis')).click()");
     await until("[...document.querySelectorAll('button')].some(b => b.textContent.includes('Analyzing climb') && b.disabled)", "analysis starts");
-    const stagePattern = stage === "start" ? "Finding the start|Reading|Scanning lane" : stage === "finish" ? "finish|return-color" : "Following the climber:";
+    const stagePattern = stage === "start" ? "Finding the start|Reading|Scanning lane"
+      : stage === "detail" ? "Inspecting faint lane lights at higher detail"
+      : stage === "finish" ? "finish|return-color" : "Following the climber:";
     await until(`new RegExp(${JSON.stringify(stagePattern)}, 'i').test(document.querySelector('.quick-analysis-box .status-message')?.textContent ?? '')`, `${stage} phase`, 150000);
 
     // Even a programmatic file change must respect the busy-state guard.
-    await upload(replacement, false);
+    await upload(stage === "detail" ? primary : replacement, false);
     const blocked = await evaluate(stateExpression);
     if (blocked.fileName !== before.fileName || blocked.source !== before.source) throw new Error(`${stage}: replacement was allowed during analysis.`);
     const atCancel = await evaluate(`(() => { const state = ${stateExpression};

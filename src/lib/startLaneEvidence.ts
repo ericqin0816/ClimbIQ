@@ -37,7 +37,7 @@ export function startLaneId(zone: NormalizedZone): string {
  * eligibility vote. A lane still needs a cue supporting the selected event and
  * must pass its artifact check before it can reach movement/finish analysis.
  */
-export function associateStartLanes(records: StartLaneEvidence[], decision: FusedStartDecision, searchHintTime?: number, trustedBodyZone?: NormalizedZone) {
+export function associateStartLanes(records: StartLaneEvidence[], decision: FusedStartDecision, searchHintTime?: number, trustedBodyZone?: NormalizedZone, recoveredVisual = false) {
   const finiteTime = decision.found && Number.isFinite(decision.rawTime) && decision.rawTime! >= 0;
   const inSelectedLane = (record: StartLaneEvidence) => !trustedBodyZone ||
     ((record.zone.x1 + record.zone.x2) / 2 >= trustedBodyZone.x1 - 0.035 &&
@@ -55,17 +55,26 @@ export function associateStartLanes(records: StartLaneEvidence[], decision: Fuse
   const associationTime = hintCompatible ? searchHintTime : visualAnchor;
   const supported = finiteTime && Number.isFinite(associationTime) ? valid.filter(record =>
     labels.has(record.label) || (record.confidence !== "Low" && Math.abs(record.startRawTime - associationTime!) <= 0.35),
-  ).sort((left, right) => Math.abs(left.startRawTime - associationTime!) - Math.abs(right.startRawTime - associationTime!) ||
+  // The detail recovery must prefer the stronger visual evidence it recovered,
+  // not a weak reflection nearest the beep. Standard-pass ordering stays intact.
+  ).sort((left, right) => (recoveredVisual ? Number(left.confidence === "Low") - Number(right.confidence === "Low") : 0) ||
+    Math.abs(left.startRawTime - associationTime!) - Math.abs(right.startRawTime - associationTime!) ||
     right.score - left.score || startLaneId(left.zone).localeCompare(startLaneId(right.zone))) : [];
-  const candidates = deduplicateAnalysisLaneCandidates(supported.map(record => ({ ...record, laneId: startLaneId(record.zone) })));
-  const selected = supported[0];
+  const reliableSupport = supported.filter(record => record.confidence !== "Low");
+  // In a recovered pass, weak reflections are review evidence,
+  // not alternate Finish sensors. A later color reversal cannot retroactively
+  // prove that an uncertain patch belonged to the athlete's start light.
+  const eligible = recoveredVisual && reliableSupport.length ? reliableSupport : supported;
+  const candidates = deduplicateAnalysisLaneCandidates(eligible.map(record => ({ ...record, laneId: startLaneId(record.zone) })));
+  const selected = eligible[0];
   const audit: StartLaneAudit[] = records.filter(validLane).map(record => ({
     laneId: startLaneId(record.zone), label: record.label, zone: record.zone,
     startRawTime: record.startRawTime, confidence: record.confidence,
-    eligible: supported.includes(record), selected: record === selected,
+    eligible: eligible.includes(record), selected: record === selected,
     reason: record.automaticVoteAllowed === false ? record.artifactReason ?? "Excluded start-light artifact."
       : !inSelectedLane(record) ? "Outside the user-selected athlete lane."
-      : supported.includes(record) ? "Visual cue supports the selected start event."
+      : eligible.includes(record) ? "Visual cue supports the selected start event."
+        : supported.includes(record) ? "Weak patch retained for review; stronger visual lane evidence is available."
         : "Visual cue does not support the selected start event.",
   }));
   return { selected, candidates, audit, associationTime };
