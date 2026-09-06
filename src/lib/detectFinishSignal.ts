@@ -16,6 +16,7 @@ import {
 import { resolveFinishSearchWindow } from "./finishSearchWindow";
 import { readDecodedVideoFrameTime } from "./decodedVideoFrame";
 import { finishObservationInterval } from "./timingEvidence";
+import { scanSourceFrames } from "./sourceFrameScan";
 
 export interface FinishColorSample {
   time: number;
@@ -485,6 +486,17 @@ async function sampleFinishColors(
   const targetDirection = hasCalibration(calibration)
     ? Math.sign(opponent(calibration.beforeStartRGB) - opponent(calibration.afterStartRGB)) || 1
     : 1;
+  if (fps === REFINE_FPS) {
+    await scanSourceFrames({video,start,end,fallbackFps:fps,signal,onFrame:async frame=>{
+      const sampled = await sampleZoneOpponentColors(video,frame.cursorTime,zone,targetDirection);
+      appendFinishFrameSample(samples, {time:frame.rawTime,cursorTime:frame.cursorTime,
+        timestampMethod:frame.decoded?"video-frame":"seek-cursor",sourceFrameDurationSeconds:frame.decoded?.durationSeconds,
+        averageRgb:sampled.averageRgb,directionalRgb:sampled.directionalRgb});
+      // Native frame counts need not equal the nominal 30 fps grid.
+      onProgress(samples.length,Math.max(samples.length,times.length));
+    }});
+    return samples;
+  }
   for (let index = 0; index < times.length; index += 1) {
     throwIfCancelled(signal);
     const sampled = await sampleZoneOpponentColors(video, times[index], zone, targetDirection);
@@ -519,6 +531,9 @@ function toResult(
 ): StartSignalDetectionResult {
   const debugSamples: StartSignalDebug["samples"] = analysis.samples.map((sample) => ({
     time: sample.time,
+    cursorTime: sample.cursorTime,
+    timestampMethod: sample.timestampMethod,
+    sourceFrameDurationSeconds: sample.sourceFrameDurationSeconds,
     averageRgb: sample.directionalRgb ?? sample.averageRgb,
     colorDistance: computeColorDistance(sample.directionalRgb ?? sample.averageRgb, calibration.afterStartRGB!),
     distanceToBefore: computeColorDistance(sample.directionalRgb ?? sample.averageRgb, calibration.beforeStartRGB!),

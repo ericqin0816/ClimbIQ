@@ -41,12 +41,13 @@ export function hasUsableVideoMetadata(
     video.videoWidth > 0 && video.videoHeight > 0;
 }
 
-export async function seekTo(video: HTMLVideoElement, time: number): Promise<void> {
+export async function seekTo(video: HTMLVideoElement, time: number, options?: { exact?: boolean }): Promise<void> {
   if (!Number.isFinite(time)) throw new Error("Video seek time must be finite.");
   await waitForMetadata(video);
 
   const clampedTime = clamp(time, 0, Math.max(0, video.duration - 0.001));
-  if (!video.seeking && Math.abs(video.currentTime - clampedTime) < SEEK_EPSILON_SECONDS && video.readyState >= 2) {
+  const epsilon = options?.exact ? 1e-7 : SEEK_EPSILON_SECONDS;
+  if (!video.seeking && Math.abs(video.currentTime - clampedTime) < epsilon && video.readyState >= 2) {
     return;
   }
 

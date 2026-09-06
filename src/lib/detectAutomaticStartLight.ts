@@ -226,6 +226,13 @@ async function detectStartLightPass({
           reason: "The lane passed sustained coarse verification but fine refinement was inconclusive.",
           laneCandidates,
         });
+      if (refined.debug.sourceFrameSamplingFailed) {
+        coarseLaneResult.confidence = "Low";
+        coarseLaneResult.reason = "Source-frame refinement failed. The coarse light remains a review cue, not an automatic clock vote.";
+        coarseLaneResult.debug.sourceFrameSamplingFailed = true;
+        coarseLaneResult.candidates = coarseLaneResult.candidates?.map(candidate=>({...candidate,
+          confidence:"Low",reason:coarseLaneResult.reason}));
+      }
       coarseLaneResult.debug.calibration = refined.debug.calibration ?? lane.calibration;
       refinedPairs.push({ lane, result: coarseLaneResult });
     }

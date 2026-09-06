@@ -29,11 +29,17 @@ npm run benchmark:timing -- --full example.mov
 npm run test:cancellation
 npm run test:finish-review
 npm run test:audio-browser
+npm run test:source-frames
 ```
 
 The cancellation and Finish review suites expect the named private fixtures in
 their scripts. The audio suite generates synthetic signals and needs no private
 recording. `CLIMBIQ_CHROME` can point to a nonstandard Chrome installation.
+The source-frame suite also needs FFmpeg (`CLIMBIQ_FFMPEG`). It generates small
+10/30/60 fps MP4s with known light-event frames, exercises five search phases,
+and runs the actual browser detectors. No private footage is needed. CI runs
+it on Ubuntu 24.04 with Chrome and FFmpeg; its JSON report is printed in the
+workflow log. The generated files remain ignored under `node_modules/`.
 The timing runner uses debugging port 9334 by default; set `CLIMBIQ_E2E_PORT`
 to a different unused port when running another isolated replay concurrently.
 
@@ -62,6 +68,12 @@ node e2e/start-lane-probe.mjs --detail --report=test-results/lanes.json /path/to
 Omit `--detail` for the standard discovery pass. This probe does not accept
 timestamps or produce accuracy labels; the full browser workflow still has to
 pass its artifact, launch, and Finish checks.
+Add `--source-timing` to compare each sampled cursor with its native frame and
+`--finish` to inspect the ordinary lower-light Finish detector for nearby cues.
+The optional `--finish-window=START,END` experiment compares crop scales inside
+an explicitly supplied raw-time window. Its output is research only: neither
+the window nor its proposed timestamps are accepted labels or application
+settings.
 
 For automatic finish-target review diagnostics:
 

@@ -1,7 +1,7 @@
 {
   "name": "climbiq-detection-lab",
   "private": true,
-  "version": "0.28.10",
+  "version": "0.28.11",
   "type": "module",
   "engines": {
     "node": "22.x"
@@ -15,6 +15,7 @@
     "test:cancellation": "node e2e/analysis-cancellation.mjs",
     "test:audio-browser": "node e2e/audio-decoding.mjs",
     "test:finish-review": "node e2e/finish-review.mjs",
+    "test:source-frames": "node e2e/source-frame-refinement.mjs",
     "test:upload": "node e2e/upload-flow.mjs",
     "build": "tsc -b && vite build",
     "check": "npm run typecheck && npm test && npm run build",

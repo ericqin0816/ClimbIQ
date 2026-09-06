@@ -16,6 +16,8 @@ import {
   sampleZoneAverageColor,
   sampleZoneOpponentColor,
 } from "./videoFrameSampler";
+import { scanSourceFrames, type SourceFrameObservation } from "./sourceFrameScan";
+import { lightObservationInterval } from "./timingEvidence";
 
 interface DetectStartSignalOptions {
   video: HTMLVideoElement;
@@ -89,31 +91,43 @@ export async function detectStartSignal({
   }
 
   const times = sampleFramesInRange(searchStart, searchEnd, fps);
+  const sourceRefinement = fps >= 30 && searchEnd-searchStart <= 3 && hasCalibration(calibration) &&
+    profile !== "generic" && profile !== "motion";
   if (times.length < 4) {
     debug.failureReason = "Search window is too short for sustained color detection.";
     return result(false, "Start Signal not detected. Search window is too short.", "None", threshold, debug);
   }
 
   try {
-    for (const time of times) {
+    const appendSample = async (time: number, frame?: SourceFrameObservation) => {
       throwIfCancelled(signal);
       const sample = colorSamplingMode === "opponent"
         ? await sampleZoneOpponentColor(video, time, zone)
         : await sampleZoneAverageColor(video, time, zone);
       throwIfCancelled(signal);
       debug.samples.push({
-        time: sample.time,
+        time: frame?.rawTime ?? sample.time,
+        cursorTime: frame?.cursorTime,
+        timestampMethod: frame ? frame.decoded ? "video-frame" : "seek-cursor" : undefined,
+        sourceFrameDurationSeconds: frame?.decoded?.durationSeconds,
         averageRgb: sample.averageRgb,
         colorDistance: 0,
         greenScore: sample.averageRgb.g - Math.max(sample.averageRgb.r, sample.averageRgb.b),
         blueScore: sample.averageRgb.b - Math.max(sample.averageRgb.r, sample.averageRgb.g),
       });
+    };
+    if (sourceRefinement) {
+      await scanSourceFrames({video,start:searchStart,end:searchEnd,fallbackFps:fps,signal,
+        onFrame:frame=>appendSample(frame.cursorTime,frame)});
+    } else {
+      for (const time of times) await appendSample(time);
     }
   } catch (error) {
-    if (signal?.aborted) {
+    if (signal?.aborted || (error instanceof Error && error.name === "AbortError")) {
       throw error;
     }
     debug.framesSampled = debug.samples.length;
+    debug.sourceFrameSamplingFailed = sourceRefinement;
     debug.failureReason = error instanceof Error ? error.message : "Unknown start signal detection error.";
     return result(false, "Start Signal not detected. Frame sampling failed.", "None", threshold, debug);
   }
@@ -151,16 +165,19 @@ export async function detectStartSignal({
       samples: debug.samples,
       searchStart,
       searchEnd,
-      requiredFrames: profile === "blocked" ? Math.max(1, requiredFrames - 1) : requiredFrames,
+      requiredFrames: Math.max(sourceRefinement ? 2 : 1,
+        profile === "blocked" ? Math.max(1, requiredFrames - 1) : requiredFrames),
       calibration: effectiveCalibration as RequiredCalibration,
       manualReviewOnly: profile === "manual",
       blockedMode: profile === "blocked" || lightVisibility === "blocked",
       requireChromaticDeparture,
+      nominalRefinementFps: sourceRefinement ? fps : undefined,
     });
     debug.detectionMethod = "Calibrated light transition";
     debug.topCandidates = calibratedResult.candidates;
     debug.selectedCandidateTime = calibratedResult.selected?.rawTime;
     debug.selectedCandidateReason = calibratedResult.selected?.reason;
+    debug.blueConfirmationRawTime = calibratedResult.selected?.blueConfirmationRawTime;
 
     if (calibratedResult.selected && profile !== "manual") {
       debug.detectedRawTime = calibratedResult.selected.rawTime;
@@ -350,13 +367,20 @@ export function findVerifiedGreenDeparture(
   calibration: RequiredCalibration,
   requiredBlueFrames: number,
   requireChromaticDeparture = false,
+  minimumBlueDurationSeconds = 0,
 ): VerifiedGreenDeparture | undefined {
   const minAfterAdvantage = Math.max(0.35, calibration.colorDelta * 0.06);
   const blueDistanceLimit = calibration.colorDelta * 0.72;
-  const confirmationIndex = samples.findIndex((sample, index) =>
-    isBlueConfirmation(sample, minAfterAdvantage, blueDistanceLimit) &&
-    countBlueConfirmationFrames(samples, index, minAfterAdvantage, blueDistanceLimit) >= requiredBlueFrames,
-  );
+  const confirmationIndex = samples.findIndex((sample, index) => {
+    if (!isBlueConfirmation(sample,minAfterAdvantage,blueDistanceLimit)) return false;
+    const count = countBlueConfirmationFrames(samples,index,minAfterAdvantage,blueDistanceLimit);
+    if (count<requiredBlueFrames) return false;
+    if (minimumBlueDurationSeconds<=0) return true;
+    const last = samples[index+count-1];
+    const duration = last.timestampMethod === "video-frame" ? last.sourceFrameDurationSeconds : undefined;
+    const coverage = last.time-sample.time + (duration !== undefined && Number.isFinite(duration) && duration>0 ? duration : 0);
+    return coverage+1e-6>=minimumBlueDurationSeconds;
+  });
   if (confirmationIndex < 0) {
     return undefined;
   }
@@ -409,6 +433,14 @@ export function findVerifiedGreenDeparture(
       .filter(hasDeparted)
       .length;
     if (departureFrames >= Math.min(2, lookAheadEnd - index)) {
+      // A short early glitch cannot borrow confirmation from an unrelated later
+      // blue run after the sensor has returned to stable green.
+      let gaps = 0, disconnected = false;
+      for (let next=index;next<=confirmationIndex;next++) {
+        gaps = hasDeparted(samples[next]) ? 0 : gaps+1;
+        if (gaps>1) {disconnected=true;break;}
+      }
+      if (disconnected) continue;
       return {
         onsetIndex: index,
         confirmationIndex,
@@ -435,6 +467,7 @@ function detectCalibratedTransition({
   manualReviewOnly,
   blockedMode,
   requireChromaticDeparture,
+  nominalRefinementFps,
 }: {
   samples: StartSignalDebug["samples"];
   searchStart: number;
@@ -444,10 +477,12 @@ function detectCalibratedTransition({
   manualReviewOnly: boolean;
   blockedMode: boolean;
   requireChromaticDeparture: boolean;
+  nominalRefinementFps?: number;
 }): { selected?: DetectionCandidate; candidates: DetectionCandidate[]; failureReason?: string } {
   const candidates = new Map<string, DetectionCandidate>();
   const minAfterAdvantage = Math.max(0.35, calibration.colorDelta * 0.06);
-  const verified = findVerifiedGreenDeparture(samples, calibration, requiredFrames, requireChromaticDeparture);
+  const verified = findVerifiedGreenDeparture(samples, calibration, requiredFrames, requireChromaticDeparture,
+    nominalRefinementFps ? requiredFrames / nominalRefinementFps : 0);
   if (verified) {
     const onset = samples[verified.onsetIndex];
     const confirmation = samples[verified.confirmationIndex];
@@ -455,6 +490,7 @@ function detectCalibratedTransition({
     const boundaryRisk = isNearEnd(onset.time, searchEnd) || isNearStart(onset.time, searchStart);
     const candidate: DetectionCandidate = {
       rawTime: onset.time,
+      blueConfirmationRawTime: confirmation.time,
       confidence: getCalibratedConfidence({
         colorDelta: calibration.colorDelta,
         afterAdvantage: confirmationAdvantage,
@@ -810,6 +846,7 @@ function result(
   return {
     detected,
     rawTime,
+    observationIntervalSeconds: lightObservationInterval(debug.samples, rawTime),
     confidence,
     reason,
     threshold,

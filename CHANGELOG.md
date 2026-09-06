@@ -3,6 +3,32 @@
 User-facing changes and their limits. Detailed experiments and regression
 observations are recorded in [benchmarks](benchmarks).
 
+## 0.28.11 — 2026-09-06
+
+- Replaced rounded seek grids with bounded native-frame traversal for short
+  calibrated Start refinement and dense Finish refinement. Duplicate frames no
+  longer count as independent observations; source duration drives the next
+  seek when available.
+- Added elapsed blue-state support for high-frame-rate Start refinement and
+  prevented an early glitch from borrowing a later blue confirmation after a
+  return to green.
+- Made camera-cut failures apply across nearby cues in the same fused event.
+  Another colored patch can no longer bypass a failed full-frame scene check.
+- Added a consistency check for three or more native-refined visual Start
+  cues: an isolated blue-confirmation outlier cannot shift the accepted clock
+  or re-enter Finish lane selection. Exact protocol audio retains priority.
+- Preserved source/cursor timing metadata and propagated observation intervals
+  when every clock-defining visual cue has native timing. Audio-defined clocks
+  do not inherit a light's precision.
+- Added encoded 10/30/60 fps video tests, including low-fps glitches and a brief
+  first Finish flash. CI now runs those tests in Chrome using generated media;
+  private recordings are not needed or uploaded.
+
+Native frame timestamps describe the observed pixels, not the physical timing
+system's latency or a measured accuracy guarantee. Missing native metadata has
+an explicit cursor fallback; a native scan that loses timing or exceeds its
+budget cannot be silently treated as verified.
+
 ## 0.28.10 — 2026-09-06
 
 - Added automatic upper-target localization when the ordinary Finish checks

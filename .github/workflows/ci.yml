@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   verify:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - name: Check out repository
@@ -30,3 +30,23 @@ jobs:
 
       - name: Audit production dependency tree
         run: npm audit --omit=dev
+
+      - name: Prepare synthetic video encoder
+        run: |
+          if ! command -v ffmpeg >/dev/null; then
+            sudo apt-get update -qq
+            sudo apt-get install -y --no-install-recommends ffmpeg
+          fi
+          google-chrome --version
+          ffmpeg -version
+
+      - name: Verify encoded source-frame timing in Chrome
+        env:
+          CLIMBIQ_CHROME: /usr/bin/google-chrome
+          CLIMBIQ_FFMPEG: ffmpeg
+        run: |
+          ./node_modules/.bin/vite --host 127.0.0.1 --port 5173 --strictPort >/tmp/climbiq-vite.log 2>&1 &
+          CLIMBIQ_VITE_PID=$!
+          trap 'kill "$CLIMBIQ_VITE_PID" || true' EXIT
+          curl --fail --silent --retry 30 --retry-connrefused --retry-delay 1 http://127.0.0.1:5173/ >/dev/null
+          npm run test:source-frames

@@ -5,7 +5,7 @@ export function sanitizeObservationInterval(value: unknown): number | undefined 
   return typeof value === "number" && Number.isFinite(value) && value >= 0.001 && value <= 2 ? value : undefined;
 }
 
-export function finishObservationInterval(
+export function lightObservationInterval(
   samples: readonly { time: number; timestampMethod?: "video-frame" | "seek-cursor"; sourceFrameDurationSeconds?: number }[],
   selectedRawTime: number | undefined,
 ): number | undefined {
@@ -19,6 +19,9 @@ export function finishObservationInterval(
   const interval = Math.max(duration ?? 0, spacing ?? 0);
   return interval > 0 ? interval : undefined;
 }
+
+// Kept for existing finish callers and external diagnostic probes.
+export const finishObservationInterval = lightObservationInterval;
 
 type TimingMarker = { rawTime: number | null; confidence: Confidence; observationIntervalSeconds?: number };
 

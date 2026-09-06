@@ -42,7 +42,7 @@ import {
   alignStandardSpeedRouteWithFallback,
   type RouteAlignmentResult,
 } from "./lib/routeAlignment";
-import { fuseStartEvidence, type FusedStartDecision, type StartEvidence } from "./lib/startSignalFusion";
+import { fuseStartEvidence, requireContinuousStartScene, type FusedStartDecision, type StartEvidence } from "./lib/startSignalFusion";
 import { associateStartLanes, startLaneId, type AnalysisLaneCandidate, type StartLaneEvidence } from "./lib/startLaneEvidence";
 import { prepareFinishLaneCandidates } from "./lib/finishLaneEvidence";
 import { assessAutomaticStartBodyAudit } from "./lib/startBodyAudit";
@@ -96,7 +96,7 @@ const INITIAL_TIMESTAMPS: TimestampMarker[] = [
   marker("finishPad", "Finish Pad"),
 ];
 
-const APP_VERSION = "0.28.10";
+const APP_VERSION = "0.28.11";
 const SESSION_STORAGE_KEY = "climbiq.analysisSessions.v1";
 const AttemptComparisonPanel = lazy(() => import("./components/AttemptComparisonPanel"));
 const FinishReviewPanel = lazy(() => import("./components/FinishReviewPanel"));
@@ -1228,6 +1228,7 @@ function App() {
                 detectedRawTime: decision.rawTime,
                 offsetApplied: startSignalOffset,
                 note: `Automatically accepted by start detection. ${automaticStart.reason}`,
+                observationIntervalSeconds: automaticStart.observationIntervalSeconds,
               },
             );
             setSuggestedStartRawTime(null);
@@ -1533,6 +1534,8 @@ function App() {
       reason: result.reason,
       label,
       automaticVoteAllowed, artifactReason,
+      observationIntervalSeconds: result.observationIntervalSeconds,
+      blueConfirmationRawTime: result.debug.blueConfirmationRawTime,
     }));
     if (audioStart.found && audioStart.rawTime !== undefined) {
       evidence.push({
@@ -1552,7 +1555,9 @@ function App() {
         label: trustedBodyZone ? "body motion estimate" : "lane-localized body motion estimate",
       });
     }
-    const decision = fuseStartEvidence(evidence);
+    const sceneCutTimes = colorRecords.filter(record=>record.result.debug.sceneContinuity?.continuous===false)
+      .map(record=>record.result.rawTime!);
+    const decision = requireContinuousStartScene(fuseStartEvidence(evidence), sceneCutTimes);
     if (automaticLight.detailRecovery?.selected) {
       decision.reason += ` ${automaticLight.detailRecovery.reason}`;
     }
@@ -1587,6 +1592,7 @@ function App() {
         if (!zone || !candidateCalibration?.beforeStartRGB || !candidateCalibration.afterStartRGB) {
           return [];
         }
+        const timingOutlier = decision.visualTimingOutlierLabels?.includes(record.label) ?? false;
         return [{
           zone,
           calibration: candidateCalibration,
@@ -1594,8 +1600,8 @@ function App() {
           startRawTime: record.result.rawTime!,
           score: record.lane?.score ?? 0,
           confidence: record.result.confidence,
-          automaticVoteAllowed: record.automaticVoteAllowed,
-          artifactReason: record.artifactReason,
+          automaticVoteAllowed: timingOutlier ? false : record.automaticVoteAllowed,
+          artifactReason: timingOutlier ? "This patch's blue confirmation disagreed with the native visual majority; it cannot steer timing or Finish." : record.artifactReason,
         }];
       });
     const laneAssociation = associateStartLanes(laneEvidence, decision, audioStart.searchHintTime, trustedBodyZone, automaticLight.detailRecovery?.selected);
@@ -1627,6 +1633,7 @@ function App() {
       (supportsMotion && motionStart?.detected ? motionStart : buildAudioStartResult(audioStart));
     const automaticStart: StartSignalDetectionResult = {
       ...baseResult,
+      observationIntervalSeconds: decision.observationIntervalSeconds,
       detected: true,
       rawTime: decision.rawTime,
       confidence: decision.confidence,
@@ -1858,6 +1865,7 @@ function App() {
               detectedRawTime: decision.rawTime,
               offsetApplied: startSignalOffset,
               note: `Automatically accepted by Quick Analyze. ${automaticStart.reason}`,
+              observationIntervalSeconds: automaticStart.observationIntervalSeconds,
             },
           );
 

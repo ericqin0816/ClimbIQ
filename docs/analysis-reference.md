@@ -131,6 +131,41 @@ When the user has not drawn a Start Body Zone, Quick Analyze derives the athlete
 
 This does not rely on wrist tracking.
 
+## Source-frame timing refinement
+
+Short calibrated Start refinement and dense lower-light Finish refinement now
+walk source frames using native presentation timestamps and frame duration
+where available. This avoids millisecond-rounded seeks that repeat one decoded
+frame and skip the next. The bounded walker visits at most 512 observations,
+checks cancellation/source identity, skips duplicate native timestamps, and
+refuses a completed native result if metadata disappears or decoding stalls.
+If native timing is unavailable at the start of the scan, the entire pass uses
+an explicitly unverified cursor fallback. Long/generic Start scans and coarse
+discovery retain their existing sampling policy.
+
+Native high-frame-rate Start scans must cover the nominal blue-state duration,
+not merely accumulate the same small frame count faster. An early departure
+cannot borrow a later blue confirmation after the light has returned to stable
+green. A full-frame camera-cut failure applies to nearby Start candidates within
+the existing 0.38-second fusion neighborhood; another patch cannot independently
+certify the launch across that scene discontinuity.
+
+When three or more reliable native-refined visual cues define Start and their
+departure clocks disagree, their blue confirmations are checked for a unique
+majority within a source-cadence-aware window. An isolated outlier is excluded
+only when its departure also differs from every majority cue. Agreeing departure
+clocks are not vetoed by slower blue visibility in differently exposed patches;
+ambiguous disagreements remain review-only. This is an event-consistency
+check, not independent corroboration from multiple clocks. Blue confirmation
+does not replace the departure timestamp. Exact protocol audio bypasses this
+visual-clock vote, preserving its existing priority and lane association.
+
+Per-sample diagnostics preserve cursor time, timestamp method, and source-frame
+duration. A fused visual clock retains an observation interval only when every
+clock-defining visual cue has one, conservatively including their time spread.
+An audio-defined clock never borrows visual precision. None of these intervals
+is an independently measured event-error bound.
+
 ## Automatic Finish Detection
 
 After start acceptance, ClimbIQ reuses that lane-light region. For the supplied timing system, it requires a stable blue climb state, timestamps the first connected faint green-directed change, tolerates one brief blue/dark/occluded frame during the flash sequence, and requires a sustained chromatic green return state for verification. Baseline stability tolerates bounded sensor/exposure noise, but a source-color spike can anchor timing only when the next sample continues toward the verified reversal. Neutral or dark occlusion cannot anchor or confirm a finish, disconnected old flashes are rejected, and the earliest genuinely verified transition wins over later duplicates even when a later duplicate is closer to an optional official-time cross-check. Directional pixel sampling keeps faint green evidence from being hidden by brighter residual blue pixels. The direction is still learned from calibration so reverse-polarity systems remain supported.

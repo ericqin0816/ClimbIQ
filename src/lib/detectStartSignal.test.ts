@@ -16,6 +16,17 @@ const CALIBRATION: RequiredCalibration = {
 };
 
 describe("calibrated green-departure timing", () => {
+  it.each([60,120])("requires the same elapsed blue support at %s fps and disconnects an earlier short glitch", fps => {
+    const colors = Array.from({length:fps*3},(_,i)=>(i>=fps&&i<fps+2)||i>=fps*2?BLUE:GREEN);
+    const samples = makeSamples(colors).map((s,i)=>({...s,time:i/fps,timestampMethod:"video-frame" as const,sourceFrameDurationSeconds:1/fps}));
+    const result = findVerifiedGreenDeparture(samples,CALIBRATION,2,false,2/30);
+    expect(result?.onsetIndex).toBe(fps*2);
+  });
+  it("does not let a stable-green reset connect an older departure to a later blue confirmation",()=>{
+    const fade={r:20,g:175,b:65};
+    const samples=makeSamples([GREEN,GREEN,GREEN,fade,fade,GREEN,GREEN,GREEN,BLUE,BLUE,BLUE]);
+    expect(findVerifiedGreenDeparture(samples,CALIBRATION,2)?.onsetIndex).toBe(8);
+  });
   it("ignores additive gray brightening before a real recovery-pass hue change", () => {
     const brighter = {r:40,g:230,b:44};
     const samples = makeSamples([GREEN,GREEN,GREEN,brighter,brighter,brighter,BLUE,BLUE,BLUE]);

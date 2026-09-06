@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { fuseStartEvidence } from "./startSignalFusion";
+import { fuseStartEvidence, fusedObservationInterval, requireContinuousStartScene, visualConfirmationConsensus, type StartEvidence } from "./startSignalFusion";
 
 it("does not average an excluded artifact into an otherwise accepted light clock", () => {
   const decision = fuseStartEvidence([
@@ -11,6 +11,88 @@ it("does not average an excluded artifact into an otherwise accepted light clock
 });
 
 describe("start signal fusion", () => {
+  it("does not veto agreeing departures because their later blue confirmations differ", () => {
+    const cues = [7.1, 7.3, 7.5].map((blue): StartEvidence => ({
+      kind: "color", rawTime: 7.033333, blueConfirmationRawTime: blue,
+      observationIntervalSeconds: 1 / 30, confidence: "High", reason: "same departure",
+    }));
+    expect(visualConfirmationConsensus(cues)).toEqual({outliers: [], ambiguous: false});
+    expect(fuseStartEvidence(cues).autoAccept).toBe(true);
+  });
+  it("does not exclude a clock near the majority solely for slower blue visibility", () => {
+    const cues = [[9.31,9.45],[9.38,9.48],[9.414,9.7]].map(([rawTime,blue]): StartEvidence => ({
+      kind: "color", rawTime, blueConfirmationRawTime: blue,
+      observationIntervalSeconds: 1 / 30, confidence: "High", reason: "different exposure",
+    }));
+    expect(visualConfirmationConsensus(cues)).toEqual({outliers: [], ambiguous: false});
+    expect(fuseStartEvidence(cues).supportingEvidence).toHaveLength(3);
+  });
+  it("excludes a native-refined temporal outlier instead of averaging it into an agreeing blue transition",()=>{
+    const cue=(label:string,time:number,blue:number,confidence:"High"|"Medium"):StartEvidence=>({label,kind:"color",rawTime:time,
+      blueConfirmationRawTime:blue,observationIntervalSeconds:1/30,confidence,reason:"test"});
+    const early=cue("early",6.7,6.85,"Medium");
+    const a=cue("a",7.066667,7.066667,"High"),b=cue("b",7.066667,7.066667,"High");
+    const result=fuseStartEvidence([early,a,b]);
+    expect(result.autoAccept).toBe(true);
+    expect(result.rawTime).toBe(7.067);
+    expect(result.supportingEvidence).toEqual([a,b]);
+    expect(result.rejectedEvidence).toContain(early);
+    expect(result.visualTimingOutlierLabels).toEqual(["early"]);
+  });
+  it("keeps balanced overlapping visual groups for review instead of picking an arbitrary majority",()=>{
+    const cues=[1,1.08,1.16].map((time):StartEvidence=>({kind:"color",rawTime:time,blueConfirmationRawTime:time,
+      observationIntervalSeconds:1/30,confidence:"High",reason:"test"}));
+    expect(visualConfirmationConsensus(cues).ambiguous).toBe(true);
+    expect(fuseStartEvidence(cues).autoAccept).toBe(false);
+  });
+  it("does not invent native consensus from missing metadata or let it replace an exact audio clock",()=>{
+    const cues=[1,1.01,1.3].map((time):StartEvidence=>({kind:"color",rawTime:time,blueConfirmationRawTime:time,
+      observationIntervalSeconds:1/30,confidence:"High",reason:"test"}));
+    expect(visualConfirmationConsensus(cues.map(c=>({...c,observationIntervalSeconds:undefined})))).toEqual({outliers:[],ambiguous:false});
+    expect(fuseStartEvidence([...cues,{kind:"audio",rawTime:1.02,confidence:"High",reason:"protocol"}]).rawTime).toBe(1.02);
+  });
+  it("does not let another patch bypass a full-frame camera-cut check in the same event",()=>{
+    const decision=fuseStartEvidence([
+      {kind:"color",rawTime:8.8,confidence:"High",reason:"colored banner"},
+      {kind:"audio",rawTime:8.7,confidence:"Medium",reason:"approximate beep"},
+    ]);
+    expect(decision.autoAccept).toBe(true);
+    const checked=requireContinuousStartScene(decision,[9.033333]);
+    expect(checked.autoAccept).toBe(false);
+    expect(checked.rawTime).toBe(decision.rawTime);
+    expect(checked.reason).toContain("camera-cut");
+    expect(decision.autoAccept).toBe(true);
+  });
+  it("keeps an audio clock inspectable but does not certify launch across a nearby cut",()=>{
+    const decision=fuseStartEvidence([{kind:"audio",rawTime:7.8,confidence:"High",reason:"protocol"}]);
+    expect(requireContinuousStartScene(decision,[8]).autoAccept).toBe(false);
+  });
+  it("does not veto an unrelated later cut or malformed cut timestamp",()=>{
+    const decision=fuseStartEvidence([{kind:"color",rawTime:2,confidence:"High",reason:"sensor"}]);
+    expect(requireContinuousStartScene(decision,[4,NaN,-1])).toBe(decision);
+    expect(requireContinuousStartScene(fuseStartEvidence([]),[2]).found).toBe(false);
+  });
+  it("retains native light observation spacing without narrowing it by averaging lanes",()=>{
+    const result=fuseStartEvidence([
+      {kind:"color",rawTime:2,confidence:"High",reason:"lane one",observationIntervalSeconds:.1},
+      {kind:"color",rawTime:2.05,confidence:"High",reason:"lane two",observationIntervalSeconds:.033},
+    ]);
+    expect(result.observationIntervalSeconds).toBeCloseTo(.15,8);
+  });
+  it("never transfers visual precision to an audio-defined clock",()=>{
+    const result=fuseStartEvidence([
+      {kind:"color",rawTime:2,confidence:"High",reason:"lane",observationIntervalSeconds:.033},
+      {kind:"audio",rawTime:2.05,confidence:"High",reason:"exact protocol"},
+    ]);
+    expect(result.rawTime).toBe(2.05);
+    expect(result.observationIntervalSeconds).toBeUndefined();
+  });
+  it("does not invent native precision for missing or invalid timing metadata",()=>{
+    expect(fusedObservationInterval([])).toBeUndefined();
+    for(const interval of [undefined,NaN,-1,4]) expect(fusedObservationInterval([
+      {kind:"color",rawTime:2,confidence:"High",reason:"unknown",observationIntervalSeconds:interval},
+    ])).toBeUndefined();
+  });
   it("keeps a reliable cue cluster from being dragged away by earlier weak reflections", () => {
     const result = fuseStartEvidence([
       {kind:"color",rawTime:2.45,confidence:"Low",reason:"edge reflection"},

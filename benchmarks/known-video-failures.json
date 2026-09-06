@@ -3,6 +3,26 @@
   "interpretation": "Specific reproduced failure fingerprints, not a complete labeled accuracy dataset. Tolerance identifies the old failure neighborhood, not an event-error bound. Media are private and remain outside Git.",
   "cases": [
     {
+      "id": "nearby-cut-cannot-be-bypassed-by-another-start-patch",
+      "fileName": "public-chamonix-attempt-1552.mp4",
+      "sha256": "6fa9c92c070bcdd120548f7397bb81ecc62846df20238e6245c773520a8e9176",
+      "boundary": "start",
+      "rejectedRawTime": 8.8,
+      "toleranceSeconds": 0.12,
+      "evidence": "A native-refinement development candidate accepted a colored patch at 8.800 s although another cue 0.233 s later failed a full-frame camera-cut check. The source frame shows athletes already launching and no timing lamp at the selected patch. Nearby visual cues cannot independently bypass a failed global scene check.",
+      "isIndependentAccuracyLabel": false
+    },
+    {
+      "id": "broadcast-closeup-cut-is-not-an-independent-start-clock",
+      "fileName": "public-chamonix-attempt-1652.mp4",
+      "sha256": "34d3554380da57f120455777a2dc6c80dfe2aae61a89226684be7f711b548afa",
+      "boundary": "start",
+      "rejectedRawTime": 7.8,
+      "toleranceSeconds": 0.12,
+      "evidence": "A native-refinement development candidate accepted a colored area during a tight athlete/LED-banner shot at 7.800 s. A neighboring cue at 8.000 s detected a major camera cut. The pre/post-reframe motion cannot establish a continuous launch from that proposed clock.",
+      "isIndependentAccuracyLabel": false
+    },
+    {
       "id": "weak-window-reflection-is-not-finish",
       "fileName": "IMG_9076--control-720.mp4",
       "sha256": "6e353b90d4fbe221bae0c448cf7db7dd42b10a6d43b7073e9ebffacedba0d939",

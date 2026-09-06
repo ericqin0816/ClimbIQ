@@ -99,6 +99,8 @@ export interface StartSignalDebug {
   topCandidates?: DetectionCandidate[];
   detectedRawTime?: number;
   failureReason?: string;
+  sourceFrameSamplingFailed?: boolean;
+  blueConfirmationRawTime?: number;
   sceneContinuity?: {
     assessable: boolean;
     continuous: boolean;
@@ -107,6 +109,9 @@ export interface StartSignalDebug {
   };
   samples: Array<{
     time: number;
+    cursorTime?: number;
+    timestampMethod?: "video-frame" | "seek-cursor";
+    sourceFrameDurationSeconds?: number;
     averageRgb: RGB;
     colorDistance: number;
     smoothedColorDistance?: number;
@@ -129,6 +134,7 @@ export interface StartLightCalibration {
 
 export interface DetectionCandidate {
   rawTime: number;
+  blueConfirmationRawTime?: number;
   climbTime?: number;
   confidence: Confidence;
   reason: string;
