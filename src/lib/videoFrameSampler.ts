@@ -48,10 +48,11 @@ export async function seekTo(video: HTMLVideoElement, time: number, options?: { 
   const clampedTime = clamp(time, 0, Math.max(0, video.duration - 0.001));
   const epsilon = options?.exact ? 1e-7 : SEEK_EPSILON_SECONDS;
   if (!video.seeking && Math.abs(video.currentTime - clampedTime) < epsilon && video.readyState >= 2) {
+    await waitForDecodedSeek(video);
     return;
   }
 
-  return new Promise((resolve, reject) => {
+  await new Promise<void>((resolve, reject) => {
     let settled = false;
     const timeoutId = window.setTimeout(() => {
       if (!settled) {
@@ -87,6 +88,37 @@ export async function seekTo(video: HTMLVideoElement, time: number, options?: { 
     video.addEventListener("error", onError, { once: true });
     video.currentTime = clampedTime;
   });
+  await waitForDecodedSeek(video);
+}
+
+/** Some decoders dispatch seeked while their previous native frame is still
+ * exposed. Do not calibrate or sample that stale image at the new cursor.
+ * Missing WebCodecs/duration keeps the existing explicit timing fallback.
+ */
+export async function waitForDecodedSeek(video: HTMLVideoElement): Promise<void> {
+  if (typeof globalThis.VideoFrame !== "function" || !video.src) return;
+  const source = video.src, cursor = video.currentTime;
+  const deadline = Date.now() + 200;
+  while (true) {
+    if (video.src !== source || Math.abs(video.currentTime - cursor) > 1e-7) {
+      const error = new Error("Video changed during decoded-frame readiness check.");
+      error.name = "AbortError";
+      throw error;
+    }
+    let frame: VideoFrame;
+    try { frame = new VideoFrame(video); } catch { return; }
+    let ready: boolean;
+    try {
+      const timestamp = frame.timestamp / 1e6;
+      const duration = frame.duration === null ? undefined : frame.duration / 1e6;
+      if (!Number.isFinite(timestamp) || timestamp < 0 || duration === undefined ||
+          !Number.isFinite(duration) || duration <= 0 || duration > 1) return;
+      ready = timestamp <= cursor + 0.0001 && cursor < timestamp + duration + 0.0001;
+    } finally { frame.close(); }
+    if (ready) return;
+    if (Date.now() >= deadline) throw new Error("Decoded video frame did not catch up to the seek cursor.");
+    await new Promise<void>(resolve => setTimeout(resolve, 5));
+  }
 }
 
 export function captureVideoPixels(video: HTMLVideoElement): {
