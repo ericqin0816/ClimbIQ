@@ -49,6 +49,7 @@ jobs:
           CLIMBIQ_VITE_PID=$!
           trap 'kill "$CLIMBIQ_VITE_PID" || true' EXIT
           curl --fail --silent --retry 30 --retry-connrefused --retry-delay 1 http://127.0.0.1:5173/ >/dev/null
+          npm run test:coaching
           # Repetition catches decoder/readback races; a failure stops the step.
           for pass in 1 2 3; do
             npm run test:source-frames

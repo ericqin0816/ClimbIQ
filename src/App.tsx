@@ -96,9 +96,10 @@ const INITIAL_TIMESTAMPS: TimestampMarker[] = [
   marker("finishPad", "Finish Pad"),
 ];
 
-const APP_VERSION = "0.28.13";
+const APP_VERSION = "0.29.0";
 const SESSION_STORAGE_KEY = "climbiq.analysisSessions.v1";
 const AttemptComparisonPanel = lazy(() => import("./components/AttemptComparisonPanel"));
+const CoachingReviewPanel = lazy(() => import("./components/CoachingReviewPanel"));
 const FinishReviewPanel = lazy(() => import("./components/FinishReviewPanel"));
 const Hold10SecondPassPanel = lazy(() => import("./components/Hold10SecondPassPanel"));
 const BiomechanicsPanel = lazy(async () => {
@@ -3457,6 +3458,14 @@ function App() {
           </div>
         </Card>
 
+        {!hasSelectedVideo && new URLSearchParams(location.search).has("coachingReview") && (
+          <Card id="coaching-review" title="Saved coaching review" className="full secondary-card">
+            <Suspense fallback={<p className="muted">Preparing saved review…</p>}>
+              <CoachingReviewPanel getCurrentSession={() => buildSessionSnapshot("current-coaching")} sessions={[]} onJump={jumpTo} disabled />
+            </Suspense>
+          </Card>
+        )}
+
         {hasSelectedVideo && (
           <>
         <section className="run-summary full" aria-live="polite">
@@ -4403,6 +4412,18 @@ function App() {
               onJump={jumpTo}
               runVideoTask={runNamedVideoTask}
               onLocateRoute={locateVisibleRouteHolds}
+            />
+          </Suspense>
+        </Card>
+
+        <Card id="coaching-review" title="Coaching review" className="full secondary-card">
+          <Suspense fallback={<p className="muted">Preparing evidence review…</p>}>
+            <CoachingReviewPanel
+              key={JSON.stringify([videoUrl, activeSessionId, timestamps, zones.startBody, biomechanics.result?.createdAt, biomechanics.calibration, biomechanics.settings, videoAnalysisRunning, savedSessions.map(s => [s.id, s.updatedAt])])}
+              getCurrentSession={() => buildSessionSnapshot(activeSessionId ?? "current-coaching")}
+              sessions={savedSessions}
+              onJump={jumpTo}
+              disabled={videoAnalysisRunning || !metadata?.metadataLoaded}
             />
           </Suspense>
         </Card>

@@ -1,0 +1,17 @@
+.coaching-panel { max-width: 960px; }
+.coaching-controls { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 16px; margin-bottom: 12px; }
+.coaching-panel label { display: grid; gap: 6px; font-size: .9rem; }
+.coaching-panel .coaching-check { display: flex; align-items: flex-start; gap: 9px; margin: 14px 0; line-height: 1.5; }
+.coaching-check input { width: auto; margin-top: 5px; flex-shrink: 0; }
+.coaching-panel select, .coaching-panel input { max-width: 100%; min-width: 0; }
+.coaching-result { margin-top: 24px; border-top: 1px solid #d7dedb; padding-top: 16px; }
+.coaching-mode { font-size: .8rem; font-weight: 700; letter-spacing: .035em; }
+.coaching-result article { padding: 12px 0; }
+.coaching-result h3 { margin: 0; font-size: 1rem; }
+.coaching-result p, .coaching-hosted p { line-height: 1.6; }
+.coaching-result .coaching-focus { padding: 16px; border-left: 3px solid #577b68; background: #f2f6f3; margin: 12px 0 20px; }
+.coaching-result details { font-size: .875rem; }
+.coaching-hosted { margin-top: 22px; padding-top: 16px; border-top: 1px solid #d7dedb; }
+.coaching-hosted > label { margin: 14px 0; }
+.coaching-panel summary { cursor: pointer; }
+@media(max-width: 600px) { .coaching-controls { grid-template-columns: 1fr; } }

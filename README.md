@@ -14,6 +14,11 @@ The video stays on your device. ClimbIQ has no video-upload backend or account
 requirement. It is an experimental analysis tool, not a replacement for a race
 timing system.
 
+The optional [coaching review](docs/coaching.md) starts with an on-device evidence
+summary. NVIDIA NIM can prioritize approved review points when a private server
+workspace is configured. That opt-in sends numeric evidence, never the video;
+hosted AI is disabled by default.
+
 ## Try a recording
 
 1. Open the app and choose a local MOV or MP4 that your browser can decode.

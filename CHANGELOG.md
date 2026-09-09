@@ -3,6 +3,21 @@
 User-facing changes and their limits. Detailed experiments and regression
 observations are recorded in [benchmarks](benchmarks).
 
+## 0.29.0 — 2026-09-08
+
+- Added a local evidence-review panel with accepted timing, frame-reviewed
+  Hold 10 phase gates, optional comparable baseline, and source-video links.
+- Added optional NVIDIA NIM prioritization of approved evidence IDs. Model-written
+  measurements, technique causes, and training prescriptions are never displayed.
+- Hosted review requires explicit consent, server-only credentials, a private
+  workspace access code, durable Redis records and an atomic daily request limit.
+  Repeated requests reuse the saved reservation; archived reviews omit video links.
+- Added policy, provider-adapter, persistence-boundary and responsive-browser tests.
+
+Hosted AI is disabled until configured. Live NIM/Redis operation is not yet
+verified. This does not improve detector accuracy or establish coaching validity.
+See [setup, privacy and limits](docs/coaching.md).
+
 ## 0.28.13 — 2026-09-08
 
 - Hold 10 review now shows a bounded, scrollable source-frame strip covering

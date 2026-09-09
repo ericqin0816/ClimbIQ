@@ -1,7 +1,7 @@
 {
   "name": "climbiq-detection-lab",
   "private": true,
-  "version": "0.28.13",
+  "version": "0.29.0",
   "type": "module",
   "engines": {
     "node": "22.x"
@@ -17,20 +17,25 @@
     "test:finish-review": "node e2e/finish-review.mjs",
     "test:source-frames": "node e2e/source-frame-refinement.mjs",
     "test:upload": "node e2e/upload-flow.mjs",
+    "test:coaching": "node e2e/coaching-review.mjs",
     "build": "tsc -b && vite build",
     "check": "npm run typecheck && npm test && npm run build",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },
   "dependencies": {
+    "@ai-sdk/openai-compatible": "^3.0.45",
     "@mediapipe/tasks-vision": "0.10.35",
     "@vitejs/plugin-react": "^5.1.2",
+    "ai": "^7.0.94",
+    "nanoid": "^6.0.1",
     "react": "^19.2.3",
     "react-dom": "^19.2.3",
     "typescript": "^5.9.3",
     "vite": "7.3.6"
   },
   "devDependencies": {
+    "@types/node": "^22.20.1",
     "@types/react": "^19.2.7",
     "@types/react-dom": "^19.2.3",
     "vitest": "4.1.10"
