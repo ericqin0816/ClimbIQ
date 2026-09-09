@@ -1,8 +1,8 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 import { nanoid } from "nanoid";
-import { buildCoachingCatalog, parseCoachingPacket, validateCoachingPlan } from "../src/lib/coachingPolicy";
-import { generateNimReview } from "./coachingNim";
-import { RedisReviewStore, type ReviewRecord, type ReviewStore } from "./coachingStore";
+import { buildCoachingCatalog, parseCoachingPacket, validateCoachingPlan } from "../src/lib/coachingPolicy.js";
+import { generateNimReview } from "./coachingNim.js";
+import { RedisReviewStore, type ReviewRecord, type ReviewStore } from "./coachingStore.js";
 
 type Env = Record<string, string | undefined>;
 const hash = (value: string) => createHash("sha256").update(value).digest("hex");

@@ -6,6 +6,10 @@ contact acceptance are unchanged. It does not establish coaching efficacy.
 ## Local checks
 
 - Full checks: typecheck (including server/API/Vite config), unit suite and build.
+- A standalone compiled-Node smoke test checks the emitted API with Node's ESM
+  resolver. The first hosted status probe failed despite a successful Vite build;
+  extensionless server imports were reproduced as a Node module-resolution error
+  and replaced with explicit `.js` paths. This runtime check is now part of CI.
 - New tests cover evidence provenance, privacy, comparison floors, strict model
   output selection, disabled configuration, workspace auth, input/origin/size
   checks, reservation-before-inference, save-before-response, deduplication,

@@ -19,7 +19,8 @@
     "test:upload": "node e2e/upload-flow.mjs",
     "test:coaching": "node e2e/coaching-review.mjs",
     "build": "tsc -b && vite build",
-    "check": "npm run typecheck && npm test && npm run build",
+    "check": "npm run typecheck && npm test && npm run build && npm run test:coaching-server",
+    "test:coaching-server": "tsc -p tsconfig.coaching-server.json && node scripts/check-coaching-runtime.mjs",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },

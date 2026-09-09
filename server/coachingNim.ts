@@ -1,6 +1,6 @@
 import { generateText } from "ai";
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
-import { buildCoachingCatalog, validateCoachingPlan, type CoachingPacket } from "../src/lib/coachingPolicy";
+import { buildCoachingCatalog, validateCoachingPlan, type CoachingPacket } from "../src/lib/coachingPolicy.js";
 
 export async function generateNimReview(packet: CoachingPacket, apiKey: string, modelId: string, customFetch?: typeof fetch) {
   const catalog = buildCoachingCatalog(packet);
