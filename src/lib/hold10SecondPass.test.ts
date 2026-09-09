@@ -3,7 +3,7 @@ import type { BiomechanicsResult } from "../types";
 import { buildWallCalibration } from "./wallCalibration";
 import { resolveHold10Target } from "./holdTarget";
 import { getStandardSpeedHold } from "./standardSpeedRoute";
-import { planHold10SecondPass, assessHold10SecondPass } from "./hold10SecondPass";
+import { planHold10SecondPass, assessHold10SecondPass, planHold10EvidenceFrames, type Hold10SecondPassEvidence } from "./hold10SecondPass";
 import { validatePoseTrackingSeed } from "./poseAnalysis";
 import { DEFAULT_BIOMECHANICS_SETTINGS } from "./biomechanics";
 
@@ -12,6 +12,30 @@ const target = resolveHold10Target({ calibration });
 const height = getStandardSpeedHold(10).wall.yMeters;
 
 describe("Hold 10 second-pass planning and evidence", () => {
+  it("shows the earlier disputed estimate and approach without moving the review cursor",()=>{
+    const plan={coarseRawTime:15.921,startRawTime:15.121,endRawTime:16.821,seed:{rawTime:15.121,center:{x:.5,y:.5}}};
+    const evidence={coarseRawTime:15.921,candidateRawTime:15.921,refined:false,kind:"inconclusive",
+      diagnostics:{candidateRawTime:15.405}} as Hold10SecondPassEvidence;
+    const points=planHold10EvidenceFrames(plan,evidence);
+    expect(points).toHaveLength(8); // Nearby context sample is deduplicated against the estimate.
+    expect(points[0].rawTime).toBeLessThan(15.405-.2);
+    expect(points.at(-1)!.rawTime).toBeGreaterThan(15.921+.2);
+    expect(points.find(p=>p.label==="Closer estimate")?.rawTime).toBe(15.405);
+    expect(points.find(p=>p.label==="Broad cursor")?.rawTime).toBe(15.921);
+    expect(evidence.candidateRawTime).toBe(15.921);
+    expect(evidence.refined).toBe(false);
+  });
+  it("bounds, sorts and deduplicates the review plan even without a valid dense estimate",()=>{
+    const plan={coarseRawTime:5,startRawTime:4,endRawTime:6,seed:{rawTime:4,center:{x:.5,y:.5}}};
+    for (const candidateRawTime of [undefined,NaN,Infinity,3,7,5]) {
+      const evidence={coarseRawTime:5,diagnostics:{candidateRawTime}} as Hold10SecondPassEvidence;
+      const points=planHold10EvidenceFrames(plan,evidence);
+      expect(points.length).toBeLessThanOrEqual(9);
+      expect(points.every(p=>p.rawTime>=4&&p.rawTime<=6)).toBe(true);
+      expect(new Set(points.map(p=>p.rawTime)).size).toBe(points.length);
+      expect(points.map(p=>p.rawTime)).toEqual(points.map(p=>p.rawTime).sort((a,b)=>a-b));
+    }
+  });
   it("uses the same seed before and after compact storage removes hips", () => {
     const full = trajectory(5);
     for (const frame of full.frames) frame.landmarks.filter(l => l.index >= 23).forEach(l => { l.x = 0.57; l.y = 0.65; });
@@ -27,6 +51,10 @@ describe("Hold 10 second-pass planning and evidence", () => {
     expect(plan.endRawTime).toBeLessThanOrEqual(broad.endRawTime);
     expect(plan.endRawTime - plan.startRawTime).toBeLessThanOrEqual(2.2);
     expect(plan.seed.rawTime).toBe(plan.startRawTime);
+    expect(plan.previewStartRawTime).toBeGreaterThanOrEqual(broad.startRawTime);
+    expect(plan.previewStartRawTime).toBeCloseTo(plan.startRawTime-.6,5);
+    expect(planHold10EvidenceFrames(plan,{coarseRawTime:plan.coarseRawTime} as Hold10SecondPassEvidence)[0].rawTime)
+      .toBe(plan.previewStartRawTime);
   });
 
   it("does not seed a second pass from an untracked gap", () => {

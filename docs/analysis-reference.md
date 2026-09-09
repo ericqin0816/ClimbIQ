@@ -131,6 +131,25 @@ When the user has not drawn a Start Body Zone, Quick Analyze derives the athlete
 
 This does not rely on wrist tracking.
 
+## Hold 10 and chart presentation
+
+Hold 10's closer scan remains a review aid. Its filmstrip is planned separately
+from the decision to retain or replace the broad review cursor: both in-window
+estimates remain visible, with uniformly spaced context and up to 0.6 seconds
+of extra visual lead-in before the tracking pass. This does not extend pose
+inference or create new contact evidence. Up to nine distinct images use native
+source timestamps where available, with an explicit seek-cursor fallback.
+The fixed crop centers on an observed hold when available. Inconclusive and
+height-only results do not display uncertain hand rings. The strip scrolls on
+desktop and mobile; selecting an image navigates review, never accepts contact.
+
+The wall plot uses the same scale per metre on both axes (3:15 plot proportions).
+The speed plot shades intervals without a continuous usable trace, including
+the untracked tail, and reports time coverage separately from detection
+confidence. Isolated estimates are dots. Chart segments exclude invalid or
+unselected samples without mutating stored coordinates, speeds, or metrics.
+Neither a smoother-looking line nor high time coverage proves spatial accuracy.
+
 ## Source-frame timing refinement
 
 Short calibrated Start refinement and dense lower-light Finish refinement now

@@ -3,6 +3,20 @@
 User-facing changes and their limits. Detailed experiments and regression
 observations are recorded in [benchmarks](benchmarks).
 
+## 0.28.13 — 2026-09-08
+
+- Hold 10 review now shows a bounded, scrollable source-frame strip covering
+  both available estimates and an additional 0.6-second visual lead-in. A
+  disputed earlier estimate no longer disappears behind the retained cursor.
+- Kept the crop centered on the estimated hold and hid hand rings on
+  inconclusive/height-only results. Thumbnail navigation does not accept a split.
+- Corrected the wall chart to equal horizontal/vertical metre scales. Speed
+  charts show unavailable intervals and continuous-trace coverage explicitly,
+  and do not connect invalid/unselected samples or fill gaps with guessed values.
+
+These are review and presentation fixes. Pose coordinates, calculated speeds,
+contact acceptance thresholds, and accepted Start/Finish timing are unchanged.
+
 ## 0.28.12 — 2026-09-06
 
 - Added a bounded native-decoder readiness check after video seeks. A delayed

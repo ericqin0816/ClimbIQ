@@ -48,6 +48,13 @@ Use `--report=test-results/run.json` with the timing runner to retain a local
 report. `--full` includes tracking, saving, reloading, comparison, and review
 checks. Timing-only mode stops before the full pose workflow.
 
+Set `CLIMBIQ_E2E_PRESENTATION_QA=1` when running a full timing replay to check
+the Hold 10 context strip, equal-scale wall geometry, mobile overflow, and
+thumbnail navigation without marker changes. This optional check saves private
+desktop/mobile screenshots only under ignored `test-results/`. It requires a
+recording with usable COM and Hold 10 review evidence, such as the local
+12.24.mov and IMG_9199.MOV references.
+
 For controlled variations of a recorded benchmark fixture:
 
 ```bash

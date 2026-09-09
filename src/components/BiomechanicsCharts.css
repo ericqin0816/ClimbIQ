@@ -1,0 +1,12 @@
+.biomechanics-visual-grid { grid-template-columns: minmax(190px, 0.45fr) minmax(0, 1.55fr); align-items: start; }
+.biomechanics-visual-grid .wall-trajectory-figure svg { height: 520px; max-height: 520px; }
+.biomechanics-visual-grid .chart-quality-note { margin: 10px 0 0; font-size: 0.82rem; line-height: 1.55; color: var(--muted-text); }
+.biomechanics-visual-grid .chart-quality-note strong { color: var(--ink); }
+.speed-missing-interval { fill: #94a3b8; fill-opacity: 0.18; }
+.speed-isolated-sample { fill: #38bdf8; stroke: var(--surface); stroke-width: 1; }
+.biomechanics-visual-grid .trajectory-segment { stroke-width: 4; }
+.biomechanics-visual-grid .speed-line { stroke-width: 2.5; }
+@media(max-width: 760px) {
+  .biomechanics-visual-grid { grid-template-columns: minmax(0, 1fr); }
+  .biomechanics-visual-grid .wall-trajectory-figure svg { height: 440px; max-height: 440px; }
+}

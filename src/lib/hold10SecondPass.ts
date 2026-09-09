@@ -4,12 +4,15 @@ import { detectHoldContact } from "./holdContact";
 import { estimateHold10HeightPassage } from "./hold10HeightEstimate";
 import { analyzePoseVideo, validatePoseTrackingSeed, PoseAnalysisCancelledError } from "./poseAnalysis";
 import { seekTo } from "./videoFrameSampler";
+import { readDecodedVideoFrameTime } from "./decodedVideoFrame";
+import { sourceSampleTime } from "./sourceSampleTiming";
 
 export interface Hold10RefinementPlan {
   coarseRawTime: number;
   coarseHand?: "left" | "right";
   startRawTime: number;
   endRawTime: number;
+  previewStartRawTime?: number;
   seed: { center: NormalizedPoint; rawTime: number };
 }
 
@@ -40,6 +43,25 @@ export interface Hold10EvidenceFrame {
   rawTime: number;
   label: string;
   imageUrl: string;
+  timestampMethod?: "video-frame" | "seek-cursor";
+}
+
+/** Review navigation is independent of whether a denser estimate can replace
+ * the broad cursor. Keep both estimates and context across the entire scan. */
+export function planHold10EvidenceFrames(plan: Hold10RefinementPlan, evidence: Hold10SecondPassEvidence) {
+  const start = plan.previewStartRawTime ?? plan.startRawTime;
+  const end = plan.endRawTime;
+  if (![start,end].every(Number.isFinite) || start < 0 || end <= start) return [];
+  const points: Array<{rawTime: number; label: string}> = [];
+  const add = (rawTime: number | undefined, label: string) => {
+    if (rawTime === undefined || !Number.isFinite(rawTime) || rawTime < start || rawTime > end) return;
+    if (!points.some(point => Math.abs(point.rawTime-rawTime) < 0.001)) points.push({rawTime,label});
+  };
+  add(evidence.diagnostics?.candidateRawTime, "Closer estimate");
+  add(evidence.coarseRawTime, "Broad cursor");
+  for (let index=0; index<7; index++) add(start+(end-start)*index/6,
+    index===0 ? "Approach" : index===6 ? "Follow-through" : "Context");
+  return points.sort((a,b)=>a.rawTime-b.rawTime);
 }
 
 export interface Hold10SecondPassResult {
@@ -71,7 +93,8 @@ export function planHold10SecondPass(
   if (!seed) return undefined;
   const endRawTime = Math.min(duration - 0.001, broad.endRawTime, coarseRawTime + 0.9);
   if (endRawTime - seed.rawTime < 0.4 || endRawTime - seed.rawTime > 2.2) return undefined;
-  return { coarseRawTime, coarseHand: candidate.hand, startRawTime: seed.rawTime, endRawTime, seed };
+  return { coarseRawTime, coarseHand: candidate.hand, startRawTime: seed.rawTime, endRawTime, seed,
+    previewStartRawTime: Math.max(broad.startRawTime, seed.rawTime - 0.6) };
 }
 
 export function assessHold10SecondPass(
@@ -142,8 +165,8 @@ export async function runHold10SecondPass(options: {
 async function captureEvidence(video: HTMLVideoElement, dense: BiomechanicsResult, plan: Hold10RefinementPlan,
   evidence: Hold10SecondPassEvidence, target: Hold10TargetResolution, signal?: AbortSignal): Promise<Hold10EvidenceFrame[]> {
   const nearest = dense.frames.reduce((a, b) => Math.abs(a.rawTime - evidence.candidateRawTime) < Math.abs(b.rawTime - evidence.candidateRawTime) ? a : b);
-  const point = handPoint(nearest, evidence.hand) ?? plan.seed.center;
-  // Use a fixed crop for all three images so the hand's motion is visible.
+  const point = target.source !== "standard-template" ? target.imagePoint : handPoint(nearest, evidence.hand) ?? plan.seed.center;
+  // Anchor the fixed crop on the observed hold, not a possibly misplaced hand.
   const width = Math.min(0.65, 0.35 * video.videoHeight / video.videoWidth);
   const height = 0.35;
   const left = Math.max(0, Math.min(1 - width, point.x - width / 2));
@@ -153,21 +176,28 @@ async function captureEvidence(video: HTMLVideoElement, dense: BiomechanicsResul
   const ctx = canvas.getContext("2d");
   if (!ctx) throw new Error("Could not create Hold 10 evidence previews.");
   const previews: Hold10EvidenceFrame[] = [];
-  for (const [label, offset] of [["Before", -0.13], ["Candidate", 0], ["After", 0.13]] as const) {
+  for (const {label, rawTime: time} of planHold10EvidenceFrames(plan, evidence)) {
     if (signal?.aborted) throw new PoseAnalysisCancelledError();
-    const time = Math.max(plan.startRawTime, Math.min(plan.endRawTime, evidence.candidateRawTime + offset));
-    await seekTo(video, time);
+    await seekTo(video, time, {exact:true});
     if (signal?.aborted) throw new PoseAnalysisCancelledError();
+    const decoded = readDecodedVideoFrameTime(video);
+    const rawTime = decoded?.mediaTime ?? video.currentTime;
+    const duplicate = previews.find(frame => Math.abs(frame.rawTime-rawTime)<0.00001);
+    if (duplicate) {
+      if (label === "Closer estimate" || label === "Broad cursor") duplicate.label = label;
+      continue;
+    }
     ctx.drawImage(video, left * video.videoWidth, top * video.videoHeight, width * video.videoWidth, height * video.videoHeight, 0, 0, canvas.width, canvas.height);
-    const frame = dense.frames.reduce((a, b) => Math.abs(a.rawTime - time) < Math.abs(b.rawTime - time) ? a : b);
-    const hand = Math.abs(frame.rawTime - time) <= 0.05 ? handPoint(frame, evidence.hand) : undefined;
+    const frame = dense.frames.reduce((a, b) => Math.abs(sourceSampleTime(a) - rawTime) < Math.abs(sourceSampleTime(b) - rawTime) ? a : b);
+    const hand = evidence.kind === "contact-candidate" && Math.abs(sourceSampleTime(frame) - rawTime) <= 0.04
+      ? handPoint(frame, evidence.hand) : undefined;
     for (const [mark, color] of [[hand, "#38bdf8"], [target.source !== "standard-template" ? target.imagePoint : undefined, "#facc15"]] as const) {
       if (!mark) continue;
       const x = (mark.x - left) / width * canvas.width;
       const y = (mark.y - top) / height * canvas.height;
       ctx.beginPath(); ctx.arc(x, y, 11, 0, Math.PI * 2); ctx.lineWidth = 3; ctx.strokeStyle = color; ctx.stroke();
     }
-    previews.push({ label, rawTime: video.currentTime, imageUrl: canvas.toDataURL("image/jpeg", 0.82) });
+    previews.push({ label, rawTime, timestampMethod: decoded ? "video-frame" : "seek-cursor", imageUrl: canvas.toDataURL("image/jpeg", 0.82) });
   }
   return previews;
 }

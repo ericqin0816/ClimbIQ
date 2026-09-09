@@ -6,11 +6,13 @@
 .hold10-detection-details summary { cursor: pointer; color: var(--muted-text); }
 .hold10-second-pass-heading { display: flex; justify-content: space-between; gap: 16px; align-items: start; }
 .hold10-second-pass-heading > span { border: 1px solid var(--line); border-radius: 5px; padding: 6px 10px; font-size: 0.78rem; white-space: nowrap; }
-.hold10-evidence-frames { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin: 14px 0; }
+.hold10-evidence-frames { display: grid; grid-auto-flow: column; grid-auto-columns: 190px; gap: 10px; margin: 14px 0; padding-bottom: 10px; overflow-x: auto; scroll-snap-type: x proximity; }
+.hold10-evidence-frames button { scroll-snap-align: start; }
 .hold10-evidence-frames button { display: block; text-align: left; padding: 0; overflow: hidden; min-width: 0; }
 .hold10-evidence-frames img { display: block; width: 100%; aspect-ratio: 1; object-fit: contain; background: #101216; }
-.hold10-evidence-frames span { display: flex; justify-content: space-between; gap: 8px; padding: 10px; font-size: 0.82rem; }
-@media(max-width: 600px) { .hold10-second-pass-heading { flex-direction: column; gap: 8px; } .hold10-evidence-frames { grid-template-columns: 1fr; } }
+.hold10-evidence-frames span { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px 8px; padding: 9px; font-size: 0.78rem; }
+.hold10-filmstrip-explanation { color: var(--muted-text); font-size: 0.85rem; }
+@media(max-width: 600px) { .hold10-second-pass-heading { flex-direction: column; gap: 8px; } .hold10-evidence-frames { grid-auto-columns: 170px; } }
 @media(max-width: 720px) {
   .layout-grid:has(.hold10-second-pass) { grid-template-columns: minmax(0, 1fr); }
   .layout-grid:has(.hold10-second-pass) > * { min-width: 0; }

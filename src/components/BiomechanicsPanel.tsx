@@ -10,8 +10,10 @@ import type {
   VideoMetadata,
   WallCalibration,
 } from "../types";
-import { buildMetricChunks, isTrajectoryFrameExcluded } from "../lib/biomechanics";
+import { isTrajectoryFrameExcluded } from "../lib/biomechanics";
 import { sourceSampleTime } from "../lib/sourceSampleTiming";
+import { chartMetricChunks, describeSpeedTrace, WALL_PLOT, wallPlotX, wallPlotY } from "../lib/biomechanicsPresentation";
+import "./BiomechanicsCharts.css";
 import { analyzePoseVideo, PoseAnalysisCancelledError, type PoseAnalysisProgress } from "../lib/poseAnalysis";
 import { selectBiomechanicsResultCoveringRange } from "../lib/biomechanicsFreshness";
 import {
@@ -925,9 +927,8 @@ function BiomechanicsResultView({
 }
 
 function WallTrajectory({ result, currentTime }: { result: BiomechanicsResult; currentTime: number }) {
-  const usable = result.frames.filter((frame) =>
-    frame.smoothedWallCom && !isTrajectoryFrameExcluded(frame),
-  );
+  const chunks = chartMetricChunks(result.frames);
+  const usable = chunks.flat();
   if (usable.length < 2) {
     return (
       <figure className="wall-trajectory-figure">
@@ -941,22 +942,22 @@ function WallTrajectory({ result, currentTime }: { result: BiomechanicsResult; c
   }
   const current = nearestFrame(usable, currentTime, 0.6 / result.settings.sampleFps);
   const peak = Math.max(1, ...usable.map((frame) => frame.speedMps ?? 0));
-  const segments = buildMetricChunks(result.frames).flatMap(chunk =>
+  const segments = chunks.flatMap(chunk =>
     chunk.slice(1).map((frame, index) => ({ previous: chunk[index], frame })),
   );
 
   return (
     <figure className="wall-trajectory-figure">
-      <figcaption>COM path on the 3 m by 15 m wall</figcaption>
-      <svg viewBox="0 0 300 600" role="img" aria-label="Center of mass path on a three by fifteen metre speed wall">
-        <rect x="1" y="1" width="298" height="598" className="wall-map-background" />
+      <figcaption>Wall-projected COM · 3 m × 15 m</figcaption>
+      <svg viewBox="0 0 180 640" role="img" aria-label="Estimated center of mass on a three by fifteen metre wall, equal scale on both axes">
+        <rect x={WALL_PLOT.left} y={WALL_PLOT.top} width={WALL_PLOT.width} height={WALL_PLOT.height} className="wall-map-background" />
         {[0, 5, 10, 15].map((height) => (
           <g key={height}>
-            <line x1="0" x2="300" y1={wallY(height)} y2={wallY(height)} className="wall-section-line" />
-            <text x="8" y={Math.max(14, wallY(height) - 6)}>{height}m</text>
+            <line x1={wallX(0)} x2={wallX(3)} y1={wallY(height)} y2={wallY(height)} className="wall-section-line" />
+            <text x="3" y={wallY(height)+4}>{height}m</text>
           </g>
         ))}
-        {[1, 2].map((meter) => <line key={meter} x1={meter * 100} x2={meter * 100} y1="0" y2="600" className="wall-grid-line" />)}
+        {[1, 2].map((meter) => <line key={meter} x1={wallX(meter)} x2={wallX(meter)} y1={wallY(15)} y2={wallY(0)} className="wall-grid-line" />)}
         {segments.map(({ previous, frame }) => (
           <line
             key={`${previous.rawTime}-${frame.rawTime}`}
@@ -977,12 +978,14 @@ function WallTrajectory({ result, currentTime }: { result: BiomechanicsResult; c
           />
         )}
       </svg>
+      <p className="chart-quality-note"><strong>Equal scale on both axes.</strong> Gaps are missing or rejected tracking. This is a projection onto the wall, not a measured 3D body path.</p>
     </figure>
   );
 }
 
 function VelocityChart({ result, currentTime }: { result: BiomechanicsResult; currentTime: number }) {
-  const usable = result.frames.filter((frame) => frame.speedMps !== undefined && !isTrajectoryFrameExcluded(frame));
+  const {chunks,gaps,coverage} = describeSpeedTrace(result);
+  const usable = chunks.flat();
   if (usable.length < 2) {
     return (
       <figure className="velocity-chart-figure">
@@ -997,14 +1000,18 @@ function VelocityChart({ result, currentTime }: { result: BiomechanicsResult; cu
   const minTime = result.startRawTime;
   const duration = Math.max(0.001, result.endRawTime - minTime);
   const maxSpeed = Math.max(1, ...usable.map((frame) => frame.speedMps ?? 0));
-  const chunks = buildMetricChunks(result.frames, true);
   const markerX = chartX(clamp(currentTime, result.startRawTime, result.endRawTime), minTime, duration);
 
   return (
     <figure className="velocity-chart-figure">
       <figcaption>COM speed over climb time</figcaption>
-      <svg viewBox="0 0 640 300" role="img" aria-label="Wall-plane center of mass speed in metres per second over climb time">
+      <svg viewBox="0 0 640 300" role="img" aria-label="Estimated wall-plane center of mass speed; shaded intervals have no continuous estimate">
         <rect x="52" y="18" width="568" height="236" className="chart-background" />
+        {gaps.map(gap=><rect key={gap.startRawTime} className="speed-missing-interval"
+          x={chartX(gap.startRawTime,minTime,duration)} y="18"
+          width={chartX(gap.endRawTime,minTime,duration)-chartX(gap.startRawTime,minTime,duration)} height="236">
+          <title>No continuous speed trace: {(gap.startRawTime-minTime).toFixed(2)}–{(gap.endRawTime-minTime).toFixed(2)}s</title>
+        </rect>)}
         {[0, 0.5, 1].map((fraction) => (
           <g key={fraction}>
             <line x1="52" x2="620" y1={254 - fraction * 236} y2={254 - fraction * 236} className="chart-grid-line" />
@@ -1019,10 +1026,15 @@ function VelocityChart({ result, currentTime }: { result: BiomechanicsResult; cu
           />
         ))}
         <line x1={markerX} x2={markerX} y1="18" y2="254" className="chart-current-marker" />
+        {chunks.filter(chunk=>chunk.length===1).map(([frame])=><circle key={frame.rawTime}
+          className="speed-isolated-sample" r="3"
+          cx={chartX(clamp(sourceSampleTime(frame),minTime,result.endRawTime),minTime,duration)}
+          cy={chartY(frame.speedMps!,maxSpeed)}><title>Isolated estimate; no continuous trace</title></circle>)}
         <text x="52" y="282">0.00s</text>
         <text x="560" y="282">{duration.toFixed(2)}s</text>
         <text x="6" y="14">m/s</text>
       </svg>
+      <p className="chart-quality-note"><strong>Continuous speed trace: {Math.round(coverage*100)}% of the timed run.</strong> Shaded intervals have no continuous estimate; isolated samples are dots. Values are not filled across gaps. Pose jitter can affect peaks—each spike is not necessarily a real acceleration.</p>
     </figure>
   );
 }
@@ -1151,11 +1163,11 @@ function nearestFrame(frames: BiomechanicsFrame[], time: number, tolerance: numb
 }
 
 function wallX(xMeters: number): number {
-  return clamp(xMeters / 3, -0.12, 1.12) * 300;
+  return wallPlotX(xMeters);
 }
 
 function wallY(yMeters: number): number {
-  return 600 - clamp(yMeters / 15, -0.05, 1.05) * 600;
+  return wallPlotY(yMeters);
 }
 
 function chartX(time: number, start: number, duration: number): number {

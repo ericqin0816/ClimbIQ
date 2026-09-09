@@ -4,6 +4,7 @@ import { spawn } from "node:child_process";
 import { tmpdir } from "node:os";
 import { createProtocolClient } from "./cdp-client.mjs";
 import { closeTestBrowser } from "./browser-lifecycle.mjs";
+import { verifyReviewPresentation } from "./review-presentation.mjs";
 import { createReadStream } from "node:fs";
 import { createHash } from "node:crypto";
 import { analysisFailureFromOutcome, evaluateKnownVideoFailure } from "../scripts/lib/known-video-failures.mjs";
@@ -275,6 +276,9 @@ async function verifySavedWorkflow({ evaluate, send }) {
     const marker = [...document.querySelectorAll('tbody tr')].find(r => r.firstElementChild?.textContent.trim() === 'Hold 10');
     const images = [...document.querySelectorAll('.hold10-evidence-frames img')];
     return { available: Boolean(panel), text: panel?.innerText ?? '', previewCount: images.length,
+      previewTimes: [...document.querySelectorAll('.hold10-evidence-frames button')].map(b=>Number(b.dataset.rawTime)),
+      coarseRawTime: panel?.dataset.coarseTime ? Number(panel.dataset.coarseTime) : null,
+      denseRawTime: panel?.dataset.denseTime ? Number(panel.dataset.denseTime) : null,
       targetSource: panel?.dataset.targetSource, kind: panel?.dataset.evidenceKind,
       previewsLoaded: images.length > 0 && images.every(i => i.complete && i.naturalWidth > 0),
       acceptedHold10: marker?.querySelectorAll('td')[1]?.textContent.trim() ?? 'Not set' };
@@ -285,6 +289,8 @@ async function verifySavedWorkflow({ evaluate, send }) {
     const button = [...document.querySelectorAll('button')].find(b => b.textContent.trim() === 'Save Session');
     return Boolean(button && button.getClientRects().length && !button.disabled);
   })()`, 20000, "visible Save Session and released video tasks");
+  const presentation = process.env.CLIMBIQ_E2E_PRESENTATION_QA === "1" && secondPass.available
+    ? await verifyReviewPresentation({evaluate,send}) : undefined;
   await evaluate(`(() => {
     const button = [...document.querySelectorAll('button')].find(b => b.textContent.trim() === 'Save Session');
     if (!button || !button.getClientRects().length || button.disabled) throw new Error('Save Session is not visibly available.');
@@ -376,7 +382,7 @@ async function verifySavedWorkflow({ evaluate, send }) {
     const afterCancel = await evaluate(`document.querySelector('video').currentTime`);
     if (Math.abs(afterCancel - priorTime) > 0.01) throw new Error("Second-pass cancellation did not restore the video position.");
     await evaluate(`([...document.querySelectorAll('button')].find(b => b.textContent.trim() === 'Inspect Hold 10 more closely')).click()`);
-    await waitUntil(evaluate, `document.querySelectorAll('.hold10-evidence-frames img').length === 3 && ![...document.querySelectorAll('button')].some(b => b.textContent.trim() === 'Cancel closer scan')`, 60000, "second-pass retry evidence");
+    await waitUntil(evaluate, `document.querySelectorAll('.hold10-evidence-frames img').length >= 5 && document.querySelectorAll('.hold10-evidence-frames img').length <= 9 && ![...document.querySelectorAll('button')].some(b => b.textContent.trim() === 'Cancel closer scan')`, 60000, "second-pass retry evidence");
     const hold10AfterRetry = await evaluate(`([...document.querySelectorAll('tbody tr')].find(r => r.firstElementChild?.textContent.trim() === 'Hold 10'))?.querySelectorAll('td')[1]?.textContent.trim()`);
     if (hold10AfterRetry !== 'Not set') throw new Error("Second-pass retry accepted an unreviewed Hold 10 marker.");
     const retryTargetSource = await evaluate(`document.querySelector('.hold10-second-pass')?.dataset.targetSource`);
@@ -387,6 +393,7 @@ async function verifySavedWorkflow({ evaluate, send }) {
     manualReviewWorkflow = await verifyHold10Review({ evaluate, send }, saved);
   }
   return { savedAndReloaded: true, identicalComparisonPassed: hasFinish,
+    presentation,
     observationIntervals,
     secondPass,
     secondPassRetryPassed,
@@ -590,8 +597,18 @@ function validateOutcome(outcome, expected, baselineStatus = "unbaselined") {
   }
   if (outcome.workflow && expected.hold10?.fullWorkflowRequiresSecondPass) {
     const evidence = outcome.workflow.secondPass;
-    if (!evidence?.available || evidence.previewCount !== 3 || !evidence.previewsLoaded) {
-      errors.push("Full workflow did not produce three loaded Hold 10 second-pass previews.");
+    if (!evidence?.available || evidence.previewCount < 5 || evidence.previewCount > 9 || !evidence.previewsLoaded) {
+      errors.push("Full workflow did not produce a loaded, bounded Hold 10 context filmstrip.");
+    }
+    if (evidence?.previewsLoaded) {
+      const times=evidence.previewTimes ?? [];
+      if (new Set(times).size!==times.length || times.some((t,i)=>!Number.isFinite(t)||(i>0&&t<=times[i-1])))
+        errors.push("Hold 10 filmstrip repeats frames or has unordered timestamps.");
+      const candidates=[evidence.coarseRawTime,evidence.denseRawTime].filter(t=>typeof t==='number'&&Number.isFinite(t));
+      if (candidates.length && (!times.length || times[0]>=Math.min(...candidates)-.1 || times.at(-1)<=Math.max(...candidates)+.1))
+        errors.push("Hold 10 filmstrip omitted approach/follow-through around its available estimates.");
+      if (candidates.some(candidate=>!times.some(time=>Math.abs(time-candidate)<.06)))
+        errors.push("Hold 10 filmstrip omitted a frame near a displayed estimate.");
     }
     if (evidence?.acceptedHold10 !== 'Not set') errors.push("Second-pass evidence incorrectly accepted Hold 10 without frame review.");
     if (expected.hold10.fullWorkflowRequiresRegisteredHold && evidence?.targetSource !== 'visual-alignment') {
