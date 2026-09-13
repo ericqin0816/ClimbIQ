@@ -67,6 +67,9 @@ describe("private NIM review boundary", () => {
     const s = setup(); s.generate.mockRejectedValue(new Error("test-provider-key"));
     const response = await s.handler(request()); expect(response.status).toBe(502);
     expect(await response.text()).not.toContain("test-provider-key"); expect([...s.records.values()][0].status).toBe("failed");
+    const reopened = await s.handler(request());
+    expect(await reopened.json()).toMatchObject({ status: "failed", error: expect.stringContaining("No AI review was generated") });
+    expect(s.generate).toHaveBeenCalledTimes(1);
   });
   it("supports authenticated saved readback without a GET Origin header", async () => {
     const s = setup(); const result = await (await s.handler(request())).json();

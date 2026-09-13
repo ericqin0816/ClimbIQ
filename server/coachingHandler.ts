@@ -23,7 +23,8 @@ const json = (body: unknown, status = 200) => Response.json(body, { status, head
 function publicRecord(record: ReviewRecord) {
   const packet = parseCoachingPacket(record.packet);
   return { id: record.id, status: record.status, createdAt: record.createdAt, model: record.model, packet,
-    plan: record.status === "complete" ? validateCoachingPlan(record.plan, buildCoachingCatalog(packet)) : null };
+    plan: record.status === "complete" ? validateCoachingPlan(record.plan, buildCoachingCatalog(packet)) : null,
+    ...(record.status === "failed" ? { error: "This saved AI request failed. No AI review was generated. Reopening it does not start another generation; the local review below remains available." } : {}) };
 }
 async function boundedBody(request: Request) {
   const reader = request.body?.getReader();

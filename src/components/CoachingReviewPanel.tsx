@@ -111,6 +111,7 @@ export default function CoachingReviewPanel({ getCurrentSession, sessions, onJum
         <label className="coaching-check"><input type="checkbox" checked={consent} onChange={e => setConsent(e.target.checked)} />Send this numeric evidence to NVIDIA and save the review on the server. No video, file names, names, or notes are sent. Records remain until the workspace owner deletes them.</label>
       </>}
       <button className="primary" disabled={!enabled || connection !== "ready" || disabled || busy || ai || !evidence || !consent || (!localAccess && !accessCode)} onClick={() => void hostedReview()}>{busy ? "Getting AI review…" : "Get AI review"}</button>
+      <p role="status" aria-live="polite">{message}</p>
       {enabled && !evidence && <p>Choose Review my run above to prepare the measurements for AI.</p>}
       {enabled && evidence && !consent && <p>Check the sharing consent box to enable Get AI review.</p>}
       {enabled && <details><summary>Open a saved AI review</summary>
@@ -140,6 +141,5 @@ export default function CoachingReviewPanel({ getCurrentSession, sessions, onJum
       {focus && <article className="coaching-focus"><h3>Next focus: {focus.title}</h3><p>{focus.text}</p><div className="button-row">{focus.evidenceIds.map(links)}</div></article>}
       <details open><summary>Limits of this review</summary>{evidence.catalog.limitations.map(l => <p key={l.id}><strong>{l.title}.</strong> {l.text}</p>)}</details>
     </section>}
-    <p role="status" aria-live="polite">{message}</p>
   </div>;
 }
