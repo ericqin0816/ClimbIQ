@@ -74,7 +74,7 @@ No database, paid plan, NVIDIA account, or credentials are provisioned by this
 change. Restart the dev server or redeploy after configuring variables. A status
 response with `enabled: true` means configuration is present, not that credentials
 or provider availability have been validated. Test one authorized review before
-sharing access. NIM calls have a 20-second timeout, 700 output-token cap and no
+sharing access. NIM calls have a 40-second timeout, 700 output-token cap and no
 automatic SDK retry. The daily count is not a monetary spending guarantee; also
 configure provider-side limits where available. Cost is recorded as unknown
 (`null`) because no verified account-specific price is configured.

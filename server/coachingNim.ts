@@ -13,7 +13,7 @@ export async function generateNimReview(packet: CoachingPacket, apiKey: string, 
     } : {}),
     instructions: "Select review priorities from the supplied catalog. Return ONLY JSON with observationIds (up to three distinct approved observation IDs) and focusId (one approved focus ID). Select at least one observation when available. Do not add prose, measurements, diagnoses, causes, training prescriptions, or other keys. Required limitations are always displayed separately.",
     prompt: JSON.stringify({ goal: packet.goal, observations: catalog.observations, focuses: catalog.focuses }),
-    maxOutputTokens: 700, maxRetries: 0, abortSignal: AbortSignal.timeout(20_000),
+    maxOutputTokens: 700, maxRetries: 0, abortSignal: AbortSignal.timeout(40_000),
   });
   let plan = null;
   try { plan = validateCoachingPlan(JSON.parse(result.text), catalog); } catch { /* Persist rejected output, never display it. */ }
