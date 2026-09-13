@@ -15,6 +15,22 @@ video without accepting or changing markers. Changing analysis evidence resets
 the review. Small differences within the existing comparison policy are not
 presented as improvements; that policy is not an independently measured error bound.
 
+### Sections to review
+
+The local review links to the entry and exit of sections worth inspecting. A
+single run can highlight its longest estimated wall third only when all three
+thirds pass the existing tracking, calibration and timing checks and their
+duration spread exceeds the conservative comparison threshold. The launch,
+finish and different movements naturally take different amounts of time; a
+longer section is not proof of a technique mistake.
+
+With a user-confirmed comparable baseline, the panel shows section time changes
+above the existing comparison thresholds. It prefers two frame-reviewed Hold 10
+phases; otherwise it uses reliable matching wall thirds. It never adds changes
+from overlapping partitions. Links refer only to the current video's clock.
+These findings and video cursors stay local and are labeled separately from NIM's
+prioritization. Archived numeric AI reviews cannot restore these video links.
+
 ## What NIM adds
 
 NVIDIA NIM selects up to three observations and one next review focus from an

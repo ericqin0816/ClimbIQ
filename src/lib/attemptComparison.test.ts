@@ -3,8 +3,29 @@ import type { Confidence, SavedAnalysisSession, TimestampMarker } from "../types
 import { compareAttempts, hasComparableTiming, summarizeAttempt } from "./attemptComparison";
 import { compactBiomechanicsSession, sanitizeBiomechanicsSession } from "./biomechanicsSession";
 import { sanitizeTimestampSequence } from "./timestampIntegrity";
+import { buildSectionReview } from "./coachingSections";
 
 describe("attempt comparison", () => {
+  it("links the longest reliable wall third and withholds stale or interrupted tracking", () => {
+    const s = withRouteTracking(makeSession("sections", { start: 2, finish: 6 }), 2, 6);
+    const result = s.biomechanics!.result!;
+    const template = result.frames[0];
+    result.frames = Array.from({ length: 41 }, (_, i) => {
+      const t = i / 10;
+      const yMeters = t <= 1 ? t * 5 : t <= 3 ? 5 + (t - 1) * 2.5 : 10 + (t - 3) * 5;
+      return { ...template, rawTime: 2 + t, climbTime: t, smoothedWallCom: { xMeters: 1.5, yMeters } };
+    });
+    expect(buildSectionReview(s).items).toMatchObject([{ id: "middle-third", seconds: 2, startRawTime: 3, endRawTime: 5 }]);
+    const stale = structuredClone(s); stale.timestamps.find(m => m.id === "startSignal")!.rawTime = 2.1;
+    expect(buildSectionReview(stale).items).toHaveLength(0);
+    const low = structuredClone(s); low.biomechanics!.calibration!.confidence = "Low";
+    expect(buildSectionReview(low).items).toHaveLength(0);
+    result.frames = result.frames.filter(f => f.rawTime < 2.7 || f.rawTime > 3.3);
+    expect(buildSectionReview(s).items).toHaveLength(0);
+  });
+  it("does not flag evenly timed wall thirds", () => {
+    expect(buildSectionReview(withRouteTracking(makeSession("even", { start: 2, finish: 5 }), 2, 5)).items).toHaveLength(0);
+  });
   it("does not call a 150 ms difference a gain when finish observations were 200 ms apart", () => {
     const baseline=makeSession("baseline",{start:1,finish:11});
     const candidate=makeSession("candidate",{start:1,finish:10.85});

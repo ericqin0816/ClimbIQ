@@ -2,6 +2,7 @@ import type {SavedAnalysisSession, TimestampMarker} from "../types";
 import {summarizeAttempt} from "./attemptComparison";
 import {sanitizeTimestampSequence} from "./timestampIntegrity";
 import {describeSpeedTrace} from "./biomechanicsPresentation";
+import {buildSectionReview} from "./coachingSections";
 import {buildCoachingCatalog, type CoachingGoal, type CoachingPacket, type CoachingRunFacts} from "./coachingPolicy";
 
 export interface CoachingEvidenceLink {label:string; rawTime:number}
@@ -38,6 +39,6 @@ export function buildCoachingEvidence(current:SavedAnalysisSession,goal:Coaching
     "total-change":[...start,...finish],"no-change":[...start,...finish],"bottom-change":[...start,...hold],"top-change":[...hold,...finish],
     "timing-review":[...start,...finish],"hold10-review":[],tracking:[],
   };
-  return {packet,catalog:buildCoachingCatalog(packet),links,currentName:current.name,baselineName:baseline?.name};
+  return {packet,catalog:buildCoachingCatalog(packet),links,currentName:current.name,baselineName:baseline?.name,sectionReview:buildSectionReview(current,baseline)};
 }
 export type CoachingEvidence = ReturnType<typeof buildCoachingEvidence>;

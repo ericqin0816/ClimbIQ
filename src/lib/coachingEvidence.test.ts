@@ -10,6 +10,29 @@ function session(): SavedAnalysisSession {
   };
 }
 describe("coaching session adapter", () => {
+  it("links reviewed phase differences in the current video's clock and keeps them local", () => {
+    const baseline = session(); baseline.id = "baseline";
+    const current = session();
+    for (const s of [baseline, current]) s.timestamps.find(m => m.id === "hold10")!.acceptanceMode = "frame-review";
+    current.timestamps.find(m => m.id === "hold10")!.rawTime = 16.9;
+    const review = buildCoachingEvidence(current, "overview", baseline);
+    expect(review.sectionReview.items).toMatchObject([
+      { id: "bottom-phase", deltaSeconds: 1, startRawTime: 9.4, endRawTime: 16.9 },
+      { id: "top-phase", deltaSeconds: -1, startRawTime: 16.9, endRawTime: 21.655 },
+    ]);
+    expect(JSON.stringify(review.packet)).not.toMatch(/sectionReview|rawTime|PRIVATE/);
+    baseline.timestamps.find(m => m.id === "hold10")!.acceptanceMode = undefined;
+    expect(buildCoachingEvidence(current, "overview", baseline).sectionReview.items).toHaveLength(0);
+  });
+  it("does not flag phase changes inside the threshold or from low-confidence endpoints", () => {
+    const baseline = session(), current = session();
+    for (const s of [baseline, current]) s.timestamps.find(m => m.id === "hold10")!.acceptanceMode = "frame-review";
+    current.timestamps.find(m => m.id === "hold10")!.rawTime! += .05;
+    expect(buildCoachingEvidence(current, "overview", baseline).sectionReview.items).toHaveLength(0);
+    current.timestamps.find(m => m.id === "hold10")!.rawTime! += 1;
+    current.timestamps.find(m => m.id === "finishPad")!.confidence = "Low";
+    expect(buildCoachingEvidence(current, "overview", baseline).sectionReview.items).toHaveLength(0);
+  });
   it("uses accepted timing, not the user-entered official total", () => {
     expect(coachingRunFacts(session()).totalSeconds).toBeCloseTo(12.255);
   });

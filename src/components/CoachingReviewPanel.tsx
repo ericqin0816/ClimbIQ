@@ -61,7 +61,7 @@ export default function CoachingReviewPanel({ getCurrentSession, sessions, onJum
       const selected = validateCoachingPlan(data.plan, catalog);
       if (!loadSaved && JSON.stringify(packet) !== JSON.stringify(evidence!.packet)) throw new Error("The response does not match this analysis.");
       // Archived records cannot prove which local video is loaded: never attach seek links.
-      if (loadSaved) setEvidence({ packet, catalog, links: {}, currentName: "Saved numeric review", baselineName: undefined });
+      if (loadSaved) setEvidence({ packet, catalog, links: {}, currentName: "Saved numeric review", baselineName: undefined, sectionReview: { items: [], note: "Load the original analysis to inspect video sections." } });
       setPlan(selected); setAi(true);
       setMessage(loadSaved ? "Saved AI review loaded. Video links are withheld because this record does not identify your local video." : "NIM selected these points from the approved evidence. No model-written measurements or technique claims are shown.");
     } catch (error) {
@@ -88,6 +88,20 @@ export default function CoachingReviewPanel({ getCurrentSession, sessions, onJum
     {evidence && plan && <section className="coaching-result" aria-label="Evidence review">
       <p className="coaching-mode">{ai ? "AI-prioritized review · NVIDIA NIM" : "Local evidence review · not AI"}</p>
       <p className="muted">{evidence.currentName}{evidence.baselineName ? ` compared with ${evidence.baselineName}` : " · single-run review"}</p>
+      <section aria-label="Sections to review">
+        <h3>Sections to review</h3>
+        <p className="muted">From local measurements · not AI technique analysis</p>
+        {evidence.sectionReview.items.map(section => <article key={section.id}>
+          <h4>{section.label}</h4>
+          <p>{section.seconds.toFixed(3)}s{section.baselineSeconds !== undefined ? ` · baseline ${section.baselineSeconds.toFixed(3)}s` : ""} · {section.evidence}</p>
+          <p>{section.text}</p>
+          <div className="button-row">
+            <button disabled={disabled} onClick={() => onJump(section.startRawTime)}>View {section.label} entry</button>
+            <button disabled={disabled} onClick={() => onJump(section.endRawTime)}>View {section.label} exit</button>
+          </div>
+        </article>)}
+        <p>{evidence.sectionReview.note}</p>
+      </section>
       {visible.map(o => <article key={o.id}><h3>{o.title}</h3><p>{o.text}</p><div className="button-row">{links(o.id)}</div></article>)}
       {focus && <article className="coaching-focus"><h3>Next focus: {focus.title}</h3><p>{focus.text}</p><div className="button-row">{focus.evidenceIds.map(links)}</div></article>}
       <details open><summary>Limits of this review</summary>{evidence.catalog.limitations.map(l => <p key={l.id}><strong>{l.title}.</strong> {l.text}</p>)}</details>
