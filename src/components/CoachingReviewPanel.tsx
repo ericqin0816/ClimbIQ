@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { SavedAnalysisSession } from "../types";
 import { buildCoachingEvidence, type CoachingEvidence } from "../lib/coachingEvidence";
 import { buildCoachingCatalog, parseCoachingPacket, validateCoachingPlan, type CoachingGoal, type CoachingPlan } from "../lib/coachingPolicy";
@@ -15,6 +15,7 @@ export default function CoachingReviewPanel({ getCurrentSession, sessions, onJum
   const [plan, setPlan] = useState<CoachingPlan | null>(null);
   const [enabled, setEnabled] = useState(false);
   const [localAccess, setLocalAccess] = useState(false);
+  const [connection, setConnection] = useState<"checking" | "ready" | "error">("checking");
   const [consent, setConsent] = useState(false);
   const [accessCode, setAccessCode] = useState("");
   const [message, setMessage] = useState("");
@@ -23,12 +24,28 @@ export default function CoachingReviewPanel({ getCurrentSession, sessions, onJum
   const [reviewId, setReviewId] = useState(() => new URLSearchParams(location.search).get("coachingReview") ?? "");
   const request = useRef<AbortController | null>(null);
   const requestId = useRef("");
-  useEffect(() => {
+  const connectionRequest = useRef<AbortController | null>(null);
+  const checkConnection = useCallback(async () => {
+    connectionRequest.current?.abort();
     const controller = new AbortController();
-    fetch("/api/coaching?status=1", { signal: controller.signal }).then(r => r.ok ? r.json() : null)
-      .then(data => { setEnabled(data?.enabled === true); setLocalAccess(data?.localAccess === true); }).catch(() => {});
-    return () => { controller.abort(); request.current?.abort(); };
+    connectionRequest.current = controller; setConnection("checking");
+    try {
+      const response = await fetch("/api/coaching?status=1", { cache: "no-store", signal: AbortSignal.any([controller.signal, AbortSignal.timeout(8000)]) });
+      if (!response.ok) throw new Error();
+      const data = await response.json();
+      if (typeof data?.enabled !== "boolean") throw new Error();
+      if (controller.signal.aborted) return;
+      setEnabled(data.enabled); setLocalAccess(data.enabled && data.localAccess === true); setConnection("ready");
+    } catch {
+      if (!controller.signal.aborted) { setEnabled(false); setLocalAccess(false); setConnection("error"); }
+    }
   }, []);
+  useEffect(() => {
+    void checkConnection();
+    const refresh = () => { void checkConnection(); };
+    window.addEventListener("focus", refresh);
+    return () => { connectionRequest.current?.abort(); request.current?.abort(); window.removeEventListener("focus", refresh); };
+  }, [checkConnection]);
   function invalidate() {
     request.current?.abort(); setBusy(false); setEvidence(null); setPlan(null); setAi(false); setMessage(""); requestId.current = "";
   }
@@ -85,6 +102,23 @@ export default function CoachingReviewPanel({ getCurrentSession, sessions, onJum
     </div>
     {baselineId && <label className="coaching-check"><input type="checkbox" checked={comparable} onChange={e => { invalidate(); setComparable(e.target.checked); }} />Same climber and comparable recording setup</label>}
     <button className="primary" disabled={disabled || (!!baselineId && !comparable)} onClick={localReview}>Review my run</button>
+    <section className="coaching-hosted" aria-label="AI review">
+      <h3>AI review</h3>
+      <p>{connection === "checking" ? "Checking AI connection…" : connection === "error" ? "Could not reach the AI server. Refresh the connection to try again; your analysis stays here." : localAccess ? "AI is connected on this computer. No access code needed." : enabled ? "Private workspace connected. Enter its workspace access code below." : "AI is not configured for this address. Settings on your Mac do not enable the public website. For your configured Mac setup, open http://127.0.0.1:5173/."}</p>
+      <button disabled={connection === "checking"} onClick={() => void checkConnection()}>Refresh AI connection</button>
+      {enabled && <>
+        {!localAccess && <label>Workspace access code (not your NVIDIA API key)<input type="password" autoComplete="off" value={accessCode} onChange={e => setAccessCode(e.target.value)} /></label>}
+        <label className="coaching-check"><input type="checkbox" checked={consent} onChange={e => setConsent(e.target.checked)} />Send this numeric evidence to NVIDIA and save the review on the server. No video, file names, names, or notes are sent. Records remain until the workspace owner deletes them.</label>
+      </>}
+      <button className="primary" disabled={!enabled || connection !== "ready" || disabled || busy || ai || !evidence || !consent || (!localAccess && !accessCode)} onClick={() => void hostedReview()}>{busy ? "Getting AI review…" : "Get AI review"}</button>
+      {enabled && !evidence && <p>Choose Review my run above to prepare the measurements for AI.</p>}
+      {enabled && evidence && !consent && <p>Check the sharing consent box to enable Get AI review.</p>}
+      {enabled && <details><summary>Open a saved AI review</summary>
+        <label>Saved review ID<input value={reviewId} onChange={e => setReviewId(e.target.value)} /></label>
+        <button disabled={busy || (!localAccess && !accessCode) || !/^[\w-]{21}$/.test(reviewId)} onClick={() => void hostedReview(true)}>Load saved review</button>
+        {/^[\w-]{21}$/.test(reviewId) && <p><a href={`?coachingReview=${encodeURIComponent(reviewId)}#coaching-review`}>Saved review link</a>{!localAccess && " · workspace access code required"}</p>}
+      </details>}
+    </section>
     {evidence && plan && <section className="coaching-result" aria-label="Evidence review">
       <p className="coaching-mode">{ai ? "AI-prioritized review · NVIDIA NIM" : "Local evidence review · not AI"}</p>
       <p className="muted">{evidence.currentName}{evidence.baselineName ? ` compared with ${evidence.baselineName}` : " · single-run review"}</p>
@@ -106,17 +140,6 @@ export default function CoachingReviewPanel({ getCurrentSession, sessions, onJum
       {focus && <article className="coaching-focus"><h3>Next focus: {focus.title}</h3><p>{focus.text}</p><div className="button-row">{focus.evidenceIds.map(links)}</div></article>}
       <details open><summary>Limits of this review</summary>{evidence.catalog.limitations.map(l => <p key={l.id}><strong>{l.title}.</strong> {l.text}</p>)}</details>
     </section>}
-    <details className="coaching-hosted"><summary>Optional NVIDIA NIM review</summary>
-      <p>{localAccess ? "AI is connected on this computer. No access code needed." : enabled ? "Private demo workspace. Anyone with its access code and a review link can read that saved review. This is not a public multi-user account system." : "Hosted AI is not enabled here. Server credentials, durable review storage, and workspace access controls must be configured first."}</p>
-      {enabled && <>
-        {!localAccess && <label>Workspace access code (not your NVIDIA API key)<input type="password" autoComplete="off" value={accessCode} onChange={e => setAccessCode(e.target.value)} /></label>}
-        <label className="coaching-check"><input type="checkbox" checked={consent} onChange={e => setConsent(e.target.checked)} />Send this numeric evidence to NVIDIA and save the review on the server. No video, file names, names, or notes are sent. Records remain until the workspace owner deletes them.</label>
-        <button disabled={disabled || busy || ai || !evidence || !consent || (!localAccess && !accessCode)} onClick={() => void hostedReview()}>{busy ? "Working…" : "Prioritize with NIM"}</button>
-        <label>Saved review ID<input value={reviewId} onChange={e => setReviewId(e.target.value)} /></label>
-        <button disabled={busy || (!localAccess && !accessCode) || !/^[\w-]{21}$/.test(reviewId)} onClick={() => void hostedReview(true)}>Load saved review</button>
-        {/^[\w-]{21}$/.test(reviewId) && <p><a href={`?coachingReview=${encodeURIComponent(reviewId)}#coaching-review`}>Saved review link</a>{!localAccess && " · workspace access code required"}</p>}
-      </>}
-    </details>
     <p role="status" aria-live="polite">{message}</p>
   </div>;
 }

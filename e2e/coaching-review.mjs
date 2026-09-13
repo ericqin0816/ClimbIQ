@@ -33,11 +33,11 @@ try {
     const {default:{createRoot}} = await import('/node_modules/.vite/deps/react-dom_client.js');
     const {default:Panel} = await import('/src/components/CoachingReviewPanel.tsx');
     const {buildCoachingCatalog} = await import('/src/lib/coachingPolicy.ts');
-    window.__calls=[]; window.__jumps=[]; window.__slow=false;
+    window.__calls=[]; window.__jumps=[]; window.__slow=false; window.__statusFail=true;
     const nativeFetch=window.fetch;
     window.fetch=async(input,init)=>{
       if(!String(input).startsWith('/api/coaching'))return nativeFetch(input,init);
-      if(String(input).includes('status=1'))return Response.json({enabled:true});
+      if(String(input).includes('status=1'))return window.__statusFail ? new Response('',{status:503}) : Response.json({enabled:true});
       if(init?.method==='POST'){
         const body=JSON.parse(init.body);window.__calls.push(body);
         window.__record={id:'abcdefghijklmnopqrstu',status:'complete',packet:body.packet,plan:buildCoachingCatalog(body.packet).defaultPlan};
@@ -57,22 +57,26 @@ try {
   const click = async text => { await evaluate(`[...document.querySelectorAll('button')].find(b=>b.textContent===${JSON.stringify(text)}).click()`); await delay(40); };
   const text = () => evaluate("document.querySelector('.coaching-panel').innerText");
   const check = (condition, message) => { if (!condition) throw new Error(message); };
+  await wait("document.body.innerText.includes('Could not reach the AI server')");
+  check(await evaluate("[...document.querySelectorAll('button')].some(b=>b.textContent==='Get AI review')"), "AI action was hidden on connection failure.");
+  await evaluate("window.__statusFail=false"); await click("Refresh AI connection");
+  await wait("!!document.querySelector('input[type=password]')");
   await click("Review my run");
   check((await text()).includes("12.255s") && (await text()).includes("Bottom/top-half conclusions are withheld"), "Local facts or contact gate missing.");
   await click("View Start"); check((await evaluate("window.__jumps[0]")) === 9.4, "Evidence link did not preserve raw time.");
-  await evaluate("document.querySelector('.coaching-hosted').open=true");
-  check(await evaluate("[...document.querySelectorAll('button')].find(b=>b.textContent==='Prioritize with NIM').disabled"), "Hosted action lacks opt-in gate.");
+  check(await evaluate("[...document.querySelectorAll('button')].find(b=>b.textContent==='Get AI review').disabled"), "Hosted action lacks opt-in gate.");
   await evaluate(`(()=>{const input=document.querySelector('input[type=password]');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(input,'workspace-test-code');input.dispatchEvent(new Event('input',{bubbles:true}));document.querySelector('.coaching-hosted input[type=checkbox]').click()})()`);
-  await delay(40); await click("Prioritize with NIM");
+  await delay(40); await click("Get AI review");
   await wait("document.body.innerText.includes('AI-prioritized review')");
   check(!JSON.stringify(await evaluate("window.__calls")).match(/PRIVATE|rawTime|location|notes/), "Private metadata reached mocked API.");
   check((await text()).includes("What this review can establish"), "Model selection hid mandatory limits.");
+  await evaluate("document.querySelector('.coaching-hosted details').open=true");
   await click("Load saved review");
   await wait("document.body.innerText.includes('Saved numeric review')");
   check(await evaluate("!document.querySelector('.coaching-result button')"), "Archived record has local-video seek links.");
   await evaluate(`(()=>{const select=document.querySelector('select');Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype,'value').set.call(select,'start');select.dispatchEvent(new Event('change',{bubbles:true}))})()`);
   await wait("!document.querySelector('.coaching-result')");
-  await click("Review my run"); await evaluate("window.__slow=true"); await click("Prioritize with NIM");
+  await click("Review my run"); await evaluate("window.__slow=true"); await click("Get AI review");
   await evaluate(`(()=>{const select=document.querySelector('select');Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype,'value').set.call(select,'halves');select.dispatchEvent(new Event('change',{bubbles:true}))})()`);
   await delay(350);
   check(await evaluate("!document.querySelector('.coaching-result')"), "A stale in-flight response restored old evidence.");
