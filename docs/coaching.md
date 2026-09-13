@@ -63,6 +63,13 @@ automatic SDK retry. The daily count is not a monetary spending guarantee; also
 configure provider-side limits where available. Cost is recorded as unknown
 (`null`) because no verified account-specific price is configured.
 
+When using the Vite dev server on the configured `localhost` or `127.0.0.1`
+origin, the app connects automatically: no workspace code needs to be entered.
+The dev middleware supplies it server-side only for same-origin browser requests
+from a loopback connection with the expected Host and local-request header.
+The browser never receives the code. Consent to send numeric evidence is still
+required. Deployed and LAN access retain the workspace-code requirement.
+
 This is a **private demo workspace**, not public multi-user authentication.
 Anyone holding its access code and a review ID can retrieve that review. Do not
 share the code publicly. A public release needs individual authentication,

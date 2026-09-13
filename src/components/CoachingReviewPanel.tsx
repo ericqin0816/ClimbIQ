@@ -14,6 +14,7 @@ export default function CoachingReviewPanel({ getCurrentSession, sessions, onJum
   const [evidence, setEvidence] = useState<CoachingEvidence | null>(null);
   const [plan, setPlan] = useState<CoachingPlan | null>(null);
   const [enabled, setEnabled] = useState(false);
+  const [localAccess, setLocalAccess] = useState(false);
   const [consent, setConsent] = useState(false);
   const [accessCode, setAccessCode] = useState("");
   const [message, setMessage] = useState("");
@@ -25,7 +26,7 @@ export default function CoachingReviewPanel({ getCurrentSession, sessions, onJum
   useEffect(() => {
     const controller = new AbortController();
     fetch("/api/coaching?status=1", { signal: controller.signal }).then(r => r.ok ? r.json() : null)
-      .then(data => setEnabled(data?.enabled === true)).catch(() => {});
+      .then(data => { setEnabled(data?.enabled === true); setLocalAccess(data?.localAccess === true); }).catch(() => {});
     return () => { controller.abort(); request.current?.abort(); };
   }, []);
   function invalidate() {
@@ -42,13 +43,13 @@ export default function CoachingReviewPanel({ getCurrentSession, sessions, onJum
   }
   async function hostedReview(loadSaved = false) {
     if (accessCode.trim().toLowerCase().startsWith("nvapi")) { setMessage("Do not enter your NVIDIA API key here. It belongs in server settings. This field takes a separate workspace access code."); return; }
-    if (!enabled || !accessCode || (!loadSaved && (!evidence || !consent))) return;
+    if (!enabled || (!localAccess && !accessCode) || (!loadSaved && (!evidence || !consent))) return;
     request.current?.abort(); const controller = new AbortController(); request.current = controller;
     setBusy(true); setMessage("");
     try {
       const response = await fetch(loadSaved ? `/api/coaching?id=${encodeURIComponent(reviewId)}` : "/api/coaching", {
         method: loadSaved ? "GET" : "POST", signal: controller.signal,
-        headers: { Authorization: `Bearer ${accessCode}`, ...(loadSaved ? {} : { "Content-Type": "application/json" }) },
+        headers: { ...(localAccess ? { "X-Climbiq-Local": "1" } : { Authorization: `Bearer ${accessCode}` }), ...(loadSaved ? {} : { "Content-Type": "application/json" }) },
         ...(loadSaved ? {} : { body: JSON.stringify({ consent: true, requestId: requestId.current, packet: evidence!.packet }) }),
       });
       const data = await response.json();
@@ -92,14 +93,14 @@ export default function CoachingReviewPanel({ getCurrentSession, sessions, onJum
       <details open><summary>Limits of this review</summary>{evidence.catalog.limitations.map(l => <p key={l.id}><strong>{l.title}.</strong> {l.text}</p>)}</details>
     </section>}
     <details className="coaching-hosted"><summary>Optional NVIDIA NIM review</summary>
-      <p>{enabled ? "Private demo workspace. Anyone with its access code and a review link can read that saved review. This is not a public multi-user account system." : "Hosted AI is not enabled here. Server credentials, durable review storage, and workspace access controls must be configured first."}</p>
+      <p>{localAccess ? "AI is connected on this computer. No access code needed." : enabled ? "Private demo workspace. Anyone with its access code and a review link can read that saved review. This is not a public multi-user account system." : "Hosted AI is not enabled here. Server credentials, durable review storage, and workspace access controls must be configured first."}</p>
       {enabled && <>
-        <label>Workspace access code (not your NVIDIA API key)<input type="password" autoComplete="off" value={accessCode} onChange={e => setAccessCode(e.target.value)} /></label>
+        {!localAccess && <label>Workspace access code (not your NVIDIA API key)<input type="password" autoComplete="off" value={accessCode} onChange={e => setAccessCode(e.target.value)} /></label>}
         <label className="coaching-check"><input type="checkbox" checked={consent} onChange={e => setConsent(e.target.checked)} />Send this numeric evidence to NVIDIA and save the review on the server. No video, file names, names, or notes are sent. Records remain until the workspace owner deletes them.</label>
-        <button disabled={disabled || busy || ai || !evidence || !consent || !accessCode} onClick={() => void hostedReview()}>{busy ? "Working…" : "Prioritize with NIM"}</button>
+        <button disabled={disabled || busy || ai || !evidence || !consent || (!localAccess && !accessCode)} onClick={() => void hostedReview()}>{busy ? "Working…" : "Prioritize with NIM"}</button>
         <label>Saved review ID<input value={reviewId} onChange={e => setReviewId(e.target.value)} /></label>
-        <button disabled={busy || !accessCode || !/^[\w-]{21}$/.test(reviewId)} onClick={() => void hostedReview(true)}>Load saved review</button>
-        {/^[\w-]{21}$/.test(reviewId) && <p><a href={`?coachingReview=${encodeURIComponent(reviewId)}#coaching-review`}>Saved review link</a> · workspace access code required</p>}
+        <button disabled={busy || (!localAccess && !accessCode) || !/^[\w-]{21}$/.test(reviewId)} onClick={() => void hostedReview(true)}>Load saved review</button>
+        {/^[\w-]{21}$/.test(reviewId) && <p><a href={`?coachingReview=${encodeURIComponent(reviewId)}#coaching-review`}>Saved review link</a>{!localAccess && " · workspace access code required"}</p>}
       </>}
     </details>
     <p role="status" aria-live="polite">{message}</p>
