@@ -76,7 +76,11 @@ describe("private NIM review boundary", () => {
   });
 });
 describe("actual NIM compatible adapter with mocked HTTP", () => {
-  it.each([false, true])("validates model output (unsupported=%s) and captures usage", async unsupported => {
+  it.each([
+    { unsupported: false, model: "nvidia/test-model" },
+    { unsupported: true, model: "nvidia/test-model" },
+    { unsupported: false, model: "nvidia/nemotron-3.5-lightning-30b-a3b" },
+  ])("validates model output ($model, unsupported=$unsupported) and captures usage", async ({ unsupported, model }) => {
     let payload: Record<string, unknown> = {};
     const mockFetch: typeof fetch = async (input, init) => {
       expect(String(input)).toBe("https://integrate.api.nvidia.com/v1/chat/completions");
@@ -84,8 +88,9 @@ describe("actual NIM compatible adapter with mocked HTTP", () => {
       payload = JSON.parse(init!.body as string);
       return Response.json({ id: "test-completion", object: "chat.completion", created: 1, model: "nvidia/test-model", choices: [{ index: 0, message: { role: "assistant", content: JSON.stringify(unsupported ? { observationIds: ["invented"], focusId: "rehab" } : buildCoachingCatalog(evidence()).defaultPlan) }, finish_reason: "stop" }], usage: { prompt_tokens: 50, completion_tokens: 20, total_tokens: 70 } });
     };
-    const result = await generateNimReview(evidence(), "test-key", "nvidia/test-model", mockFetch);
-    expect(payload.model).toBe("nvidia/test-model"); expect(payload.max_tokens).toBe(700);
+    const result = await generateNimReview(evidence(), "test-key", model, mockFetch);
+    expect(payload.model).toBe(model); expect(payload.max_tokens).toBe(700);
+    expect(payload.chat_template_kwargs).toEqual(model === "nvidia/nemotron-3.5-lightning-30b-a3b" ? { enable_thinking: false } : undefined);
     expect(result.usage).toEqual({ inputTokens: 50, outputTokens: 20 });
     expect(result.plan === null).toBe(unsupported); expect(result.rawOutput).toBeTruthy();
     expect(result.estimatedCostUsd).toBeNull();

@@ -30,6 +30,11 @@ The current model catalog can be checked at
 <https://integrate.api.nvidia.com/v1/models>. Hosted-model structured-generation
 extensions are not assumed: plain JSON output is parsed and strictly validated.
 
+For `nvidia/nemotron-3.5-lightning-30b-a3b`, the adapter disables reasoning with
+`chat_template_kwargs.enable_thinking: false` so the short response budget is
+available for the JSON selection. Other models receive no reasoning override.
+NVIDIA documents this flag in its [Lightning setup guide](https://docs.nvidia.com/nim/large-language-models/2.0.10/get-started/advanced/get-started-nemotron-3.5-lightning.html).
+
 ## Private-workspace setup
 
 Hosted AI is disabled by default. Do not paste an NVIDIA key into the browser or
