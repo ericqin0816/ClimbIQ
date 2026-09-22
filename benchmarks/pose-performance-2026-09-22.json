@@ -1,0 +1,217 @@
+{
+  "schemaVersion": 1,
+  "capturedAt": "2026-09-22T05:32:30.308Z",
+  "baseCommit": "3f110af",
+  "environment": {
+    "os": "Windows",
+    "cpu": "AMD Ryzen 7 8700F, 8 cores / 16 threads",
+    "browser": "Chrome/153.0.8010.53",
+    "server": "Vite development server",
+    "nativeIOS": false
+  },
+  "interpretation": "Small local performance comparison, not accuracy validation. No general throughput speedup claimed: repeat noise and warmup exceed model-cache setup savings. Pixel probing forces extra readback and its timings are not comparable with normal runs.",
+  "change": "One integrity-verified model cache with isolated consumer cancellation; fresh VIDEO tracker per analysis; no detector or identity thresholds changed.",
+  "retainedModelBytes": 9398198,
+  "outcomes": [
+    {
+      "fileName": "12.24.mov",
+      "sourceSha256": "b981cc57f8d3d4fe9c57e4e6414f23457ad8bc7eb7cbec5a95c969707d21b333",
+      "baseline": [
+        {
+          "elapsedMs": 5558.3,
+          "firstSampleMs": 496,
+          "validFrames": 45,
+          "requestedFrames": 62,
+          "modelFetchCount": 1,
+          "longTaskCount": 46,
+          "longTaskMs": 4092,
+          "maxLongTaskMs": 225,
+          "maxEventLoopDelayMs": 217.6,
+          "frameFingerprint": "4bbedd6836b1e3d7875dd7af9c5e038fdaee1816e77a1cefb576772fdbd42011"
+        },
+        {
+          "elapsedMs": 5111.7,
+          "firstSampleMs": 197.6,
+          "validFrames": 35,
+          "requestedFrames": 62,
+          "modelFetchCount": 2,
+          "longTaskCount": 45,
+          "longTaskMs": 3848,
+          "maxLongTaskMs": 129,
+          "maxEventLoopDelayMs": 118.3,
+          "frameFingerprint": "d1cd107902801a031462c41e1cd9278cd102b37683ba78340f5647fa46040752"
+        },
+        {
+          "elapsedMs": 5247.6,
+          "firstSampleMs": 190.7,
+          "validFrames": 35,
+          "requestedFrames": 62,
+          "modelFetchCount": 3,
+          "longTaskCount": 46,
+          "longTaskMs": 4004,
+          "maxLongTaskMs": 135,
+          "maxEventLoopDelayMs": 125.8,
+          "frameFingerprint": "d1cd107902801a031462c41e1cd9278cd102b37683ba78340f5647fa46040752"
+        }
+      ],
+      "cache": [
+        {
+          "elapsedMs": 5496.8,
+          "firstSampleMs": 457.6,
+          "validFrames": 45,
+          "requestedFrames": 62,
+          "modelFetchCount": 1,
+          "longTaskCount": 45,
+          "longTaskMs": 4017,
+          "maxLongTaskMs": 215,
+          "maxEventLoopDelayMs": 198.5,
+          "frameFingerprint": "4bbedd6836b1e3d7875dd7af9c5e038fdaee1816e77a1cefb576772fdbd42011"
+        },
+        {
+          "elapsedMs": 5056.3,
+          "firstSampleMs": 190.4,
+          "validFrames": 35,
+          "requestedFrames": 62,
+          "modelFetchCount": 1,
+          "longTaskCount": 45,
+          "longTaskMs": 3802,
+          "maxLongTaskMs": 127,
+          "maxEventLoopDelayMs": 117.3,
+          "frameFingerprint": "d1cd107902801a031462c41e1cd9278cd102b37683ba78340f5647fa46040752"
+        },
+        {
+          "elapsedMs": 5135,
+          "firstSampleMs": 176.6,
+          "validFrames": 35,
+          "requestedFrames": 62,
+          "modelFetchCount": 1,
+          "longTaskCount": 45,
+          "longTaskMs": 3904,
+          "maxLongTaskMs": 137,
+          "maxEventLoopDelayMs": 118.9,
+          "frameFingerprint": "d1cd107902801a031462c41e1cd9278cd102b37683ba78340f5647fa46040752"
+        }
+      ],
+      "decodedFrameTimesMatchByRepeat": [
+        true,
+        true,
+        true
+      ],
+      "pixelProbeParity": [
+        {
+          "cropSamples": 80,
+          "pixelsAndCropMetadataIdentical": true,
+          "fullFrameOutputsIdentical": true
+        },
+        {
+          "cropSamples": 80,
+          "pixelsAndCropMetadataIdentical": true,
+          "fullFrameOutputsIdentical": true
+        }
+      ]
+    },
+    {
+      "fileName": "IMG_9199.MOV",
+      "sourceSha256": "c906a632d57519e75a8ea95da28a1059a613b7bdb0d63781681b6c71ece8ec26",
+      "baseline": [
+        {
+          "elapsedMs": 4339.4,
+          "firstSampleMs": 285.8,
+          "validFrames": 43,
+          "requestedFrames": 52,
+          "modelFetchCount": 1,
+          "longTaskCount": 52,
+          "longTaskMs": 3548,
+          "maxLongTaskMs": 142,
+          "maxEventLoopDelayMs": 127,
+          "frameFingerprint": "0088e8e57f2853e1ff4103966d81cf976c63a3161a75daf58636b79c75b9ebfb"
+        },
+        {
+          "elapsedMs": 3877,
+          "firstSampleMs": 200,
+          "validFrames": 42,
+          "requestedFrames": 52,
+          "modelFetchCount": 2,
+          "longTaskCount": 43,
+          "longTaskMs": 2689,
+          "maxLongTaskMs": 118,
+          "maxEventLoopDelayMs": 108.9,
+          "frameFingerprint": "c5a225584f2a7b4dc9be62b70c4de423f85c0fa7589d9f4ad93b4b41bf5d8e10"
+        },
+        {
+          "elapsedMs": 3912.7,
+          "firstSampleMs": 208.2,
+          "validFrames": 42,
+          "requestedFrames": 52,
+          "modelFetchCount": 3,
+          "longTaskCount": 46,
+          "longTaskMs": 2892,
+          "maxLongTaskMs": 126,
+          "maxEventLoopDelayMs": 115.8,
+          "frameFingerprint": "c5a225584f2a7b4dc9be62b70c4de423f85c0fa7589d9f4ad93b4b41bf5d8e10"
+        }
+      ],
+      "cache": [
+        {
+          "elapsedMs": 3855.7,
+          "firstSampleMs": 275.9,
+          "validFrames": 42,
+          "requestedFrames": 52,
+          "modelFetchCount": 1,
+          "longTaskCount": 42,
+          "longTaskMs": 2726,
+          "maxLongTaskMs": 143,
+          "maxEventLoopDelayMs": 136,
+          "frameFingerprint": "c5a225584f2a7b4dc9be62b70c4de423f85c0fa7589d9f4ad93b4b41bf5d8e10"
+        },
+        {
+          "elapsedMs": 3470.4,
+          "firstSampleMs": 184.2,
+          "validFrames": 42,
+          "requestedFrames": 52,
+          "modelFetchCount": 1,
+          "longTaskCount": 31,
+          "longTaskMs": 1922,
+          "maxLongTaskMs": 113,
+          "maxEventLoopDelayMs": 102.4,
+          "frameFingerprint": "c5a225584f2a7b4dc9be62b70c4de423f85c0fa7589d9f4ad93b4b41bf5d8e10"
+        },
+        {
+          "elapsedMs": 3451.2,
+          "firstSampleMs": 192.1,
+          "validFrames": 42,
+          "requestedFrames": 52,
+          "modelFetchCount": 1,
+          "longTaskCount": 26,
+          "longTaskMs": 1662,
+          "maxLongTaskMs": 110,
+          "maxEventLoopDelayMs": 92.1,
+          "frameFingerprint": "c5a225584f2a7b4dc9be62b70c4de423f85c0fa7589d9f4ad93b4b41bf5d8e10"
+        }
+      ],
+      "decodedFrameTimesMatchByRepeat": [
+        true,
+        true,
+        true
+      ],
+      "pixelProbeParity": [
+        {
+          "cropSamples": 54,
+          "pixelsAndCropMetadataIdentical": true,
+          "fullFrameOutputsIdentical": true
+        },
+        {
+          "cropSamples": 53,
+          "pixelsAndCropMetadataIdentical": true,
+          "fullFrameOutputsIdentical": true
+        }
+      ]
+    }
+  ],
+  "limitations": [
+    "Only two existing private recordings, no independent event labels.",
+    "Cold/warm source rendering sensitivity exists in the baseline: crop readback changes some pose outputs.",
+    "JS heap measurements do not measure all WASM/GPU/native memory.",
+    "Worker inference remains an experiment, not used by the production path at this checkpoint."
+  ]
+}

@@ -129,7 +129,7 @@ try {
       resultsDisabled: Boolean(document.querySelector('.mobile-workflow button[aria-label^="Results:"]')?.disabled),
       overflow: document.documentElement.scrollWidth > window.innerWidth,
     })`);
-    assert.match(empty.text, /No saved sessions yet/);
+    assert.match(empty.text, /Your training history starts with one run/);
     assert.equal(empty.reviewDisabled, true);
     assert.equal(empty.resultsDisabled, true);
     assert.equal(empty.overflow, false, `Unexpected horizontal overflow at ${width}px.`);
@@ -232,6 +232,42 @@ try {
   await until("document.querySelector('#saved-attempts .saved-session-list')?.textContent.includes('Newer imported attempt')", "committed import survives reload");
   await libraryReady();
   assert.equal(JSON.parse(await readSessionLibraryJson(evaluate)).length, 3);
+  // Search and filtering must leave the persisted library unchanged.
+  const beforeSearch = await readSessionLibraryJson(evaluate);
+  await evaluate(`(() => {
+    const input = document.querySelector('.attempt-library-search input');
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(input, 'newer');
+    input.dispatchEvent(new Event('input', {bubbles:true}));
+  })()`);
+  await until("document.querySelectorAll('.attempt-library-list button').length === 1", "search narrows the library");
+  assert.match(await evaluate("document.querySelector('.attempt-library-list')?.textContent"), /Newer imported attempt/);
+  await evaluate(`(() => {
+    const select = document.querySelector('.attempt-library-tools select');
+    select.value = 'review'; select.dispatchEvent(new Event('change', {bubbles:true}));
+  })()`);
+  await until("document.querySelector('.attempt-library-empty')?.textContent.includes('No attempts match')", "timing filter empty state");
+  await evaluate("[...document.querySelectorAll('.attempt-library-empty button')].find(button => button.textContent.includes('Clear search')).click()");
+  await until("document.querySelectorAll('.attempt-library-list button').length === 3", "clearing filters restores all attempts");
+  assert.equal(await readSessionLibraryJson(evaluate), beforeSearch, "Searching must not alter saved attempts.");
+  assert.equal(await evaluate("document.documentElement.scrollWidth > window.innerWidth"), false, "Filtered library must fit the narrow phone viewport.");
+  report.checks.push("search and timing filters expose matching attempts without changing stored data");
+
+  await evaluate("document.querySelector('.attempt-library-list button').click()");
+  await until("Boolean(document.querySelector('#save-analysis')) && Boolean(document.querySelector('#coaching-review'))", "saved editing and coaching without video");
+  await until("[...document.querySelectorAll('#coaching-review button')].some(button => button.textContent === 'Review my run')", "saved-review panel finished loading");
+  await evaluate("[...document.querySelectorAll('#coaching-review button')].find(button => button.textContent === 'Review my run').click()");
+  await until("Boolean(document.querySelector('.coaching-result'))", "local review from saved measurements");
+  assert.equal(await evaluate("[...document.querySelectorAll('.coaching-result button')].some(button => button.textContent.startsWith('View '))"), false, "A saved-only review must not offer source-video seek links.");
+  const beforeDelete = await readSessionLibraryJson(evaluate);
+  await evaluate("document.querySelector('.session-details').open = true");
+  await evaluate("[...document.querySelectorAll('#save-analysis button')].find(button => button.textContent === 'Delete Session').click()");
+  const afterDelete = JSON.parse(await waitForSessionLibraryChange(evaluate, beforeDelete));
+  assert.equal(afterDelete.length, 2);
+  await evaluate("[...document.querySelectorAll('#saved-attempts button')].find(button => button.textContent === 'Undo last deletion').click()");
+  const restoredLibrary = JSON.parse(await waitForSessionLibraryChange(evaluate, JSON.stringify(afterDelete)));
+  const byId = values => [...values].sort((a,b) => a.id.localeCompare(b.id));
+  assert.deepEqual(byId(restoredLibrary), byId(JSON.parse(beforeDelete)), "Undo must restore exact saved measurements, without replacing other attempts.");
+  report.checks.push("saved-only coaching hides video links and undo restores exact deleted measurements");
   assert.deepEqual(runtimeErrors, [], "Unexpected browser runtime exceptions.");
   report.checks.push("all three saved attempts survive reload without runtime exceptions");
   report.status = "passed";

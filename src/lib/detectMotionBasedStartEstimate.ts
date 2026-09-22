@@ -17,6 +17,7 @@ interface DetectMotionBasedStartOptions {
   reactionOffset: number;
   sensitivity: Sensitivity;
   fps?: number;
+  signal?: AbortSignal;
 }
 
 const FIXED_THRESHOLDS: Record<Sensitivity, number> = {
@@ -45,7 +46,17 @@ export async function detectMotionBasedStartEstimate({
   reactionOffset,
   sensitivity,
   fps = 15,
+  signal,
 }: DetectMotionBasedStartOptions): Promise<StartSignalDetectionResult> {
+  const source = video.src;
+  const checkCancelled = () => {
+    if (signal?.aborted || video.src !== source) {
+      const error = new Error("Motion-based start detection cancelled.");
+      error.name = "AbortError";
+      throw error;
+    }
+  };
+  checkCancelled();
   const analysisZone = zone ?? createFallbackStartBodyZone();
   const usingFallbackZone = !zone;
   const threshold = FIXED_THRESHOLDS[sensitivity];
@@ -72,7 +83,9 @@ export async function detectMotionBasedStartEstimate({
   try {
     let previousImageData: ImageData | null = null;
     for (const time of times) {
+      checkCancelled();
       await seekTo(video, time);
+      checkCancelled();
       const current = captureZoneImageData(video, analysisZone);
       if (previousImageData) {
         const motionScore = computeSensitiveMotionScore(previousImageData, current.imageData);
@@ -86,11 +99,13 @@ export async function detectMotionBasedStartEstimate({
       debug.pixelZone = current.pixelZone;
     }
   } catch (error) {
+    if (signal?.aborted || (error instanceof Error && error.name === "AbortError")) throw error;
     debug.framesSampled = motionSamples.length;
     debug.failureReason = error instanceof Error ? error.message : "Unknown motion-based start error.";
     return result(false, "Start Signal not detected. Motion sampling failed.", "None", threshold, debug);
   }
 
+  checkCancelled();
   smoothMotionSamples(motionSamples);
   debug.framesSampled = times.length;
   debug.maxColorDistance = roundMetric(motionSamples.reduce((max, sample) => Math.max(max, sample.smoothedMotionScore), 0));

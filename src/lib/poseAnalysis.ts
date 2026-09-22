@@ -14,6 +14,7 @@ import { validateWallCalibration } from "./wallCalibration";
 import { readDecodedVideoFrameTime } from "./decodedVideoFrame";
 import { summarizeSourceSampleTiming } from "./sourceSampleTiming";
 import { resolveAppAssetUrl } from "./appAssets";
+import { verifiedPoseModelCache } from "./verifiedModelCache";
 
 const MEDIAPIPE_WASM_RELATIVE_PATH = "mediapipe/wasm";
 const MODEL_RELATIVE_PATH = "models/pose_landmarker_full.task";
@@ -76,9 +77,12 @@ export async function analyzePoseVideo({
   onProgress?.({ phase: "loading", processed: 0, total: times.length });
   checkCancelled(isCancelled, signal);
 
-  const { FilesetResolver, PoseLandmarker } = await import("@mediapipe/tasks-vision");
-  checkCancelled(isCancelled, signal);
-  const modelAssetBuffer = await loadVerifiedModel(signal);
+  // Resolve independent setup in parallel. Every analysis still creates a new
+  // VIDEO tracker; only integrity-checked model bytes are reusable.
+  const [{ FilesetResolver, PoseLandmarker }, modelAssetBuffer] = await Promise.all([
+    import("@mediapipe/tasks-vision"),
+    loadVerifiedModel(signal),
+  ]);
   checkCancelled(isCancelled, signal);
   const vision = await FilesetResolver.forVisionTasks(assetUrl(MEDIAPIPE_WASM_RELATIVE_PATH));
   checkCancelled(isCancelled, signal);
@@ -461,21 +465,11 @@ export function buildPoseSampleTimes(start: number, end: number, fps: number): n
 
 export async function loadVerifiedModel(signal?: AbortSignal): Promise<Uint8Array> {
   try {
-    const response = await fetch(assetUrl(MODEL_RELATIVE_PATH), { signal });
-    const contentType = response.headers.get("content-type")?.toLowerCase() ?? "";
-    if (!response.ok || contentType.includes("text/html")) {
-      throw new Error("The local pose model is missing or was served as an HTML fallback. Redeploy the complete production build.");
-    }
-    const buffer = await response.arrayBuffer();
-    if (buffer.byteLength !== MODEL_EXPECTED_BYTES) {
-      throw new Error(`Pose model size check failed (${buffer.byteLength} bytes).`);
-    }
-    const digest = await crypto.subtle.digest("SHA-256", buffer);
-    const hash = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
-    if (hash !== MODEL_SHA256) {
-      throw new Error("Pose model integrity check failed.");
-    }
-    return new Uint8Array(buffer);
+    return await verifiedPoseModelCache.load({
+      url: assetUrl(MODEL_RELATIVE_PATH),
+      expectedBytes: MODEL_EXPECTED_BYTES,
+      sha256: MODEL_SHA256,
+    }, signal);
   } catch (error) {
     if (signal?.aborted || (error instanceof DOMException && error.name === "AbortError")) {
       throw new PoseAnalysisCancelledError();

@@ -1,4 +1,10 @@
 .coaching-panel { max-width: 960px; }
+.coaching-intro { display: flex; gap: 20px; align-items: flex-start; justify-content: space-between; margin-bottom: 22px; }
+.coaching-intro strong { display: block; font-size: 1.04rem; font-weight: 620; letter-spacing: -.02em; }
+.coaching-intro p { max-width: 65ch; margin: 7px 0 0; color: var(--muted-text, #696c71); font-size: .85rem; line-height: 1.6; }
+.coaching-local-badge { flex-shrink: 0; border: 1px solid #c9d5cc; border-radius: 20px; padding: 6px 10px; color: #376546; background: #f4f8f3; font-size: .71rem; font-weight: 620; }
+.coaching-baseline-note, .coaching-privacy-note { color: var(--muted-text, #696c71); font-size: .78rem; line-height: 1.6; }
+.coaching-privacy-note { margin: 10px 0 0; }
 .coaching-controls { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 16px; margin-bottom: 12px; }
 .coaching-panel label { display: grid; gap: 6px; font-size: .9rem; }
 .coaching-panel .coaching-check { display: flex; align-items: flex-start; gap: 9px; margin: 14px 0; line-height: 1.5; }
@@ -8,10 +14,62 @@
 .coaching-mode { font-size: .8rem; font-weight: 700; letter-spacing: .035em; }
 .coaching-result article { padding: 12px 0; }
 .coaching-result h3 { margin: 0; font-size: 1rem; }
+.coaching-result h4 { margin: 0 0 6px; font-size: .9rem; font-weight: 620; }
 .coaching-result p, .coaching-hosted p { line-height: 1.6; }
+.coaching-result article > p { margin: 6px 0 12px; font-size: .85rem; color: #555b61; }
+.coaching-headline { margin: 18px 0 20px; border: 1px solid var(--line, #d9dad7); border-radius: 8px; padding: 20px; background: #f6f6f3; }
+.coaching-headline.shorter { border-color: #c9d9ce; background: #f3f8f4; }
+.coaching-headline.longer, .coaching-headline.needs-review { border-color: #e0d5bd; background: #faf7f0; }
+.coaching-headline h3 { font-size: clamp(1.15rem, 3vw, 1.6rem); letter-spacing: -.035em; line-height: 1.25; }
+.coaching-headline p { max-width: 75ch; margin: 8px 0 0; font-size: .82rem; color: #62686d; }
+.coaching-reattach-note { border-left: 2px solid #b9cadd; padding-left: 12px; font-size: .8rem; color: #535f6b; }
+.coaching-comparison-wrap { max-width: 100%; overflow-x: auto; margin: 18px 0 25px; border: 1px solid var(--line, #d9dad7); border-radius: 7px; }
+.coaching-comparison { min-width: 460px; font-size: .82rem; }
+.coaching-comparison caption { padding: 14px; text-align: left; font-size: .84rem; font-weight: 620; }
+.coaching-comparison caption small { display: block; margin-top: 4px; color: #696c71; font-size: .71rem; font-weight: 400; }
+.coaching-comparison th, .coaching-comparison td { padding: 11px 14px; border-color: var(--line, #d9dad7); color: var(--ink, #15171a); }
+.coaching-comparison thead th { background: #f5f5f2; color: #686d72; font-size: .72rem; font-weight: 550; }
+.coaching-comparison tbody th { font-size: .79rem; font-weight: 560; }
+.coaching-comparison tbody tr:last-child > * { border-bottom: 0; }
+.coaching-comparison td { white-space: nowrap; font-variant-numeric: tabular-nums; }
+.coaching-comparison .coaching-delta strong, .coaching-comparison .coaching-delta small { display: block; }
+.coaching-comparison .coaching-delta small { margin-top: 3px; font-size: .65rem; color: #696c71; }
+.coaching-comparison .coaching-delta.shorter strong { color: #2f7247; }
+.coaching-comparison .coaching-delta.longer strong { color: #886122; }
+.coaching-result .coaching-section-label { font-size: .75rem; font-weight: 650; letter-spacing: .025em; color: #616970; }
+.coaching-observations article + article { border-top: 1px solid #e7e8e5; }
+.coaching-review-tasks { margin: 18px 0 22px; border: 1px solid #dce1e5; border-radius: 8px; padding: 17px; background: #f7f8fa; }
+.coaching-review-tasks > p { margin: 7px 0 15px; color: #696c71; font-size: .78rem; }
+.coaching-review-tasks ul { padding: 0; margin: 0; list-style: none; }
+.coaching-review-tasks li { padding: 14px 0; }
+.coaching-review-tasks li:first-child { padding-top: 0; }
+.coaching-review-tasks li:last-child { padding-bottom: 0; }
+.coaching-review-tasks li + li { border-top: 1px solid #e0e4e7; }
+.coaching-review-tasks li > p { margin: 5px 0 10px; color: #61686e; font-size: .8rem; }
+.coaching-review-tasks .next-check h4 { color: #2658a4; }
+.coaching-limits { margin-top: 20px; border-top: 1px solid #e0e2df; padding-top: 14px; }
+.coaching-limits > summary { min-height: 44px; font-weight: 620; }
+.coaching-limits > p { font-size: .77rem; color: #696c71; }
+.coaching-panel .button-row:empty { display: none; }
 .coaching-result .coaching-focus { padding: 16px; border-left: 3px solid #577b68; background: #f2f6f3; margin: 12px 0 20px; }
 .coaching-result details { font-size: .875rem; }
 .coaching-hosted { margin-top: 22px; padding-top: 16px; border-top: 1px solid #d7dedb; }
 .coaching-hosted > label { margin: 14px 0; }
 .coaching-panel summary { cursor: pointer; }
-@media(max-width: 600px) { .coaching-controls { grid-template-columns: 1fr; } }
+@media(max-width: 600px) {
+  .coaching-controls { grid-template-columns: 1fr; }
+  .coaching-intro { flex-direction: column; gap: 10px; }
+  .coaching-headline { padding: 16px; }
+  .coaching-panel :is(button, select, summary, input:not([type="checkbox"])) { min-height: 44px; }
+  .coaching-panel :is(select, input:not([type="checkbox"])) { font-size: 16px; }
+  .coaching-result .button-row > button { flex: 1 1 auto; }
+  .coaching-result .coaching-focus { padding: 14px; }
+  .coaching-review-tasks { padding: 14px; }
+  .coaching-comparison { min-width: 0; table-layout: fixed; }
+  .coaching-comparison th, .coaching-comparison td { padding: 10px 5px; white-space: normal; font-size: .72rem; }
+  .coaching-comparison thead th { font-size: .65rem; }
+  .coaching-comparison th:first-child { width: 31%; }
+  .coaching-comparison th:nth-child(2), .coaching-comparison th:nth-child(3) { width: 20%; }
+  .coaching-comparison th:last-child { width: 29%; }
+  .coaching-comparison .coaching-delta small { font-size: .61rem; line-height: 1.4; }
+}

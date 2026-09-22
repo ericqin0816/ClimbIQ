@@ -19,6 +19,7 @@ interface DetectFirstMovementOptions {
   movementDefinition?: FirstMovementDefinition;
   committedLaunchMinDelay?: number;
   fps?: number;
+  signal?: AbortSignal;
 }
 
 const FIXED_THRESHOLDS: Record<Sensitivity, number> = {
@@ -48,7 +49,17 @@ export async function detectFirstMovement({
   movementDefinition = "earliest",
   committedLaunchMinDelay = 0.1,
   fps = 15,
+  signal,
 }: DetectFirstMovementOptions): Promise<FirstMovementDetectionResult> {
+  const source = video.src;
+  const checkCancelled = () => {
+    if (signal?.aborted || video.src !== source) {
+      const error = new Error("First movement detection cancelled.");
+      error.name = "AbortError";
+      throw error;
+    }
+  };
+  checkCancelled();
   const analysisZone = zone ?? createFallbackStartBodyZone();
   const usingFallbackZone = !zone;
   const debug: FirstMovementDebug = {
@@ -86,7 +97,9 @@ export async function detectFirstMovement({
   try {
     let previousImageData: ImageData | null = null;
     for (const time of times) {
+      checkCancelled();
       await seekTo(video, time);
+      checkCancelled();
       const current = captureZoneImageData(video, analysisZone);
       if (previousImageData) {
         const motionScore = computeSensitiveMotionScore(previousImageData, current.imageData);
@@ -100,11 +113,13 @@ export async function detectFirstMovement({
       debug.pixelZone = current.pixelZone;
     }
   } catch (error) {
+    if (signal?.aborted || (error instanceof Error && error.name === "AbortError")) throw error;
     debug.framesSampled = debug.samples.length;
     debug.failureReason = error instanceof Error ? error.message : "Unknown first movement detection error.";
     return result(false, "First Movement not detected. Frame sampling failed.", "None", debug);
   }
 
+  checkCancelled();
   smoothMotionSamples(debug.samples);
   debug.framesSampled = times.length;
   debug.maxMotion = roundMetric(debug.samples.reduce((max, sample) => Math.max(max, sample.smoothedMotionScore), 0));

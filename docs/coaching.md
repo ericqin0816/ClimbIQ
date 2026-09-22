@@ -5,23 +5,51 @@ technique coach. It does not change Start, Finish, Hold 10, or pose results.
 
 ## What works without a server
 
-After loading a video, choose **Review my run**. The local rules summarize accepted
-timing, explicitly reviewed Hold 10 phases, and current tracking availability.
-They withhold low-confidence timing and unreviewed contact conclusions. To compare
-a saved baseline, confirm it is the same climber and a comparable setup.
+Open a current or saved attempt and choose **Review my run**. No internet
+connection, provider key, or AI account is needed for the local review. Saved
+measurements can be reviewed without reattaching the video; frame links appear
+only when the matching recording is available.
 
-The result is labeled **Local evidence review · not AI**. Links seek the current
-video without accepting or changing markers. Changing analysis evidence resets
-the review. Small differences within the existing comparison policy are not
-presented as improvements; that policy is not an independently measured error bound.
+The review starts with a canonical timing summary. With a comparable baseline,
+it shows accepted Start → Finish and, when both contact markers were frame
+reviewed, Start → Hold 10 and Hold 10 → Finish. The local priorities lead with
+the total difference and the largest supported section change. Opposing section
+changes are explained together even when the total is unchanged. The phases
+partition the run; first movement and wall-height splits must not be added to
+them. These are measured interval changes, not explanations of their cause.
+
+The baseline picker includes dates and accepted total times. The current attempt,
+an exact copy with the same recording details and timing, and attempts without
+usable Start/Finish timing are unavailable as baselines. The user still confirms
+the same climber, route, and comparable recording conditions; the app cannot
+establish that from file metadata. Equal times on different recordings remain
+eligible. No baseline is selected automatically.
+
+The result is labeled **Local evidence review · rule based**. **What the
+measurements show** is separate from **Checks still needed**. Unreviewed contact,
+incomplete movement evidence, and tracking gaps become review tasks rather than
+technique findings. All required checks and limitations remain available even
+when AI chooses a different focus. Small differences within the conservative
+comparison rule stay unclassified; this rule is not a measured accuracy bound.
+
+Links seek the current video without accepting or changing markers. Changing
+analysis evidence resets the review. Before seeking or accepting a hosted reply,
+a local fingerprint also checks source identity, raw timing, tracking, and the
+selected baseline. Moving every raw timestamp by the same amount leaves the
+numeric intervals unchanged, but still invalidates old video links. This local
+fingerprint includes private source details and never enters the hosted packet.
 
 ## What NIM adds
 
 NVIDIA NIM selects up to three observations and one next review focus from an
-approved catalog. The browser renders canonical text, never model-written timing,
+approved catalog. The headline, comparison table, and outstanding review tasks
+are always derived locally and cannot be omitted by the model. The browser renders canonical text, never model-written timing,
 diagnoses, causes, or training prescriptions. All evidence limitations remain
 visible regardless of the model selection. This is AI prioritization, not free-form
-coaching or direct video understanding.
+coaching or direct video understanding. Catalog policy version 2 participates in
+the server deduplication fingerprint; the numeric packet stays at version 1 so
+stored records keep their existing strict privacy schema. Packaged iOS builds
+hide hosted controls and do not request the hosted status endpoint.
 
 The server uses the AI SDK's OpenAI-compatible adapter against
 `https://integrate.api.nvidia.com/v1/chat/completions`. Model access varies by
@@ -94,3 +122,10 @@ bounded bodies, reservation ordering, duplicate requests, budget refusal,
 persistence failure and authenticated readback. The actual SDK adapter is tested
 against mocked HTTP responses. Live NIM inference and live Redis persistence
 still require configured credentials; unit tests are not evidence of account access.
+
+The isolated browser harness uses synthetic sessions and mocked hosted responses.
+It checks the total and phase table, offsetting changes, strongest-section
+priorities, baseline confirmation, saved reviews without video, stale source
+links and replies, and the packaged-app policy without contacting a provider.
+That platform-policy check does not replace testing the actual iOS build on a
+device.

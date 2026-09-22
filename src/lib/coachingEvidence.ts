@@ -5,10 +5,47 @@ import {describeSpeedTrace} from "./biomechanicsPresentation";
 import {buildCoachingCatalog, type CoachingGoal, type CoachingPacket, type CoachingRunFacts} from "./coachingPolicy";
 
 export interface CoachingEvidenceLink {label:string; rawTime:number}
+export interface CoachingBaselineOption {
+  id: string; name: string; date: string; totalSeconds: number | null;
+  eligible: boolean; reason?: string;
+}
+
+/** Local identity only. This string must never enter the hosted numeric packet. */
+export function coachingEvidenceFingerprint(current: SavedAnalysisSession, baseline?: SavedAnalysisSession): string {
+  const basis = (session: SavedAnalysisSession) => ({
+    id: session.id, name: session.name, video: session.videoMetadata,
+    timestamps: session.timestamps, athlete: session.zones.startBody,
+    calibration: session.biomechanics?.calibration, settings: session.biomechanics?.settings,
+    tracking: session.biomechanics?.result,
+  });
+  // Exclude updatedAt: creating a current snapshot changes it without changing evidence.
+  return JSON.stringify([basis(current), baseline ? basis(baseline) : null]);
+}
+
+function isSameRecordingEvidence(current: SavedAnalysisSession, candidate: SavedAnalysisSession): boolean {
+  const left = current.videoMetadata, right = candidate.videoMetadata;
+  if (!left || !right || !left.fileName || left.fileName !== right.fileName ||
+    left.duration !== right.duration || left.videoWidth !== right.videoWidth || left.videoHeight !== right.videoHeight) return false;
+  const timing = (session: SavedAnalysisSession) => sanitizeTimestampSequence(session.timestamps, session.videoMetadata?.duration)
+    .filter(marker => marker.rawTime !== null).map(marker => [marker.id, marker.rawTime, marker.source, marker.acceptanceMode]);
+  return JSON.stringify(timing(current)) === JSON.stringify(timing(candidate));
+}
+
+export function coachingBaselineOptions(current: SavedAnalysisSession, sessions: SavedAnalysisSession[]): CoachingBaselineOption[] {
+  return sessions.map(candidate => {
+    const facts = coachingRunFacts(candidate);
+    const reason = candidate.id === current.id ? "Current attempt"
+      : isSameRecordingEvidence(current, candidate) ? "Same recording details and timing"
+        : facts.timingState !== "accepted" ? "Start or Finish needs review" : undefined;
+    return { id: candidate.id, name: candidate.name, date: candidate.date, totalSeconds: facts.totalSeconds,
+      eligible: reason === undefined, reason };
+  });
+}
+
 export function coachingRunFacts(session:SavedAnalysisSession):CoachingRunFacts {
   const summary=summarizeAttempt(session);
   const markers=sanitizeTimestampSequence(session.timestamps,session.videoMetadata?.duration);
-  const marker=(id:TimestampMarker["id"])=>markers.find(m=>m.id===id&&Number.isFinite(m.rawTime));
+  const marker=(id:TimestampMarker["id"])=>markers.find(m=>m.id===id&&m.source!=="Not set"&&Number.isFinite(m.rawTime));
   const metric=(id:string)=>summary.metrics.find(m=>m.id===id&&(m.confidence==="High"||m.confidence==="Medium"));
   const total=metric("total");
   const empty:CoachingRunFacts={timingState:!marker("startSignal")?"missing-start":!marker("finishPad")?"missing-finish":"review",
@@ -26,6 +63,9 @@ export function coachingRunFacts(session:SavedAnalysisSession):CoachingRunFacts 
 }
 
 export function buildCoachingEvidence(current:SavedAnalysisSession,goal:CoachingGoal,baseline?:SavedAnalysisSession) {
+  if (baseline && !coachingBaselineOptions(current, [baseline])[0].eligible) {
+    throw new Error("Choose a different saved attempt with accepted Start and Finish timing.");
+  }
   const packet:CoachingPacket={version:1,goal,current:coachingRunFacts(current),baseline:baseline?coachingRunFacts(baseline):null};
   const markers=sanitizeTimestampSequence(current.timestamps,current.videoMetadata?.duration);
   const link=(id:TimestampMarker["id"],label:string):CoachingEvidenceLink[]=>{
@@ -36,8 +76,10 @@ export function buildCoachingEvidence(current:SavedAnalysisSession,goal:Coaching
   const links:Record<string,CoachingEvidenceLink[]>={
     total:[...start,...finish],movement:[...start,...link("firstMovement","View first movement")],halves:[...start,...hold,...finish],
     "total-change":[...start,...finish],"no-change":[...start,...finish],"bottom-change":[...start,...hold],"top-change":[...hold,...finish],
-    "timing-review":[...start,...finish],"hold10-review":[],tracking:[],
+    "phase-balance":[...start,...hold,...finish],
+    "timing-review":[...start,...finish],"hold10-review":link("hold10","Inspect current Hold 10 marker"),tracking:[],
   };
-  return {packet,catalog:buildCoachingCatalog(packet),links,currentName:current.name,baselineName:baseline?.name};
+  return {packet,catalog:buildCoachingCatalog(packet),links,currentName:current.name,baselineName:baseline?.name,
+    sourceFingerprint:coachingEvidenceFingerprint(current,baseline)};
 }
 export type CoachingEvidence = ReturnType<typeof buildCoachingEvidence>;

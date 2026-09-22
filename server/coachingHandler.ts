@@ -1,6 +1,6 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 import { nanoid } from "nanoid";
-import { buildCoachingCatalog, parseCoachingPacket, validateCoachingPlan } from "../src/lib/coachingPolicy.js";
+import { buildCoachingCatalog, COACHING_POLICY_VERSION, parseCoachingPacket, validateCoachingPlan } from "../src/lib/coachingPolicy.js";
 import { generateNimReview } from "./coachingNim.js";
 import { RedisReviewStore, type ReviewRecord, type ReviewStore } from "./coachingStore.js";
 
@@ -68,7 +68,7 @@ export function createCoachingHandler(env: Env, dependencies: { store?: ReviewSt
         if (!body || Object.keys(body).sort().join(",") !== "consent,packet,requestId" || body.consent !== true || typeof body.requestId !== "string" || !/^[\da-f-]{36}$/i.test(body.requestId)) throw new Error();
         packet = parseCoachingPacket(body.packet); requestId = body.requestId;
       } catch { return json({ error: "Invalid request or missing consent." }, 400); }
-      const fingerprint = hash(JSON.stringify({ packet, model: config.model, policy: 1 }));
+      const fingerprint = hash(JSON.stringify({ packet, model: config.model, policy: COACHING_POLICY_VERSION }));
       const record: ReviewRecord = { id: nanoid(), requestId, fingerprint, model: config.model, packet, status: "pending", createdAt: new Date().toISOString(), estimatedCostUsd: null };
       const reservation = await store.reserve(record);
       if (reservation.state === "limited") return json({ error: "Daily workspace review limit reached. Use the local review." }, 429);

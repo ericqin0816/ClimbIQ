@@ -8,7 +8,8 @@ export async function generateNimReview(packet: CoachingPacket, apiKey: string, 
   const result = await generateText({
     model: provider.chatModel(modelId),
     instructions: "Select review priorities from the supplied catalog. Return ONLY JSON with observationIds (up to three distinct approved observation IDs) and focusId (one approved focus ID). Select at least one observation when available. Do not add prose, measurements, diagnoses, causes, training prescriptions, or other keys. Required limitations are always displayed separately.",
-    prompt: JSON.stringify({ goal: packet.goal, observations: catalog.observations, focuses: catalog.focuses }),
+    prompt: JSON.stringify({ goal: packet.goal, headline: catalog.headline, comparisonRows: catalog.comparisonRows,
+      observations: catalog.observations, focuses: catalog.focuses, suggestedPlan: catalog.defaultPlan }),
     maxOutputTokens: 700, maxRetries: 0, abortSignal: AbortSignal.timeout(20_000),
   });
   let plan = null;

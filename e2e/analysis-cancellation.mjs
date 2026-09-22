@@ -76,7 +76,7 @@ try {
   report.version = await evaluate("document.querySelector('main[data-app-version]')?.dataset.appVersion");
 
   const stages = process.argv.includes("--rerun-only") ? [] : process.argv.includes("--target-only")
-    ? ["target"] : ["start", "detail", "target", "finish", "pose"];
+    ? ["target"] : ["start", "detail", "motion", "target", "finish", "pose"];
   for (const stage of stages) {
     console.error(`Testing ${stage} cancellation`);
     await upload(stage === "target" ? recoveryVideo : stage === "detail" ? replacement : primary);
@@ -87,6 +87,7 @@ try {
     await until("[...document.querySelectorAll('button')].some(b => b.textContent.includes('Analyzing climb') && b.disabled)", "analysis starts");
     const stagePattern = stage === "start" ? "Finding the start|Reading|Scanning lane"
       : stage === "detail" ? "Inspecting faint lane lights at higher detail"
+      : stage === "motion" ? "Comparing lane lights, final beep, and body motion"
       : stage === "target" ? "Locating finish targets|Inspecting automatic target"
       : stage === "finish" ? "finish|return-color" : "Following the climber:";
     await until(`new RegExp(${JSON.stringify(stagePattern)}, 'i').test(document.querySelector('.quick-analysis-box .status-message')?.textContent ?? '')`, `${stage} phase`, 150000);
@@ -116,7 +117,8 @@ try {
   await until(`[...document.querySelectorAll('button')].some(b => b.textContent.includes('Analyzing climb') && b.disabled)`, "complete rerun starts");
   await until(`!(${stateExpression}).busy`, "complete rerun", 150000);
   const evidenceExpression = `({ com: document.getElementById('biomechanics-results-heading')?.closest('section')?.textContent ?? '',
-    hold10: document.querySelector('.hold10-second-pass')?.textContent ?? '', previews: document.querySelectorAll('.hold10-evidence-frames img').length })`;
+    hold10: document.querySelector('.hold10-second-pass')?.textContent ?? '', previews: document.querySelectorAll('.hold10-evidence-frames img').length,
+    previewsLoaded: [...document.querySelectorAll('.hold10-evidence-frames img')].every(img => img.complete && img.naturalWidth > 0) })`;
   const priorEvidence = await evaluate(evidenceExpression);
   const captureLaneLedger = () => evaluate(`(() => {
     const original = navigator.clipboard.writeText; let captured;
@@ -130,7 +132,12 @@ try {
   })()`);
   const priorLaneLedger = await captureLaneLedger();
   if (!priorLaneLedger?.entries?.length || !priorLaneLedger.activeLightLaneId) throw new Error('No prior lane evidence was established.');
-  if (!priorEvidence.com || priorEvidence.previews !== 3) throw new Error("Rerun cancellation test did not establish complete prior evidence.");
+  // The source-frame strip now includes approach/follow-through context, with
+  // 5–9 distinct frames; the old three-thumbnail assertion predates that UI.
+  if (!priorEvidence.com || priorEvidence.previews < 5 || priorEvidence.previews > 9 || !priorEvidence.previewsLoaded) {
+    report.priorEvidenceDiagnostic = { state: await evaluate(stateExpression), evidence: priorEvidence, laneLedger: priorLaneLedger };
+    throw new Error("Rerun cancellation test did not establish complete prior evidence.");
+  }
   // A rerun must not discard earlier timing before its replacement Start commits.
   const priorAnalysis = await evaluate(stateExpression);
   await evaluate("[...document.querySelectorAll('button')].find(b => b.textContent.includes('Run full analysis')).click()");

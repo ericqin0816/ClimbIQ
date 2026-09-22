@@ -57,11 +57,22 @@ const fixtures = [
     kind: "finish",
     expected: 31 / 30,
   },
+  {
+    name: "upper-finish-source-frame-30fps.mp4", fps: 30,
+    base: "0x581817", event: "0x228E30", lampY: 8,
+    enable: "gte(n,49)", kind: "upper", expected: 49 / 30,
+  },
+  {
+    name: "upper-finish-distinct-frames-10fps.mp4", fps: 10,
+    base: "0x581817", event: "0x228E30", lampY: 8,
+    enable: "gte(n,17)", kind: "upper", expected: 1.7,
+  },
 ];
 for (const fixture of fixtures) {
   await new Promise((resolve, reject) => {
-    const prelude=fixture.preludeColor?`,drawbox=x=48:y=48:w=16:h=16:color=${fixture.preludeColor}:t=fill:enable='${fixture.preludeEnable}'`:"";
-    const filter = `drawbox=x=48:y=48:w=16:h=16:color=${fixture.base}:t=fill${prelude},drawbox=x=48:y=48:w=16:h=16:color=${fixture.event}:t=fill:enable='${fixture.enable}'`;
+    const lampY = fixture.lampY ?? 48;
+    const prelude=fixture.preludeColor?`,drawbox=x=48:y=${lampY}:w=16:h=16:color=${fixture.preludeColor}:t=fill:enable='${fixture.preludeEnable}'`:"";
+    const filter = `drawbox=x=48:y=${lampY}:w=16:h=16:color=${fixture.base}:t=fill${prelude},drawbox=x=48:y=${lampY}:w=16:h=16:color=${fixture.event}:t=fill:enable='${fixture.enable}'`;
     const child = spawn(
       ffmpeg,
       [
@@ -211,6 +222,7 @@ async function inspect(fixture) {
     "/src/lib/detectStartSignal.ts"
   );
   const { detectFinishSignal } = await import("/src/lib/detectFinishSignal.ts");
+  const { detectTopFinishSignal } = await import("/src/lib/detectTopFinishSignal.ts");
   const {
     sampleZoneOpponentColor,
     computeColorDistance,
@@ -247,9 +259,9 @@ async function inspect(fixture) {
       id: "startLight",
       label: "Synthetic lamp",
       x1: 48 / 128,
-      y1: 48 / 128,
+      y1: (fixture.lampY ?? 48) / 128,
       x2: 64 / 128,
-      y2: 64 / 128,
+      y2: ((fixture.lampY ?? 48) + 16) / 128,
     };
     const initial = (await sampleZoneOpponentColor(video, 0.5, zone))
       .averageRgb;
@@ -266,7 +278,7 @@ async function inspect(fixture) {
         const canvas = document.createElement("canvas");
         canvas.width = canvas.height = 16;
         const context = canvas.getContext("2d", {willReadFrequently:true});
-        context.drawImage(native,48,48,16,16,0,0,16,16);
+        context.drawImage(native,48,fixture.lampY ?? 48,16,16,0,0,16,16);
         const pixels = context.getImageData(0,0,16,16).data;
         calibrationReadback = {cursor:video.currentTime,nativeTime:native.timestamp/1e6,
           nativePixel:Array.from(pixels.slice(0,4)),
@@ -274,7 +286,12 @@ async function inspect(fixture) {
       } finally { native.close(); }
     }
     const runDetector = async (start,sensitivity="medium") =>
-      fixture.kind === "start"
+      fixture.kind === "upper"
+        ? (await detectTopFinishSignal({
+            video, startSignalRawTime: 0, minimumClimbSeconds: start,
+            maximumClimbSeconds: 2.9, expectedFinishTime: fixture.expected,
+          })).result
+      : fixture.kind === "start"
         ? await detectStartSignal({
             video,
             zone,
@@ -368,6 +385,7 @@ async function inspect(fixture) {
       uniqueDetectorFrames: new Set(result.debug.samples.map((s) => s.time))
         .size,
       detectorSamples: result.debug.samples.length,
+      observationIntervalSeconds: result.observationIntervalSeconds,
       legacyRequested: legacy.length,
       legacyUnique: new Set(legacy).size,
       phases,
@@ -377,6 +395,11 @@ async function inspect(fixture) {
       passed:
         result.detected &&
         Math.abs(result.rawTime - fixture.expected) < 0.001 &&
+        (fixture.kind !== "upper" || (
+          result.debug.samples.every(sample => sample.timestampMethod === "video-frame") &&
+          new Set(result.debug.samples.map(sample => sample.time)).size === result.debug.samples.length &&
+          Math.abs(result.observationIntervalSeconds - 1 / fixture.fps) < 0.001
+        )) &&
         phases.every(
           (p) =>
             p.containsExpected &&

@@ -5,6 +5,20 @@ observations are recorded in [benchmarks](benchmarks).
 
 ## Unreleased — iPhone beta foundation
 
+- Added searchable saved attempts, timing filters, offline saved-run editing and
+  review, and undo for the most recent deletion. Visual and keyboard workflow
+  order now agree, with the saved library after the current analysis.
+- Coaching now leads with supported overall/section changes, explains offsetting
+  phases, and keeps unresolved evidence checks visible. Source fingerprints
+  reject stale review links and responses; native review remains local.
+- Refined upper electronic finish cues using actual source frames, including
+  distinct low-frame-rate observations. Failed fine verification cannot retain
+  a High-confidence coarse finish. Motion scans now honor cancellation promptly.
+- Reused one integrity-verified pose model while retaining a fresh tracker for
+  each analysis. Three-pass fetches fell from three to one; measured warm setup
+  savings were small, and no general analysis speedup is claimed.
+- Added elapsed analysis feedback and best-effort screen-awake handling while
+  automatic analysis is active, with release on completion or backgrounding.
 - Added a Capacitor iPhone project with bundled analysis assets, official App,
   Filesystem and Share plugins, privacy metadata, and portable setup/check commands.
 - Added a phone workflow with larger touch controls, safe-area spacing, recording

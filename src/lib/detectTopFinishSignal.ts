@@ -14,6 +14,8 @@ import {
   seekTo,
 } from "./videoFrameSampler";
 import { resolveFinishSearchWindow } from "./finishSearchWindow";
+import { scanSourceFrames } from "./sourceFrameScan";
+import { lightObservationInterval } from "./timingEvidence";
 
 export interface TopFinishFrame {
   time: number;
@@ -25,6 +27,9 @@ export interface TopFinishFrame {
 export interface TopFinishColorSample {
   time: number;
   averageRgb: RGB;
+  cursorTime?: number;
+  timestampMethod?: "video-frame" | "seek-cursor";
+  sourceFrameDurationSeconds?: number;
 }
 
 export interface TopFinishDiscovery {
@@ -156,20 +161,23 @@ export async function detectTopFinishSignal({
 
   const refineStart = Math.max(searchStart, discovery.rawTime - 0.8);
   const refineEnd = Math.min(searchEnd, discovery.rawTime + 1.25);
-  const refineTimes = sampleFramesInRange(refineStart, refineEnd, REFINE_FPS);
+  const estimatedFrames = Math.ceil((refineEnd - refineStart) * REFINE_FPS);
   const refinedSamples: TopFinishColorSample[] = [];
-  for (let index = 0; index < refineTimes.length; index += 1) {
-    throwIfCancelled(signal);
-    const sampled = await sampleZoneAverageColor(video, refineTimes[index], discovery.zone, "cover");
-    refinedSamples.push({ time: roundTime(sampled.time), averageRgb: sampled.averageRgb });
-    onProgress?.("refine", index + 1, refineTimes.length);
-    if (index % 8 === 7) await new Promise<void>((resolve) => setTimeout(resolve, 0));
-  }
+  const indicatorZone = discovery.zone;
+  await scanSourceFrames({ video, start: refineStart, end: refineEnd, fallbackFps: REFINE_FPS, signal,
+    onFrame: async frame => {
+      const sampled = await sampleZoneAverageColor(video, frame.cursorTime, indicatorZone, "cover");
+      refinedSamples.push({ time: frame.rawTime, cursorTime: frame.cursorTime,
+        timestampMethod: frame.decoded ? "video-frame" : "seek-cursor",
+        sourceFrameDurationSeconds: frame.decoded?.durationSeconds, averageRgb: sampled.averageRgb });
+      onProgress?.("refine", refinedSamples.length, Math.max(estimatedFrames, refinedSamples.length));
+    },
+  });
 
   const refined = analyzeTopFinishColorSamples(refinedSamples, discovery.calibration, expectedFinishTime);
   let result = refined.detected
     ? refined
-    : discoveryToResult(discovery);
+    : unconfirmedUpperRefinement(discovery);
   result.debug.normalizedZone = discovery.zone;
   result.debug.calibration = discovery.calibration;
 
@@ -180,6 +188,17 @@ export async function detectTopFinishSignal({
   // clock reference: foreground people can coincide with a timing-unit reset.
   result = requireUpperFinishCorroboration(result, contactDiscovery, expectedFinishTime);
   return { result, zone: discovery.zone, calibration: discovery.calibration };
+}
+
+/** An official total cannot replace visual evidence lost in the finer scan. */
+function unconfirmedUpperRefinement(discovery: TopFinishDiscovery): StartSignalDetectionResult {
+  const coarse = discoveryToResult(discovery);
+  const reason = `${coarse.reason} The finer scan did not confirm this transition; the coarse time requires frame review.`;
+  const candidates = coarse.candidates?.map(candidate => ({
+    ...candidate, confidence: candidate.confidence === "High" ? "Medium" as const : candidate.confidence, reason,
+  }));
+  return { ...coarse, confidence: coarse.confidence === "High" ? "Medium" : coarse.confidence,
+    reason, candidates, debug: { ...coarse.debug, selectedCandidateReason: reason, topCandidates: candidates } };
 }
 
 /** Only an entered official total can promote an upper visual cue to High.
@@ -663,7 +682,6 @@ export function analyzeTopFinishColorSamples(
   );
   const baselineProjection = median(projection.slice(0, baselineCount));
   const normalized = projection.map((value) => value - baselineProjection);
-  const frameInterval = median(samples.slice(1).map((sample, index) => sample.time - samples[index].time));
   const candidates: DetectionCandidate[] = [];
 
   for (let index = baselineCount; index < samples.length - 2; index += 1) {
@@ -706,7 +724,7 @@ export function analyzeTopFinishColorSamples(
 
   if (!candidates.length) return emptyResult("The discovered upper indicator did not produce a frame-level persistent finish transition.");
   const selected = [...candidates].sort((left, right) => left.rawTime - right.rawTime)[0];
-  return resultFromCandidates(selected, candidates, samples, calibration, frameInterval);
+  return resultFromCandidates(selected, candidates, samples, calibration);
 }
 
 /** Brightening an existing red clock digit is not a finish-state transition. */
@@ -730,10 +748,12 @@ function resultFromCandidates(
   candidates: DetectionCandidate[],
   samples: TopFinishColorSample[],
   calibration: StartLightCalibration,
-  frameInterval: number,
 ): StartSignalDetectionResult {
   const debugSamples = samples.map((sample) => ({
     time: sample.time,
+    cursorTime: sample.cursorTime,
+    timestampMethod: sample.timestampMethod,
+    sourceFrameDurationSeconds: sample.sourceFrameDurationSeconds,
     averageRgb: sample.averageRgb,
     colorDistance: computeColorDistance(sample.averageRgb, calibration.beforeStartRGB!),
     distanceToBefore: computeColorDistance(sample.averageRgb, calibration.beforeStartRGB!),
@@ -744,8 +764,11 @@ function resultFromCandidates(
   return {
     detected: true,
     rawTime: selected.rawTime,
+    observationIntervalSeconds: lightObservationInterval(samples, selected.rawTime),
     confidence: selected.confidence,
-    reason: `Finish detected from the perspective-aware upper indicator at ${selected.rawTime.toFixed(3)}s (${Math.round(1 / Math.max(frameInterval, 1 / 120))} fps refinement).`,
+    reason: `Finish detected from the perspective-aware upper indicator at ${selected.rawTime.toFixed(3)}s. ${samples.every(sample => sample.timestampMethod === "video-frame")
+      ? "Refinement used decoded source frames."
+      : "Refinement used video seek positions; source-frame timing is unavailable."}`,
     threshold: 0.16,
     candidates: [selected, ...candidates.filter((candidate) => candidate !== selected)].slice(0, 5),
     debug: {

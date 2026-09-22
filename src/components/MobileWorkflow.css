@@ -2,6 +2,11 @@
   display: none;
 }
 
+/* Keep visual and keyboard reading order aligned with the workflow in App. */
+.app-shell.mobile-workflow-enabled .layout-grid > * {
+  order: 0;
+}
+
 /* Landscape iPhones can be wider than the bottom-navigation breakpoint. */
 @media (min-width: 721px) {
   .app-shell.mobile-workflow-enabled {

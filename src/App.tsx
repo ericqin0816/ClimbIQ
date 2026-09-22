@@ -4,6 +4,8 @@ import { useSavedAttempts } from "./lib/useSavedAttempts";
 import { exportTextFile, exportResultMessage } from "./lib/exportFile";
 import { MobileWorkflow, NextStepCard } from "./components/MobileWorkflow";
 import RecordingGuide from "./components/RecordingGuide";
+import SavedAttemptsPanel from "./components/SavedAttemptsPanel";
+import AnalysisActivity from "./components/AnalysisActivity";
 import "./components/SessionWorkflow.css";
 import TimestampReviewPanel from "./components/TimestampReviewPanel";
 import type { FinishReviewScan } from "./lib/finishReview";
@@ -257,6 +259,7 @@ function App() {
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [sessionStatus, setSessionStatus] = useState("");
   const [libraryStatus, setLibraryStatus] = useState("");
+  const [recentlyDeletedSession, setRecentlyDeletedSession] = useState<SavedAnalysisSession | null>(null);
   const [exportStatus, setExportStatus] = useState("");
   const [obsidianFolderName, setObsidianFolderName] = useState("");
   const [biomechanics, setBiomechanics] = useState<BiomechanicsSession>(createDefaultBiomechanicsSession());
@@ -1548,6 +1551,7 @@ function App() {
       ? await detectMotionBasedStartEstimate({
           video,
           zone: motionProbeZone,
+          signal,
           searchStart: motionSearchHintTime === undefined ? searchStart : Math.max(searchStart, motionSearchHintTime - 0.25),
           searchEnd: motionSearchHintTime === undefined ? searchEnd : Math.min(searchEnd, motionSearchHintTime + 0.9),
           reactionOffset: reactionTimeOffset,
@@ -1741,6 +1745,7 @@ function App() {
       video,
       zone: analysisBodyZone,
       startSignalRawTime: acceptedStart,
+      signal,
       sensitivity: movementSensitivity,
       movementDefinition: firstMovementDefinition,
       committedLaunchMinDelay,
@@ -1947,6 +1952,7 @@ function App() {
       video,
       zone: zoneOverride ?? zones.startBody,
       startSignalRawTime: acceptedStart,
+      signal,
       sensitivity: movementSensitivity,
       movementDefinition: firstMovementDefinition,
       committedLaunchMinDelay,
@@ -3141,8 +3147,11 @@ function App() {
 
   function loadSelectedSession(sessionId: string) {
     const session = savedSessions.find((item) => item.id === sessionId);
-    if (session) {
+    if (session && !videoAnalysisRunning) {
       applySession(session);
+      window.requestAnimationFrame(() => {
+        document.getElementById("results")?.scrollIntoView({ block: "start", behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+      });
     }
   }
 
@@ -3156,13 +3165,25 @@ function App() {
       return;
     }
     const context = analysisContextRef.current;
+    const deletedSession = savedSessions.find(session => session.id === activeSessionId);
     const storageError = await persistSavedSessions(current => current.filter((session) => session.id !== activeSessionId));
     if (storageError) {
       setSessionStatus(storageError);
       return;
     }
     if (context === analysisContextRef.current) setActiveSessionId(null);
+    setRecentlyDeletedSession(deletedSession ?? null);
     setSessionStatus("Saved session deleted.");
+    setLibraryStatus(`Deleted "${deletedSession?.name ?? "saved attempt"}". You can undo this deletion until another attempt is deleted or the app closes.`);
+  }
+
+  async function undoSessionDeletion() {
+    if (!recentlyDeletedSession || videoAnalysisRunning) return;
+    const removed = recentlyDeletedSession;
+    const storageError = await persistSavedSessions(current => mergeSessionLibraries(current, [removed]).sessions);
+    if (storageError) { setLibraryStatus(storageError); return; }
+    setRecentlyDeletedSession(null);
+    setLibraryStatus(`Restored "${removed.name}" to your library.`);
   }
 
   async function renameActiveSession() {
@@ -3379,13 +3400,14 @@ function App() {
         </a>
         <nav className="site-nav" aria-label="Primary navigation">
           <a href="#upload">Analyze</a>
+          <a href="#saved-attempts">Saved attempts</a>
           {hasSelectedVideo && <a href="#video-review">Review</a>}
           {hasSelectedVideo && <a href="#center-of-mass">Insights</a>}
           <span>Runs locally</span>
         </nav>
       </header>
 
-      {!hasSelectedVideo && (
+      {!hasSelectedVideo && !activeSessionId && (
         <section className="hero" aria-labelledby="hero-title">
           <div className="hero-content">
             <p className="eyebrow">Speed climbing video analysis</p>
@@ -3531,42 +3553,12 @@ function App() {
           </div>
           <div className="summary-footer">
             {calculatedClimbTime !== null && <p className="timing-precision-note"><span>{finishPrecisionNote(acceptedFinish)}</span></p>}
-            <p><strong>Review the analysis</strong><span>Check the video against the detected timestamps, then open insights for pace and center-of-mass details.</span></p>
+            <p><strong>{hasLoadedVideo ? "Review the analysis" : "Saved measurements"}</strong><span>{hasLoadedVideo ? "Check the video against the detected timestamps, then open insights for pace and center-of-mass details." : "You can edit notes, export, and review this saved run here. Attach its original recording for frame review."}</span></p>
           </div>
         </section>
         )}
 
-        <Card id="saved-attempts" title="Saved attempts & comparison" className="full secondary-card comparison-card">
-          {!libraryReady && !libraryError && <p role="status">Opening your saved attempts…</p>}
-          {libraryError && <div role="alert"><p>{libraryError}</p><button onClick={reloadLibrary} disabled={librarySaving}>Retry loading saved attempts</button></div>}
-          {libraryNotice && <p className="muted">{libraryNotice}</p>}
-          {librarySaving && <p role="status">Saving your changes…</p>}
-          <SavedSessionsList sessions={savedSessions} activeSessionId={activeSessionId} onLoad={loadSelectedSession} disabled={videoAnalysisRunning || !libraryReady || librarySaving} />
-          {savedSessions.length > 5 && <label className="single-field">All saved attempts<select aria-label="Open saved attempt" value={activeSessionId ?? ""} onChange={event => loadSelectedSession(event.target.value)} disabled={videoAnalysisRunning || !libraryReady || librarySaving}>
-            <option value="">Choose an attempt</option>{savedSessions.map(session => <option key={session.id} value={session.id}>{session.name}</option>)}
-          </select></label>}
-          <Suspense fallback={<p className="muted">Preparing saved attempt comparison…</p>}>
-            <AttemptComparisonPanel sessions={savedSessions} />
-          </Suspense>
-          <div className="library-transfer">
-            <div>
-              <strong>Back up or move your attempts</strong>
-              <p className="muted">Saved on this device. Export a library backup to keep another copy or import it on a different device. Keep your original videos separately.</p>
-            </div>
-            <div className="button-row">
-              <button onClick={exportSessionLibrary} disabled={savedSessions.length === 0 || videoAnalysisRunning || !libraryReady || librarySaving || exportBusy}>
-                Export saved library
-              </button>
-              <label className="file-button">
-                Import session or library
-                <input type="file" accept="application/json,.json" onChange={importSession} disabled={videoAnalysisRunning || !libraryReady || librarySaving} />
-              </label>
-            </div>
-            {libraryStatus && <p className="status-message" role="status">{libraryStatus}</p>}
-          </div>
-        </Card>
-
-        {!hasSelectedVideo && new URLSearchParams(location.search).has("coachingReview") && (
+        {!hasSelectedVideo && !activeSessionId && new URLSearchParams(location.search).has("coachingReview") && (
           <Card id="coaching-review" title="Saved coaching review" className="full secondary-card">
             <Suspense fallback={<p className="muted">Preparing saved review…</p>}>
               <CoachingReviewPanel getCurrentSession={() => buildSessionSnapshot("current-coaching")} sessions={[]} onJump={jumpTo} disabled />
@@ -3574,9 +3566,7 @@ function App() {
           </Card>
         )}
 
-        {hasSelectedVideo && (
-          <>
-
+        {(hasSelectedVideo || activeSessionId !== null) && (
         <Card id="save-analysis" title="Save this analysis" className="full secondary-card session-card">
           <div className="session-save-summary">
             <div><strong>{sessionName || "Current analysis"}</strong>
@@ -3644,6 +3634,25 @@ function App() {
           </details>
         </Card>
 
+        )}
+
+        {(hasSelectedVideo || activeSessionId !== null) && (
+        <Card id="coaching-review" title="Coaching review" className="full secondary-card">
+          <Suspense fallback={<p className="muted">Preparing evidence review…</p>}>
+            <CoachingReviewPanel
+              key={JSON.stringify([videoUrl, activeSessionId, timestamps, zones.startBody, biomechanics.result?.createdAt, biomechanics.calibration, biomechanics.settings, videoAnalysisRunning, savedSessions.map(s => [s.id, s.updatedAt])])}
+              getCurrentSession={() => buildSessionSnapshot(activeSessionId ?? "current-coaching")}
+              sessions={savedSessions}
+              onJump={jumpTo}
+              disabled={videoAnalysisRunning}
+              canSeek={hasLoadedVideo}
+            />
+          </Suspense>
+        </Card>
+        )}
+
+        {hasSelectedVideo && (
+          <>
         <Card id="video-review" title="Review the run" className="full video-review-card">
           <div className={`review-workspace${visibleTimestampReview ? " active" : ""}`}>
           <div className="review-player-area">
@@ -4497,18 +4506,6 @@ function App() {
           </Suspense>
         </Card>
 
-        <Card id="coaching-review" title="Coaching review" className="full secondary-card">
-          <Suspense fallback={<p className="muted">Preparing evidence review…</p>}>
-            <CoachingReviewPanel
-              key={JSON.stringify([videoUrl, activeSessionId, timestamps, zones.startBody, biomechanics.result?.createdAt, biomechanics.calibration, biomechanics.settings, videoAnalysisRunning, savedSessions.map(s => [s.id, s.updatedAt])])}
-              getCurrentSession={() => buildSessionSnapshot(activeSessionId ?? "current-coaching")}
-              sessions={savedSessions}
-              onJump={jumpTo}
-              disabled={videoAnalysisRunning || !metadata?.metadataLoaded}
-            />
-          </Suspense>
-        </Card>
-
         <Card id="export" title="Save & export" className="full secondary-card export-card">
           <p className="muted">
             Export a human-readable Obsidian note or machine-readable JSON dataset. Videos are not stored or uploaded.
@@ -4553,15 +4550,38 @@ function App() {
           </>
         )}
 
+        <Card id="saved-attempts" title="Saved attempts & comparison" className="full secondary-card comparison-card">
+          {!libraryReady && !libraryError && <p role="status">Opening your saved attempts…</p>}
+          {libraryError && <div role="alert"><p>{libraryError}</p><button onClick={reloadLibrary} disabled={librarySaving}>Retry loading saved attempts</button></div>}
+          {libraryNotice && <p className="muted">{libraryNotice}</p>}
+          {librarySaving && <p role="status">Saving your changes…</p>}
+          {recentlyDeletedSession && <button type="button" onClick={undoSessionDeletion} disabled={videoAnalysisRunning || !libraryReady}>Undo last deletion</button>}
+          <SavedAttemptsPanel sessions={savedSessions} activeSessionId={activeSessionId} onLoad={loadSelectedSession}
+            disabled={videoAnalysisRunning || !libraryReady || librarySaving} loading={!libraryReady} />
+          <Suspense fallback={<p className="muted">Preparing saved attempt comparison…</p>}>
+            <AttemptComparisonPanel sessions={savedSessions} />
+          </Suspense>
+          <div className="library-transfer">
+            <div>
+              <strong>Back up or move your attempts</strong>
+              <p className="muted">Saved on this device. Export a library backup to keep another copy or import it on a different device. Keep your original videos separately.</p>
+            </div>
+            <div className="button-row">
+              <button onClick={exportSessionLibrary} disabled={savedSessions.length === 0 || videoAnalysisRunning || !libraryReady || librarySaving || exportBusy}>
+                Export saved library
+              </button>
+              <label className="file-button">
+                Import session or library
+                <input type="file" accept="application/json,.json" onChange={importSession} disabled={videoAnalysisRunning || !libraryReady || librarySaving} />
+              </label>
+            </div>
+            {libraryStatus && <p className="status-message" role="status">{libraryStatus}</p>}
+          </div>
+        </Card>
+
       </section>
       <MobileWorkflow hasVideo={hasLoadedVideo} hasResults={(hasSelectedVideo || activeSessionId !== null) && calculatedClimbTime !== null} analysisRunning={videoAnalysisRunning} savedCount={savedSessions.length} />
-      {autoAnalysisRunning && (
-        <aside className="analysis-tray" aria-live="polite">
-          <span className="analysis-spinner" aria-hidden="true" />
-          <div><strong>ClimbIQ is analyzing your video</strong><small>{autoAnalysisStatus || "Finding the athlete, timing signals, and wall geometry…"}</small></div>
-          <button onClick={() => autoAnalysisAbortRef.current?.abort()}>Cancel</button>
-        </aside>
-      )}
+      <AnalysisActivity active={autoAnalysisRunning} status={autoAnalysisStatus} onCancel={() => autoAnalysisAbortRef.current?.abort()} />
     </main>
   );
 }
@@ -4590,38 +4610,6 @@ function Metric({ label, value }: { label: string; value: string }) {
     <div className="metric">
       <span>{label}</span>
       <strong>{value}</strong>
-    </div>
-  );
-}
-
-function SavedSessionsList({
-  sessions,
-  activeSessionId,
-  onLoad,
-  disabled = false,
-}: {
-  sessions: SavedAnalysisSession[];
-  activeSessionId: string | null;
-  onLoad: (sessionId: string) => void;
-  disabled?: boolean;
-}) {
-  if (!sessions.length) {
-    return <p className="muted">No saved sessions yet.</p>;
-  }
-
-  return (
-    <div className="saved-session-list">
-      {sessions.slice(0, 5).map((session) => (
-        <button
-          key={session.id}
-          className={session.id === activeSessionId ? "active" : ""}
-          onClick={() => onLoad(session.id)}
-          disabled={disabled}
-        >
-          <strong>{session.name}</strong>
-          <span>{session.date || "No date"}{session.videoFileName ? ` / ${session.videoFileName}` : ""}</span>
-        </button>
-      ))}
     </div>
   );
 }
