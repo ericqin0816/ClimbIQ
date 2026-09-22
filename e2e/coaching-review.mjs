@@ -1,21 +1,16 @@
 // Controlled component/browser contract test. No live provider calls or private media.
-import { spawn } from "node:child_process";
 import { mkdir, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import path from "node:path";
 import { createProtocolClient } from "./cdp-client.mjs";
-import { closeTestBrowser } from "./browser-lifecycle.mjs";
+import { startTestBrowser } from "./test-browser.mjs";
 
-const port = Number(process.env.CLIMBIQ_COACHING_TEST_PORT ?? 9341);
 const url = process.env.CLIMBIQ_E2E_URL ?? "http://127.0.0.1:5173/";
-const executable = process.env.CLIMBIQ_CHROME ?? (process.platform === "win32" ? "C:/Program Files/Google/Chrome/Application/chrome.exe" : process.platform === "darwin" ? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" : "/usr/bin/google-chrome");
-const child = spawn(executable, ["--headless=new", "--no-first-run", `--remote-debugging-port=${port}`, `--user-data-dir=${path.join(tmpdir(), `climbiq-coaching-${Date.now()}`)}`], { stdio: "ignore" });
+const browser = await startTestBrowser({ label: "coaching", port: Number(process.env.CLIMBIQ_COACHING_TEST_PORT ?? process.env.CLIMBIQ_E2E_PORT ?? 0) });
+const port = browser.port;
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
-let send;
+let send, socket;
 try {
-  for (let i = 0; i < 100; i++) { try { if ((await fetch(`http://127.0.0.1:${port}/json/version`)).ok) break; } catch {} await delay(100); }
   const target = await (await fetch(`http://127.0.0.1:${port}/json/new?${encodeURIComponent(url)}`, { method: "PUT" })).json();
-  const socket = new WebSocket(target.webSocketDebuggerUrl);
+  socket = new WebSocket(target.webSocketDebuggerUrl);
   await new Promise((resolve, reject) => { socket.addEventListener("open", resolve, { once: true }); socket.addEventListener("error", reject, { once: true }); });
   ({ send } = createProtocolClient(socket));
   const evaluate = async expression => {
@@ -34,7 +29,7 @@ try {
     const {default:Panel} = await import('/src/components/CoachingReviewPanel.tsx');
     const {default:ComparisonPanel} = await import('/src/components/AttemptComparisonPanel.tsx');
     const {buildCoachingCatalog} = await import('/src/lib/coachingPolicy.ts');
-    window.__calls=[]; window.__jumps=[]; window.__slow=false; window.__statusCalls=0;
+    window.__calls=[]; window.__jumps=[]; window.__slow=false; window.__statusCalls=0; window.__heldResponses=[];
     const nativeFetch=window.fetch;
     window.fetch=async(input,init)=>{
       if(!String(input).startsWith('/api/coaching'))return nativeFetch(input,init);
@@ -42,10 +37,13 @@ try {
       if(init?.method==='POST'){
         const body=JSON.parse(init.body);window.__calls.push(body);
         window.__record={id:'abcdefghijklmnopqrstu',status:'complete',packet:body.packet,plan:buildCoachingCatalog(body.packet).defaultPlan};
+        if(window.__holdResponse)await new Promise(resolve=>window.__heldResponses.push(resolve));
         if(window.__slow)await new Promise(r=>setTimeout(r,250));
+        if(window.__htmlResponse)return new Response('<html>Service unavailable</html>',{status:503});
         return Response.json(window.__record);
       }
-      return Response.json(window.__record);
+      if(window.__holdGetResponse)await new Promise(resolve=>window.__heldResponses.push(resolve));
+      return Response.json(window.__wrongReviewId?{...window.__record,id:'BBBBBBBBBBBBBBBBBBBBB'}:window.__record);
     };
     const markers=[['startSignal',9.4],['firstMovement',9.6],['hold10',15.9],['finishPad',21.655]];
     const s={id:'current',version:1,name:'Controlled UI fixture',climberName:'PRIVATE NAME',location:'PRIVATE GYM',notes:'PRIVATE NOTES',date:'2026-09-08',attemptType:'Training',createdAt:'2026-09-08T00:00:00Z',updatedAt:'2026-09-08T00:00:00Z',videoMetadata:null,zones:{},startLightCalibration:{},
@@ -72,7 +70,18 @@ try {
   await wait("document.body.innerText.includes('AI-prioritized review')");
   check(!JSON.stringify(await evaluate("window.__calls")).match(/PRIVATE|rawTime|location|notes/), "Private metadata reached mocked API.");
   check((await text()).includes("What this review can establish"), "Model selection hid mandatory limits.");
-  await click("Load saved review");
+  await evaluate("window.__holdGetResponse=true"); await click("Load saved review");
+  await wait("!![...document.querySelectorAll('button')].find(b=>b.textContent==='Stop waiting')");
+  check(await evaluate("[...document.querySelectorAll('.coaching-hosted input:not([type=checkbox])')].every(input=>input.disabled)"), "Saved-review identity fields remain editable during a request.");
+  await click("Stop waiting");
+  await evaluate(`(()=>{const input=document.querySelector('.coaching-hosted label:last-of-type input');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(input,'BBBBBBBBBBBBBBBBBBBBB');input.dispatchEvent(new Event('input',{bubbles:true}));window.__holdGetResponse=false;window.__heldResponses.shift()()})()`);
+  await delay(60);
+  check(await evaluate("document.querySelector('.coaching-hosted label:last-of-type input').value==='BBBBBBBBBBBBBBBBBBBBB' && !document.body.innerText.includes('Saved numeric review')"), "A cancelled archive response replaced the edited review ID or loaded stale data.");
+  await evaluate(`(()=>{const input=document.querySelector('.coaching-hosted label:last-of-type input');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(input,'abcdefghijklmnopqrstu');input.dispatchEvent(new Event('input',{bubbles:true}));window.__wrongReviewId=true})()`);
+  await delay(40); await click("Load saved review");
+  await wait("document.body.innerText.includes('does not match the requested saved review')");
+  check(await evaluate("!document.body.innerText.includes('Saved numeric review') && document.querySelector('.coaching-hosted label:last-of-type input').value==='abcdefghijklmnopqrstu'"), "A mismatched archive response changed the displayed review or requested ID.");
+  await evaluate("window.__wrongReviewId=false"); await click("Load saved review");
   await wait("document.body.innerText.includes('Saved numeric review')");
   check(await evaluate("!document.querySelector('.coaching-result button')"), "Archived record has local-video seek links.");
   await evaluate(`(()=>{const select=document.querySelector('select');Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype,'value').set.call(select,'start');select.dispatchEvent(new Event('change',{bubbles:true}))})()`);
@@ -81,6 +90,36 @@ try {
   await evaluate(`(()=>{const select=document.querySelector('select');Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype,'value').set.call(select,'halves');select.dispatchEvent(new Event('change',{bubbles:true}))})()`);
   await delay(350);
   check(await evaluate("!document.querySelector('.coaching-result')"), "A stale in-flight response restored old evidence.");
+
+  // Recovery keeps local evidence and the idempotency key. The mock deliberately
+  // ignores abort so an old response can arrive during the replacement request.
+  await evaluate("window.__slow=false;window.__holdResponse=true");
+  await click("Review my run"); await click("Prioritize with NIM");
+  await wait("!![...document.querySelectorAll('button')].find(b=>b.textContent==='Stop waiting')");
+  const stoppedRequestId = await evaluate("window.__calls.at(-1).requestId");
+  await click("Stop waiting");
+  check((await text()).includes("Local evidence review") && (await text()).includes("Stopped waiting"), "Stopping the request lost local evidence or did not recover controls.");
+  await click("Prioritize with NIM");
+  check(await evaluate("window.__calls.at(-1).requestId") === stoppedRequestId, "Retrying after stop changed the generation request ID.");
+  await evaluate("window.__heldResponses.shift()()"); await delay(60);
+  check(await evaluate("!![...document.querySelectorAll('button')].find(b=>b.textContent==='Stop waiting') && !document.body.innerText.includes('AI-prioritized review')"), "An old response interrupted the replacement request.");
+  await evaluate("window.__holdResponse=false;window.__heldResponses.shift()()");
+  await wait("document.body.innerText.includes('AI-prioritized review')");
+
+  await click("Review my run");
+  await evaluate("window.__holdResponse=true;window.__nativeSetTimeout=window.setTimeout;window.setTimeout=(fn,ms,...args)=>window.__nativeSetTimeout(fn,ms===35000?100:ms,...args)");
+  await click("Prioritize with NIM");
+  await wait("document.body.innerText.includes('took too long')");
+  await evaluate("window.setTimeout=window.__nativeSetTimeout;window.__holdResponse=false;window.__htmlResponse=true;window.__heldResponses.shift()()");
+  const timedOutRequestId = await evaluate("window.__calls.at(-1).requestId");
+  check((await text()).includes("Local evidence review") && await evaluate("![...document.querySelectorAll('button')].find(b=>b.textContent==='Prioritize with NIM').disabled"), "A timed-out response lost local evidence or left the action disabled.");
+  await click("Prioritize with NIM");
+  await wait("document.body.innerText.includes('unreadable response')");
+  check(await evaluate("window.__calls.at(-1).requestId") === timedOutRequestId, "Retrying after timeout changed the generation request ID.");
+  check((await text()).includes("Local evidence review"), "An HTML error response hid the local review.");
+  await evaluate("window.__htmlResponse=false"); await click("Prioritize with NIM");
+  await wait("document.body.innerText.includes('AI-prioritized review')");
+  check(await evaluate("window.__calls.at(-1).requestId") === timedOutRequestId, "Error recovery started a distinct generation request.");
 
   // Canonical baseline math is visible without the hosted service choosing it.
   await evaluate(`(()=>{
@@ -192,5 +231,5 @@ try {
     const shot=await send('Page.captureScreenshot',{format:'png',captureBeyondViewport:true});
     await writeFile(`test-results/coaching-${name}.png`,Buffer.from(shot.data,'base64'));
   }
-  console.log(JSON.stringify({passed:true,localFacts:true,contactGate:true,sourceLinks:true,optIn:true,privateMetadataExcluded:true,mandatoryLimits:true,archivedLinksWithheld:true,staleResponseRejected:true,comparisonPriorities:true,offsettingPhases:true,offlineSavedReview:true,sourceIdentityGuard:true,duplicateLineageGuard:true,distinctAttemptConfirmation:true,annotationComparison:true,nativeNoHostedRequests:true,responsive:true,provider:'mocked; no live NIM call'},null,2));
-} finally { await closeTestBrowser(child,send); }
+  console.log(JSON.stringify({passed:true,localFacts:true,contactGate:true,sourceLinks:true,optIn:true,privateMetadataExcluded:true,mandatoryLimits:true,archivedLinksWithheld:true,staleResponseRejected:true,stoppedRequestRecovery:true,timeoutRecovery:true,unreadableResponseRecovery:true,sameRequestIdOnRetry:true,comparisonPriorities:true,offsettingPhases:true,offlineSavedReview:true,sourceIdentityGuard:true,duplicateLineageGuard:true,distinctAttemptConfirmation:true,annotationComparison:true,nativeNoHostedRequests:true,responsive:true,provider:'mocked; no live NIM call'},null,2));
+} finally { try { await browser.close(send); } finally { socket?.close(); } }

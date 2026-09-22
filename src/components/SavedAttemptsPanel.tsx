@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import type { SavedAnalysisSession } from "../types";
 import { buildSavedAttemptRows, searchSavedAttempts, type SavedAttemptFilter, type SavedAttemptSort } from "../lib/savedAttemptSearch";
 import "./SavedAttemptsPanel.css";
@@ -12,6 +12,7 @@ interface SavedAttemptsPanelProps {
 }
 
 export default function SavedAttemptsPanel({ sessions, activeSessionId, onLoad, disabled = false, loading = false }: SavedAttemptsPanelProps) {
+  const searchRef = useRef<HTMLInputElement>(null);
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<SavedAttemptFilter>("all");
   const [sort, setSort] = useState<SavedAttemptSort>("updated");
@@ -35,7 +36,7 @@ export default function SavedAttemptsPanel({ sessions, activeSessionId, onLoad, 
     </div>
     <div className="attempt-library-tools">
       <label className="attempt-library-search">Find an attempt
-        <input type="search" value={query} placeholder="Name, climber, gym, date, or notes" onChange={event => { setQuery(event.target.value); setVisibleCount(8); }} />
+        <input ref={searchRef} type="search" value={query} placeholder="Name, climber, gym, date, or notes" onChange={event => { setQuery(event.target.value); setVisibleCount(8); }} />
       </label>
       <label>Show<select value={filter} onChange={event => { setFilter(event.target.value as SavedAttemptFilter); setVisibleCount(8); }}>
         <option value="all">All attempts</option><option value="timed">Timing available</option><option value="review">Timing needs review</option>
@@ -47,7 +48,7 @@ export default function SavedAttemptsPanel({ sessions, activeSessionId, onLoad, 
     <p className="attempt-library-count" role="status">{matches.length} of {sessions.length} {sessions.length === 1 ? "attempt" : "attempts"}{query.trim() || filter !== "all" ? " match" : " shown"}{matches.length > visibleCount ? ` · first ${visibleCount} below` : ""}</p>
     {!matches.length ? <div className="attempt-library-empty">
       <strong>No attempts match this search.</strong><p>Try a name, gym, recording date, or a word from your notes.</p>
-      <button type="button" onClick={() => { setQuery(""); setFilter("all"); setVisibleCount(8); }}>Clear search and filters</button>
+      <button type="button" onClick={() => { setQuery(""); setFilter("all"); setVisibleCount(8); searchRef.current?.focus(); }}>Clear search and filters</button>
     </div> : <div className="saved-session-list attempt-library-list">
       {matches.slice(0, visibleCount).map(({ session, totalSeconds, needsReview }) => <button type="button" key={session.id}
         className={`attempt-library-row${session.id === activeSessionId ? " active" : ""}`} onClick={() => onLoad(session.id)} disabled={disabled}

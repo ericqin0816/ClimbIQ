@@ -79,3 +79,34 @@ Native WKWebView, device heat, battery, memory pressure, and actual iPhone respo
 After `npm run build`, run `node e2e/pose-worker-build-smoke.mjs`. This synthetic-only check owns an ephemeral preview server and browser profile, finds the emitted worker through the built app's actual module graph, and verifies the served assets match the selected build. It initializes the packaged model and module WASM loader in a strict worker, sends two blank frames, requires valid array replies, and terminates the worker. It cannot silently pass using the main-thread fallback. No private recordings, labels, or pose-accuracy assertions are involved.
 
 Use `--build-dir path` for a frozen build or `--url http://127.0.0.1:port/` for an existing preview; an existing preview must serve the same selected build. The first local run checked 24 built assets and passed with one worker created and terminated. This catches production bundling/loader regressions; it does not replace the real-video parity or native-device checks above.
+
+## Repeated crop rendering
+
+The crop canvas now requests `willReadFrequently: true` from creation. This asks the browser to prefer software rendering for the fractional video crop; it adds no explicit pixel-readback loop. The model, tracker options, crop geometry, identity checks, and timing gates remain unchanged. The [canvas specification](https://html.spec.whatwg.org/multipage/canvas.html) describes the software preference and leaves the precise smoothing algorithm to the browser, so this is not a guarantee of identical behavior across browsers or devices.
+
+The earlier variation was reproduced in an ignored, frozen laboratory build. It logged exact crop rectangles, source-frame timestamps, and raw unrounded model outputs. Ordinary rendering used no additional pixel reads or VideoFrames. Every repeat used a fresh VIDEO tracker. Three passes per condition, two complete recordings, both backends, fresh browser processes, reversed order, and fixed-pixel replays were compared. Input recordings were checked by checksum and stayed local. See [pose-repeatability-2026-09-22.json](../benchmarks/pose-repeatability-2026-09-22.json) for hashes and aggregate results.
+
+| Control | Observation in desktop Chrome |
+| --- | --- |
+| Ordinary canvas, `12.24.mov` | 45, 35, 35 usable COM frames; raw outputs diverged at 10.2 s despite the same crop rectangle and source timestamp. |
+| Add 5 ms after every crop | Each run's raw output exactly matched its corresponding ordinary run; waiting alone did not remove the variation. |
+| Software preference from creation | 44, 44, 44 frames; exact raw outputs, crop sequence, and result frames across main-thread, worker, and reversed-order fresh-process runs. |
+| Explicit readback before or after inference | Both sequences gave 45, 45, 44 frames and matching corresponding raw outputs. Readback changed later rendering behavior and was not a stable substitute. |
+| Replay one captured RGBA sequence | Three fresh trackers per backend exactly matched the capture and each other. |
+| Second recording, `IMG_9199.MOV` | Both paths repeated consistently; software gave 43/52 in the direct harness and matched exactly between backends. |
+
+A separate rendering probe held the same NV12/BT709 source frame at 10.171667 s. Full-frame RGBA pixels matched exactly between ordinary and software canvases. The fractional video crop differed in 2,854 of 182,016 channel values, each by one byte level, in either draw order. Drawing the pinned VideoFrame instead followed another consistent crop path. This supports a source/resampling-path explanation rather than a wrong source timestamp or a broad color-conversion error. The internal browser backing was not measured, and pixel readback itself affects execution, so these observations do not identify a specific GPU implementation bug.
+
+This change trades some speed for the demonstrated repeatability. On the second clip, the three-run median rose from about 3.80 to 4.48 s on the main thread and 3.84 to 4.53 s in the worker. Those timings include different resulting crop trajectories; they are not isolated rendering costs. The first clip showed no comparable total-pass penalty. Software rendering changes model inputs and outputs: neither a larger nor smaller usable-frame count establishes accuracy.
+
+The frozen application prototype passed all six original workflows. Accepted timing stayed unchanged; the unverified-Finish clip still paused COM, and the three weak-Start clips still required review. The complete clips produced 44/62 and 44/52 usable COM frames under the application's settings, which differ from the direct harness's defaults. Actual pointer cancellation reached its handler in 2 ms and restored the cursor in 1.690 s in one desktop run. Native WKWebView repeatability, cost, heat, and battery remain unverified; native inference still uses the existing main-thread backend.
+
+The permanent `e2e/pose-repeatability.mjs` check runs Full analysis repeatedly on the same recording and document, comparing complete pose frames, accepted markers, calibration, athlete identity, and source-frame audit. It checks the original local recording checksums and refuses a Vite development page. With an immutable production preview running on port 4173 and the original private clips available locally:
+
+```sh
+node e2e/pose-repeatability.mjs --repeats=2 --report=test-results/pose-repeatability.json
+```
+
+`CLIMBIQ_E2E_URL` selects another preview and `CLIMBIQ_VIDEO_DIR` selects the local recording directory. This regression is separate from synthetic CI checks; it needs the two original recordings and does not upload or commit them.
+
+The subsequent build emitted from the source change passed this check: two consecutive Full analyses on each loaded recording produced identical complete pose frames, accepted markers, calibration, identity region, and source-frame audit. A second browser invocation reproduced the same frame hashes. The current build also passed all six original full workflows and kept the review/rejection outcomes above. Its pointer-cancel observation was 1 ms to the handler and 1.707 s through cursor restoration, with one worker created and terminated and none pending.

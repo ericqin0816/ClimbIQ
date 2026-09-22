@@ -102,7 +102,9 @@ export async function analyzePoseVideo({
   let missedFrames = 0;
   let lastInferenceTimestamp = -1;
   const cropCanvas = document.createElement("canvas");
-  const cropContext = cropCanvas.getContext("2d", { alpha: false });
+  // Prefer a consistent software raster path for fractional video crops.
+  // Default canvas resampling varied across otherwise identical repeated passes.
+  const cropContext = cropCanvas.getContext("2d", { alpha: false, willReadFrequently: true });
 
   try {
     onBackendSelected?.({ backend: landmarker.backend, fallbackReason: landmarker.fallbackReason });

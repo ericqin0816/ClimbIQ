@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { SavedAnalysisSession, TimestampMarker } from "../types";
-import { buildCoachingEvidence, coachingBaselineOptions, coachingEvidenceFingerprint, coachingRunFacts } from "./coachingEvidence";
+import { buildCoachingEvidence, coachingBaselineOptions, coachingEvidenceFingerprint, coachingRunFacts, coachingTimingFacts } from "./coachingEvidence";
 
 function session(): SavedAnalysisSession {
   const markers = [["startSignal", 9.4], ["firstMovement", 9.6], ["hold10", 15.9], ["finishPad", 21.655]] as const;
@@ -40,6 +40,37 @@ describe("coaching session adapter", () => {
     ]);
     expect(() => buildCoachingEvidence(current, "overview", current)).toThrow("different saved attempt");
     expect(() => buildCoachingEvidence(current, "overview", missing)).toThrow("different saved attempt");
+  });
+  it("lists baseline eligibility without reading every saved tracking result", () => {
+    const current = session(), candidate = { ...session(), id: "other" };
+    Object.defineProperty(candidate, "biomechanics", { get() { throw new Error("A baseline selector must not traverse saved COM"); } });
+    expect(coachingBaselineOptions(current, [candidate])).toMatchObject([{ eligible: true, totalSeconds: 12.255 }]);
+    candidate.timestamps.find(marker => marker.id === "finishPad")!.confidence = "Low";
+    expect(coachingBaselineOptions(current, [candidate])).toMatchObject([{ eligible: false, totalSeconds: null }]);
+  });
+  it("preserves full-facts timing eligibility and floors at duration, confidence, source, and rounding boundaries", () => {
+    const starts = [null, -1, 0, 9.4, Number.NaN];
+    const finishes = [null, 9.4, 9.4011, 9.402, 21.655, 609.4, 609.4004, 609.402, 610, Number.POSITIVE_INFINITY];
+    for (const start of starts) for (const finish of finishes) for (const confidence of ["High", "Medium", "Low", "None"] as const) {
+      for (const source of ["Manual", "Not set", "Motion-based estimate"] as const) for (const duration of [undefined, 20]) {
+        const candidate = { ...session(), id: "candidate" };
+        const startMarker = candidate.timestamps.find(marker => marker.id === "startSignal")!;
+        const finishMarker = candidate.timestamps.find(marker => marker.id === "finishPad")!;
+        startMarker.rawTime = start;
+        startMarker.source = source;
+        startMarker.observationIntervalSeconds = 1 / 60;
+        finishMarker.rawTime = finish;
+        finishMarker.confidence = confidence;
+        finishMarker.observationIntervalSeconds = .35;
+        if (duration !== undefined) candidate.videoMetadata = { fileName: "clip.mp4", duration, videoWidth: 640, videoHeight: 480, metadataLoaded: false };
+        const fullFacts = coachingRunFacts(candidate);
+        const timingFacts = coachingTimingFacts(candidate);
+        expect(timingFacts, JSON.stringify({ start, finish, confidence, source, duration })).toEqual({ timingState: fullFacts.timingState, totalSeconds: fullFacts.totalSeconds, comparisonFloorSeconds: fullFacts.comparisonFloorsSeconds.total });
+        const option = coachingBaselineOptions(session(), [candidate])[0];
+        expect(option.eligible).toBe(fullFacts.timingState === "accepted");
+        expect(option.totalSeconds).toBe(fullFacts.totalSeconds);
+      }
+    }
   });
   it("requests distinct-attempt confirmation for ambiguous metadata collisions", () => {
     const current = session();

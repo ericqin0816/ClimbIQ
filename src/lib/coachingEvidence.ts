@@ -1,5 +1,5 @@
 import type {SavedAnalysisSession, TimestampMarker} from "../types";
-import {summarizeAttempt} from "./attemptComparison";
+import {summarizeAttempt, summarizeAttemptTiming} from "./attemptComparison";
 import {sanitizeTimestampSequence} from "./timestampIntegrity";
 import {describeSpeedTrace} from "./biomechanicsPresentation";
 import {assessAttemptIdentity, resolveAttemptLineageId} from "./attemptIdentity";
@@ -26,7 +26,7 @@ export function coachingEvidenceFingerprint(current: SavedAnalysisSession, basel
 
 export function coachingBaselineOptions(current: SavedAnalysisSession, sessions: SavedAnalysisSession[]): CoachingBaselineOption[] {
   return sessions.map(candidate => {
-    const facts = coachingRunFacts(candidate);
+    const facts = coachingTimingFacts(candidate);
     const identity = assessAttemptIdentity(current, candidate);
     const reason = candidate.id === current.id ? "Current attempt"
       : identity.relationship === "same-attempt" ? "Another analysis of the same attempt"
@@ -35,6 +35,17 @@ export function coachingBaselineOptions(current: SavedAnalysisSession, sessions:
       eligible: reason === undefined, reason, requiresDistinctAttemptConfirmation: !reason && identity.requiresDistinctAttemptConfirmation,
       warning: !reason && identity.requiresDistinctAttemptConfirmation ? identity.explanation : undefined };
   });
+}
+
+/** Marker-only facts for candidate selection; detailed tracking stays with the chosen runs. */
+export function coachingTimingFacts(session: SavedAnalysisSession): Pick<CoachingRunFacts, "timingState" | "totalSeconds"> & { comparisonFloorSeconds: number } {
+  const { metrics, timestamps } = summarizeAttemptTiming(session);
+  const marker = (id: TimestampMarker["id"]) => timestamps.find(item => item.id === id && item.source !== "Not set" && Number.isFinite(item.rawTime));
+  const total = metrics.find(item => item.id === "total" && (item.confidence === "High" || item.confidence === "Medium"));
+  if (!total || total.valueSeconds <= 0 || total.valueSeconds > 600) {
+    return { timingState: !marker("startSignal") ? "missing-start" : !marker("finishPad") ? "missing-finish" : "review", totalSeconds: null, comparisonFloorSeconds: .1 };
+  }
+  return { timingState: "accepted", totalSeconds: total.valueSeconds, comparisonFloorSeconds: Math.min(600, Math.max(.1, total.comparisonFloorSeconds)) };
 }
 
 export function coachingRunFacts(session:SavedAnalysisSession):CoachingRunFacts {

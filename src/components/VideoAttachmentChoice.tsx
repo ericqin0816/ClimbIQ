@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react";
 import "./VideoAttachmentChoice.css";
 
 interface VideoAttachmentChoiceProps {
@@ -10,7 +11,25 @@ interface VideoAttachmentChoiceProps {
 }
 
 export default function VideoAttachmentChoice({ fileName, previewDataUrl, sessionName, onAttach, onNewAttempt, onCancel }: VideoAttachmentChoiceProps) {
-  return <section className="video-attachment-choice" aria-labelledby="video-attachment-title" data-video-attachment-choice>
+  const choiceRef = useRef<HTMLElement>(null);
+  const returnFocusRef = useRef<HTMLElement | null>(null);
+
+  useEffect(() => {
+    if (!returnFocusRef.current) returnFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    choiceRef.current?.focus({ preventScroll: true });
+    choiceRef.current?.scrollIntoView({ block: "start", behavior: "instant" });
+  }, []);
+
+  function cancelChoice() {
+    const previousControl = returnFocusRef.current;
+    onCancel();
+    // Wait for the pending choice to release any disabled initiating control.
+    window.requestAnimationFrame(() => {
+      if (previousControl?.isConnected && (document.activeElement === document.body || !document.activeElement)) previousControl.focus();
+    });
+  }
+
+  return <section ref={choiceRef} className="video-attachment-choice" tabIndex={-1} aria-labelledby="video-attachment-title" data-video-attachment-choice>
     {previewDataUrl && <img src={previewDataUrl} alt={`Preview of ${fileName}`} />}
     <div>
       <h3 id="video-attachment-title">Is this the original recording?</h3>
@@ -19,7 +38,7 @@ export default function VideoAttachmentChoice({ fileName, previewDataUrl, sessio
       <div className="button-row">
         <button type="button" className="primary" onClick={onAttach}>Attach to this attempt</button>
         <button type="button" onClick={onNewAttempt}>Analyze as a new attempt</button>
-        <button type="button" onClick={onCancel}>Cancel</button>
+        <button type="button" onClick={cancelChoice}>Cancel</button>
       </div>
     </div>
   </section>;

@@ -28,8 +28,8 @@ child cannot be stopped, the helper reports the retained profile instead of
 deleting files that the browser might still be writing. It never searches for or
 deletes historical profiles.
 
-The upload, cancellation, finish-review, and real-video timing runners use this
-helper. Existing test assertions and workflow modes are retained.
+The upload, cancellation, finish-review, real-video timing, and coaching runners
+use this helper. Existing test assertions and workflow modes are retained.
 
 - `CLIMBIQ_CHROME` overrides the Chrome executable.
 - `CLIMBIQ_E2E_URL` selects the app URL in each runner.

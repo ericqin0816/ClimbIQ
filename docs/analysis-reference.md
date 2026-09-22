@@ -320,7 +320,7 @@ Vercel should use:
 - Build command: `npm run build`
 - Output directory: `dist`
 
-The app is still client-only. Uploaded videos are read locally in the browser with `HTMLVideoElement` and canvas; this version does not upload videos, store files, or use a backend.
+Video analysis runs locally with `HTMLVideoElement`, canvas, and the bundled pose model; raw video is never uploaded. Saved attempts contain local analysis data, not the recording. The web app can optionally use the hosted coaching backend after explicit opt-in, sending only the validated numeric evidence packet described in [Coaching](coaching.md). The native iOS app keeps coaching and analysis local and does not call the hosted coaching service.
 
 ## Diagnostic Data
 

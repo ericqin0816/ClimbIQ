@@ -5,6 +5,17 @@ observations are recorded in [benchmarks](benchmarks).
 
 ## Unreleased — iPhone beta foundation
 
+- Saved comparison and coaching selectors use accepted timing directly instead
+  of processing every stored motion trace. Full tracking summaries are still
+  calculated for the selected attempts.
+- Online coaching waits have a timeout and a Stop waiting action. Local evidence
+  stays available after interrupted or unreadable responses, and retries keep
+  the same request ID to avoid starting a duplicate generation. Saved-review
+  responses must match the requested ID before they can replace the display.
+  Saving unchanged evidence preserves a pending review; changes to its selected
+  baseline invalidate the review and reject late responses.
+- Improved phone focus and layout for video attachment, saved-attempt search,
+  and comparison, including long attempt names and accessible headings.
 - Added an optional Start & finish only scope using the same timing acceptance
   checks while skipping movement results, pose tracking, and hold splits. Full
   analysis remains the default; a reviewed Start resumes the scope that requested
@@ -16,6 +27,10 @@ observations are recorded in [benchmarks](benchmarks).
   interface responsive during model processing. Unsupported or blocked workers
   fall back before processing; native remains on the existing path pending device
   tests. Paired desktop crop/output checks matched; overall throughput is similar.
+- Pose crops prefer software rendering to reduce repeated-run variation observed
+  in desktop Chrome. Full app repeats matched exactly on two tested recordings;
+  the change has a small processing cost and does not establish pose accuracy or
+  repeatability on an iPhone.
 - Opening a replacement video waits for a decoded frame before changing the
   current analysis. Damaged or cancelled selections preserve unsaved work. Unknown
   associations between a recording and saved timing require an explicit choice;

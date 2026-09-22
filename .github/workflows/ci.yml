@@ -55,6 +55,7 @@ jobs:
           npm run test:browser-harness
           npm run test:pose-worker-build
           npm run test:coaching
+          npm run test:coaching-save-recovery
           npm run test:mobile-library
           npm run test:library-concurrency
           npm run test:video-attachment
@@ -62,3 +63,14 @@ jobs:
           for pass in 1 2 3; do
             npm run test:source-frames
           done
+
+      - name: Keep synthetic browser failure evidence
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: browser-failure-evidence
+          path: |
+            test-results/*.json
+            test-results/*.png
+          if-no-files-found: ignore
+          retention-days: 7

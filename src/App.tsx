@@ -3576,6 +3576,13 @@ function App() {
           : hasLoadedVideo
             ? "Ready to analyze"
             : "Waiting for a video";
+  // Storage status and unrelated saved-attempt edits must not discard an
+  // in-flight coaching request or its retry ID. The panel checks its baseline.
+  const coachingSourceKey = JSON.stringify([
+    videoUrl, activeSessionId ?? draftSessionId,
+    sessionName.trim() || metadata?.fileName?.replace(/\.[^/.]+$/, "") || "Untitled climb analysis",
+    timestamps, zones.startBody, biomechanics.result?.createdAt, biomechanics.calibration, biomechanics.settings,
+  ]);
 
   return (
     <main className="app-shell mobile-workflow-enabled" id="top" data-app-version={APP_VERSION}
@@ -3595,6 +3602,7 @@ function App() {
         </nav>
       </header>
 
+      {hasOpenAttempt && <h1 className="visually-hidden">ClimbIQ analysis</h1>}
       {!hasOpenAttempt && (
         <section className="hero" aria-labelledby="hero-title">
           <div className="hero-content">
@@ -3844,7 +3852,7 @@ function App() {
         <Card id="coaching-review" title="Coaching review" className="full secondary-card">
           <Suspense fallback={<p className="muted">Preparing evidence review…</p>}>
             <CoachingReviewPanel
-              key={JSON.stringify([videoUrl, activeSessionId, timestamps, zones.startBody, biomechanics.result?.createdAt, biomechanics.calibration, biomechanics.settings, videoAnalysisRunning, savedSessions.map(s => [s.id, s.updatedAt])])}
+              key={coachingSourceKey}
               getCurrentSession={() => buildSessionSnapshot()}
               sessions={savedSessions}
               onJump={jumpTo}

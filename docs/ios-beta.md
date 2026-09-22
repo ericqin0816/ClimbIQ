@@ -1,49 +1,77 @@
 # ClimbIQ: first iPhone beta
 
-The `codex/ios-app` branch adds an iPhone project around the existing React app with Capacitor. The analysis code stays shared with the website. The iPhone app loads the `dist` files included in its installation; it does not open the published website.
+The `codex/ios-app` branch adds a Capacitor iPhone project around the shared React analysis app. A branch is a separate line of development; checking it out does not publish an app or change the live website. The installed app runs its bundled web files, not the published website.
 
-This is a development foundation, not an App Store submission. Native compilation, signing, camera access, and real-device performance still need verification on a Mac and iPhone. The app icon and launch artwork are Capacitor placeholders.
+**Handoff status, checked September 22, 2026:** Windows web checks, browser workflows, native source checks, and asset synchronization have passed. No Mac native build, signing, iPhone run, or TestFlight upload has been verified. The first goal below is a working installation on your friend's iPhone; invite testers after the device checks pass.
 
-## What a branch means
+## What the owner needs to supply
 
-A Git branch is a separate line of development in the same project. `codex/ios-app` lets us make and review iPhone changes before combining them with the main version. Creating a branch does not publish the app or change the live website. A branch is local until someone commits and pushes its changes; do not switch branches with unfinished changes you have not saved.
+| Item | Current project | Owner action |
+| --- | --- | --- |
+| Apple team | No `DEVELOPMENT_TEAM` is set | Use the team that will own this app. TestFlight needs Apple Developer Program membership; a free Personal Team is not the distribution team. |
+| Bundle ID | `com.example.climbiq` in `capacitor.config.json` and both Xcode build configurations | Choose a unique reverse-domain ID under that team, then use it everywhere. `com.yourteam.climbiq` is only an example. |
+| Artwork | Capacitor app icon and splash placeholders | Replace `AppIcon.appiconset` and `Splash.imageset` in `ios/App/App/Assets.xcassets` before distributing the beta. |
+| Native version/build | Version `0.29.0`, build `1` | Confirm the intended version and use a new build number for each upload. These Xcode values do not automatically follow `package.json`. |
+| App Store Connect record | Not created or checked in this work | Owner supplies the app name, primary language, matching bundle ID, internal SKU, beta contact, and test information. |
 
-After the team reviews, commits, and shares this branch, your friend can check it out on a Mac:
+Have your friend sign in on their own Mac. Do not exchange Apple passwords or add credentials/provisioning profiles to Git. For an individual membership, inviting someone to App Store Connect does not make them a member of the signing team; having the account owner perform the first build avoids that access mismatch. [Apple's account roles](https://developer.apple.com/help/account/access/roles)
+
+## Get the branch onto the Mac
+
+Install Node.js **22** (the repository's `.nvmrc` and `engines` version), Xcode **26 or later**, and Xcode's command-line tools. Open Xcode once to finish setup and install iOS platform support. Use a macOS version supported by that Xcode release. This project already uses Swift Package Manager; it does not need CocoaPods. [Capacitor environment setup](https://capacitorjs.com/docs/getting-started/environment-setup), [SPM setup](https://capacitorjs.com/docs/ios/spm)
+
+In Terminal, for a fresh checkout:
 
 ```sh
-git fetch origin
-git switch codex/ios-app
+git clone --branch codex/ios-app --single-branch https://github.com/ericqin0816/ClimbIQ.git
+cd ClimbIQ
+node --version
+xcodebuild -version
+git rev-parse --short HEAD
 npm ci
+npm run check
 npm run ios:sync
 npm run ios:open
 ```
 
-If Git has not created a local copy of the shared branch, use `git switch --track origin/codex/ios-app` instead. Nothing in the setup scripts pushes code or uploads an app.
+`node --version` should report `v22.x`. Share the commit printed by Git with the team so everyone knows which build is being tested. If the repository is private, your friend needs repository access first. The original/private test videos are not included in a clone; use recordings you have permission to share.
 
-## Tools and commands
+For an existing clean checkout, use `git fetch origin`, `git switch codex/ios-app`, and `git pull --ff-only` instead of cloning. If the local branch does not exist, use `git switch --track origin/codex/ios-app`. Save unfinished local work before switching. Then run the npm commands above.
 
-Use the repository's Node.js 22 version. Capacitor 8 needs Node 22 or newer. Building and running iOS requires macOS, Xcode 26 or newer, and its command-line tools. This project uses Swift Package Manager, so CocoaPods is not needed. See the [official environment setup](https://capacitorjs.com/docs/getting-started/environment-setup) and [Swift Package Manager guide](https://capacitorjs.com/docs/ios/spm).
+`ios:sync` builds `dist`, copies it into the native project, registers plugins, and checks the source configuration. `ios:open` opens `ios/App/App.xcodeproj`. The first sync/open can use the provisional ID; set the real ID and team in the next step before trying a signed run. Xcode needs network access to resolve the Capacitor Swift package, and the local plugin packages need the `node_modules` installed by `npm ci`.
 
-| Command | What it does |
+## Sign and run on an iPhone
+
+1. In **Xcode → Settings → Accounts**, add the owner's Apple Account. In the project navigator select **App**, then the **App target → Signing & Capabilities**. Enable **Automatically manage signing** and select the owner's actual developer **Team**.
+2. Choose the permanent bundle ID. Change `appId` in the root `capacitor.config.json` and the App target's **Bundle Identifier** for **both Debug and Release**. Check **Build Settings → Product Bundle Identifier** if the configurations differ. Sync does not rename an existing Xcode bundle ID. Keep the team and ID consistent with the future App Store Connect record. [Apple's distribution preparation](https://help.apple.com/xcode/mac/current/en.lproj/dev91fe7130a.html)
+3. Back in Terminal, run `npm run ios:sync` and `npm run ios:check -- --release`. The release check is expected to reject `com.example.climbiq` until you replace it. Resolve the actual Xcode signing error if one remains; this script cannot check certificates, team permissions, or provisioning.
+4. Connect and unlock the iPhone, trust/pair it with the Mac when asked, and select it as the destination for the **App** scheme. On devices that require it, enable **Settings → Privacy & Security → Developer Mode**, restart, and confirm the prompt. Developer Mode is for local Xcode installs; TestFlight testers do not need it. [Apple's Developer Mode guide](https://developer.apple.com/documentation/xcode/enabling-developer-mode-on-a-device)
+5. Use **Product → Run**. Let Xcode finish package resolution and device preparation. The project currently targets **iPhone, iOS 15 or newer**; that is the deployment minimum, separate from the SDK used to build it. Complete the device checks below, including relaunching without the Xcode debugger attached.
+
+Run `npm run ios:sync` again after each web or plugin change, then rebuild in Xcode. Keep the native project in Git; do not delete `ios/` to refresh web assets. The CLI manages `ios/App/CapApp-SPM/Package.swift` when plugins change. If Xcode cannot find a local plugin, first confirm `npm ci` and sync completed; if package resolution remains stuck, use Xcode's package-resolution controls before changing dependencies.
+
+## Move a tested build to TestFlight
+
+Apple currently requires uploads to be built with **Xcode 26 or later and the iOS 26 SDK or later**; this has applied since April 28, 2026. Recheck the requirement on upload day. It does not require raising the app's deployment minimum to iOS 26. [Apple's SDK requirements](https://developer.apple.com/news/upcoming-requirements/)
+
+1. Once the device checks pass, replace the placeholder artwork and set **App target → General → Version/Build**. Run `npm run check`, `npm run ios:sync`, and `npm run ios:check -- --release` on the exact commit being archived. Keep `VITE_POSE_EXECUTION` unset for the normal native build.
+2. In **App Store Connect → Apps → + → New App**, create an **iOS** record with the exact bundle ID, name, language, and an owner-chosen internal SKU. An Account Holder, Admin, or App Manager can create it; the owner may need to accept Apple's current agreement first. [Create an app record](https://developer.apple.com/help/app-store-connect/create-an-app-record/add-a-new-app/)
+3. In Xcode select the **App** scheme and a generic iOS device destination such as **Any iOS Device (arm64)**, rather than a Simulator. Check that the scheme's Archive action uses **Release**, then choose **Product → Archive**. In Organizer, validate the archive and choose **Distribute App → App Store Connect** to upload. Choose that distribution method when the beta will include friends outside App Store Connect; an **Internal Only** upload is restricted to internal testing. [Apple's beta-build walkthrough](https://developer.apple.com/tutorials/develop-in-swift/test-your-beta-app)
+4. Wait for processing, then open the build in the app's **TestFlight** tab. Resolve the actual processing issues and applicable export-compliance prompts, add beta instructions/contact details, and assign the build to a tester group. The upload role can be Account Holder, Admin, App Manager, or Developer. [Upload and processing](https://developer.apple.com/help/app-store-connect/manage-builds/upload-builds/)
+5. Start with an internal team group. Friends who are not App Store Connect users are **external testers**; the first external build needs TestFlight review before invitations can install it. Testers install Apple's TestFlight app and accept the invitation. Uploading to TestFlight does not publish a public App Store release. [TestFlight setup](https://developer.apple.com/testflight/)
+
+Record the tested Git commit, bundle ID, team, native version/build, device/iOS version, and any failed checks with the beta notes. Keep developer credentials and private recordings out of that shared record.
+
+## Commands at a glance
+
+| Command | Purpose |
 | --- | --- |
-| `npm run ios:check` | Checks app configuration, plugin registration, bundle IDs, and native privacy setup. Works on Windows. Does not build or run iOS. |
-| `npm run ios:sync` | Builds the current web app, copies it into the iOS project, and updates native plugins. Works on Windows and Mac. Run after every web or dependency change. |
-| `npm run ios:open` | Opens the existing Xcode project on a Mac. Gives a clear handoff message on Windows. |
-| `npm run ios:add` | Generates a new native project only when `ios/` does not exist. The branch already includes it; normally use `ios:sync`. |
-| `npm run ios:check -- --release` | Also rejects the provisional app ID. This is a configuration check, not a release certification. |
-| `npm run check` | Runs the repository's web TypeScript, unit, production-build, and coaching-server checks. |
-
-Keep `ios/` in Git. Xcode project settings, Swift files, app icons, and privacy metadata are source files. Generated web assets, local Xcode state, signing profiles, and builds are ignored. Do not delete the iOS directory to refresh web changes. The CLI manages `ios/App/CapApp-SPM/Package.swift`; rerun sync when plugins change.
-
-## Your friend's Mac steps
-
-1. Install Xcode and its command-line tools, open Xcode once, and finish its component setup. Run `npm ci` and `npm run ios:sync` from this branch.
-2. Choose an app bundle ID owned by your friend's Apple developer team, for example `com.yourteam.climbiq`. **`com.example.climbiq` is a placeholder and must be replaced before signing.** Change `appId` in `capacitor.config.json`, then change the App target's Bundle Identifier for both Debug and Release in Xcode. Sync alone does not change an existing Xcode bundle identifier.
-3. In Xcode, select the App target, open Signing & Capabilities, select the correct team, and use automatic signing. Keep Apple credentials and provisioning profiles out of Git. Run `npm run ios:sync` again and confirm `npm run ios:check -- --release` passes.
-4. Connect an iPhone, select it as the run destination, and run the App scheme. The current project targets iPhone on iOS 15 or newer. Test actual devices; a Simulator cannot establish video performance or camera behavior.
-5. Complete the device checklist below. Replace the placeholder icon and launch artwork in `ios/App/App/Assets.xcassets`. Set the native version and increment the build number in the App target before each uploaded build. Native versions are separate from `package.json` after project generation.
-6. Create the matching app record in App Store Connect. From Xcode, archive the release build and use Organizer to validate and distribute it to App Store Connect. Complete beta information, contact details, and applicable export-compliance answers. Follow [Apple's upload instructions](https://developer.apple.com/help/app-store-connect/manage-builds/upload-builds/).
-7. Start with your team as TestFlight testers, then invite the first climbers and coaches. External testing can require beta review. TestFlight is separate from publishing a public App Store version; see [Apple's TestFlight overview](https://developer.apple.com/help/app-store-connect/test-a-beta-version/testflight-overview/).
+| `npm run check` | Web TypeScript, unit, production-build, and coaching-server checks. |
+| `npm run ios:sync` | Builds and copies web assets; updates native plugins and checks source configuration. Works on Windows and Mac. |
+| `npm run ios:check` | Checks IDs, plugin registration, privacy declarations, and bundled assets when present. Does not compile or sign iOS. |
+| `npm run ios:check -- --release` | Also rejects the provisional ID; not a native release certification. |
+| `npm run ios:open` | Opens the existing Xcode project on macOS after sync. |
+| `npm run ios:add` | Only for generating a native project when `ios/` does not exist; not part of this handoff. |
 
 ## Data, permissions, and native plugins
 
@@ -76,7 +104,7 @@ Record the device model, iOS version, app version/build, video format, file size
 - Import a portrait MOV/HEVC recording from Photos, an MP4 from Files, a slow-motion clip, and a video stored only in iCloud. Check orientation, duration, decoded audio, scrubbing, and cancellation of the picker. Try a damaged or unsupported file and confirm the error is useful.
 - Replace an edited attempt with a damaged nonempty video file and verify the original video and unsaved markers remain. Cancel opening, choose two files quickly, and reopen a saved attempt with a different clip of the same filename. Verify the attachment choice and that unconfirmed recordings never supply saved overlays or review links.
 - If the picker offers Take Video, accept and deny camera/microphone access separately; confirm the app returns safely to import. A denied microphone should not crash the app.
-- Analyze the same independently annotated speed-climbing recordings used in the web benchmark. Compare event frames and reported times with the reference labels; record uncertainty and correction effort. Passing software tests does not establish timing accuracy.
+- Run **Find start & finish**, then **Full analysis**, on the same local reference clip. Check that accepted timing stays consistent and pose analysis can be added later. The development corpus currently has no qualifying independent accuracy labels; collect separate labels through the beta evaluation plan before measuring accuracy.
 - Cancel midway through analysis and load another video. Lock the phone or switch apps during analysis, then return; confirm interrupted work does not publish partial results as complete or overwrite a different recording.
 - Run pose analysis in airplane mode from a fresh app launch. Confirm bundled model/WASM loading and record memory, heat, battery drain, duration, and any OS termination. Retest with a larger recording and repeated attempts.
 - Save, rename, compare, and delete attempts; force-close and reopen. Update the app without uninstalling and verify the library remains. Test storage failure if possible and confirm the app does not claim a failed save succeeded.
@@ -91,4 +119,4 @@ Use the [beta evaluation plan](beta-validation.md) and its empty reviewer worksh
 
 The initial native project was generated and synchronized on Windows. The production web build and source checks can pass there; Swift compilation, Xcode package resolution, signing, native permission prompts, TestFlight uploads, and device performance cannot be verified there.
 
-Capacitor core/CLI/iOS are pinned to 8.5.2, with compatible official App, Filesystem, and Share plugins. Vitest was patched to 4.1.11. At setup time, npm audit still reported three moderate development-dependency entries on the Capacitor CLI → xcode → uuid chain; the advisory concerns uuid buffer handling. This is not a dependency shipped in the web bundle. Recheck upstream releases before distributing and avoid `npm audit fix --force`, which currently proposes downgrading Capacitor rather than a compatible patch.
+Capacitor core/CLI/iOS are pinned to 8.5.2, with compatible official App, Filesystem, and Share plugins. Use `npm ci` with the committed lockfile. A setup-time audit reported moderate development-dependency findings on the Capacitor CLI → xcode → uuid chain; run `npm audit` again for current findings before distributing. Review compatible updates separately instead of applying `npm audit fix --force` during this handoff.

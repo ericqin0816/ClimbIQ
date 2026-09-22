@@ -84,7 +84,8 @@ const CONFIDENCE_RANK: Record<Confidence, number> = {
   High: 3,
 };
 
-export function summarizeAttempt(session: SavedAnalysisSession): AttemptSummary {
+/** Accepted timing only: safe for library selectors without traversing stored COM. */
+export function summarizeAttemptTiming(session: SavedAnalysisSession): { metrics: AttemptMetric[]; timestamps: TimestampMarker[] } {
   const metrics: AttemptMetric[] = [];
   const timestamps = sanitizeTimestampSequence(session.timestamps, session.videoMetadata?.duration);
   const start = validMarker(timestamps, "startSignal");
@@ -122,6 +123,13 @@ export function summarizeAttempt(session: SavedAnalysisSession): AttemptSummary 
     );
   }
 
+  return { metrics, timestamps };
+}
+
+export function summarizeAttempt(session: SavedAnalysisSession): AttemptSummary {
+  const { metrics, timestamps } = summarizeAttemptTiming(session);
+  const start = validMarker(timestamps, "startSignal");
+  const finish = validMarker(timestamps, "finishPad");
   const biomechanics = session.biomechanics;
   const storedResult = biomechanics?.result;
   const result = validateWallCalibration(biomechanics?.calibration).valid &&
@@ -207,7 +215,17 @@ export function compareAttempts(
 }
 
 export function hasComparableTiming(session: SavedAnalysisSession): boolean {
-  return summarizeAttempt(session).metrics.length > 0;
+  // Hold 10 phases and COM thirds require a total, so they cannot make an
+  // otherwise ineligible attempt eligible. Library filtering must not build
+  // route splits for every stored pose result just to populate two selectors.
+  const timestamps = sanitizeTimestampSequence(session.timestamps, session.videoMetadata?.duration);
+  const start = validMarker(timestamps, "startSignal");
+  if (!start) return false;
+  const finish = validMarker(timestamps, "finishPad");
+  if (finish && finish.rawTime! > start.rawTime!) return true;
+  const movement = validMarker(timestamps, "firstMovement");
+  return Boolean(movement && movement.rawTime! >= start.rawTime! &&
+    (!finish || movement.rawTime! <= finish.rawTime!));
 }
 
 function compareMetric(

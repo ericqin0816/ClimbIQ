@@ -3,6 +3,7 @@ import { Capacitor } from "@capacitor/core";
 import type { SavedAnalysisSession } from "../types";
 import { buildCoachingEvidence, coachingBaselineOptions, coachingEvidenceFingerprint, type CoachingEvidence } from "../lib/coachingEvidence";
 import { buildCoachingCatalog, parseCoachingPacket, validateCoachingPlan, type CoachingGoal, type CoachingPlan } from "../lib/coachingPolicy";
+import { readCoachingResponse } from "../lib/coachingRequest";
 import "./CoachingReviewPanel.css";
 
 const LOCAL_APP = Capacitor.isNativePlatform();
@@ -42,12 +43,16 @@ export default function CoachingReviewPanel({ getCurrentSession, sessions, onJum
     // Packaged builds have no same-origin server API. Keep all evidence local.
     if (LOCAL_APP) return () => { request.current?.abort(); };
     const controller = new AbortController();
-    fetch("/api/coaching?status=1", { signal: controller.signal }).then(r => r.ok ? r.json() : null)
-      .then(data => setEnabled(data?.enabled === true)).catch(() => {});
+    readCoachingResponse("/api/coaching?status=1", { signal: controller.signal }, 10_000)
+      .then(result => { if (!controller.signal.aborted) setEnabled(result.ok && result.data.enabled === true); }).catch(() => {});
     return () => { controller.abort(); request.current?.abort(); };
   }, []);
   function invalidate() {
     request.current?.abort(); request.current = null; setBusy(false); setEvidence(null); setPlan(null); setAi(false); setArchived(false); setMessage(""); requestId.current = "";
+  }
+  function stopWaiting() {
+    request.current?.abort(); request.current = null; setBusy(false);
+    setMessage("Stopped waiting. Your local review is unchanged. The server may still finish; retry checks the same request.");
   }
   function evidenceStillMatches(): boolean {
     if (!evidence || archived) return false;
@@ -60,6 +65,12 @@ export default function CoachingReviewPanel({ getCurrentSession, sessions, onJum
     setCurrentSnapshot(latestSources.current.getCurrentSession());
     setMessage("The attempt or baseline changed. Review the current measurements again before using these points.");
   }
+  useEffect(() => {
+    // A save updates the library without changing the evidence. Keep its pending
+    // request alive; only an actual source/baseline change invalidates the review.
+    if (evidence && !archived && !evidenceStillMatches()) { rejectStaleReview(); return; }
+    setCurrentSnapshot(latestSources.current.getCurrentSession());
+  }, [sessions, evidence, archived]);
   function localReview() {
     invalidate();
     try {
@@ -82,19 +93,20 @@ export default function CoachingReviewPanel({ getCurrentSession, sessions, onJum
     if (!enabled || !accessCode || (!loadSaved && (!evidence || !consent))) return;
     if (!loadSaved && !evidenceStillMatches()) { rejectStaleReview(); return; }
     request.current?.abort(); const controller = new AbortController(); request.current = controller;
+    const requestedReviewId = reviewId;
     setBusy(true); setMessage("");
     try {
-      const response = await fetch(loadSaved ? `/api/coaching?id=${encodeURIComponent(reviewId)}` : "/api/coaching", {
+      const { data, ...response } = await readCoachingResponse(loadSaved ? `/api/coaching?id=${encodeURIComponent(requestedReviewId)}` : "/api/coaching", {
         method: loadSaved ? "GET" : "POST", signal: controller.signal,
         headers: { Authorization: `Bearer ${accessCode}`, ...(loadSaved ? {} : { "Content-Type": "application/json" }) },
         ...(loadSaved ? {} : { body: JSON.stringify({ consent: true, requestId: requestId.current, packet: evidence!.packet }) }),
       });
-      const data = await response.json();
       if (controller.signal.aborted) return;
       if (!loadSaved && !evidenceStillMatches()) { rejectStaleReview(); return; }
+      if (loadSaved && response.ok && data.id !== requestedReviewId) throw new Error("The response does not match the requested saved review. Try loading it again.");
       if (typeof data.id === "string" && /^[\w-]{21}$/.test(data.id)) setReviewId(data.id);
       if (response.status === 202) { setMessage("This review is reserved or still running. Keep its ID and load it later; retrying will not start a duplicate generation."); return; }
-      if (!response.ok || data.status !== "complete") throw new Error(data.error ?? "NIM returned no supported review. Use the local evidence review.");
+      if (!response.ok || data.status !== "complete") throw new Error(typeof data.error === "string" ? data.error : "NIM returned no supported review. Use the local evidence review.");
       const packet = parseCoachingPacket(data.packet); const catalog = buildCoachingCatalog(packet);
       const selected = validateCoachingPlan(data.plan, catalog);
       if (!loadSaved && JSON.stringify(packet) !== JSON.stringify(evidence!.packet)) throw new Error("The response does not match this analysis.");
@@ -104,7 +116,7 @@ export default function CoachingReviewPanel({ getCurrentSession, sessions, onJum
       setMessage(loadSaved ? "Saved AI review loaded. Video links are withheld because this record does not identify your local video." : "NIM selected these points from the approved evidence. No model-written measurements or technique claims are shown.");
     } catch (error) {
       if (!controller.signal.aborted) setMessage(error instanceof Error ? error.message : "Hosted review unavailable. Your local review is unchanged.");
-    } finally { if (!controller.signal.aborted) setBusy(false); }
+    } finally { if (request.current === controller) { request.current = null; setBusy(false); } }
   }
   const visible = evidence && plan ? plan.observationIds.map(id => evidence.catalog.observations.find(o => o.id === id)!) : [];
   const focus = evidence?.catalog.focuses.find(f => f.id === plan?.focusId);
@@ -170,10 +182,11 @@ export default function CoachingReviewPanel({ getCurrentSession, sessions, onJum
     {!LOCAL_APP && <details className="coaching-hosted"><summary>Optional NVIDIA NIM review</summary>
       <p>{enabled ? "NVIDIA can prioritize approved review points. The measurements, comparison table, and required checks stay the same. This private workspace uses a shared access code; anyone with that code and a review link can read the saved review." : "Online AI prioritization is not enabled here. The full local evidence review is available without a connection or account."}</p>
       {enabled && <>
-        <label>Workspace access code (not your NVIDIA API key)<input type="password" autoComplete="off" value={accessCode} onChange={e => setAccessCode(e.target.value)} /></label>
+        <label>Workspace access code (not your NVIDIA API key)<input type="password" autoComplete="off" value={accessCode} onChange={e => setAccessCode(e.target.value)} disabled={busy} /></label>
         <label className="coaching-check"><input type="checkbox" checked={consent} onChange={e => setConsent(e.target.checked)} />Send this numeric evidence to NVIDIA and save the review on the server. No video, file names, names, or notes are sent. Records remain until the workspace owner deletes them.</label>
         <button disabled={disabled || busy || ai || !evidence || !consent || !accessCode} onClick={() => void hostedReview()}>{busy ? "Working…" : "Prioritize with NIM"}</button>
-        <label>Saved review ID<input value={reviewId} onChange={e => setReviewId(e.target.value)} /></label>
+        {busy && <button onClick={stopWaiting}>Stop waiting</button>}
+        <label>Saved review ID<input value={reviewId} onChange={e => setReviewId(e.target.value)} disabled={busy} /></label>
         <button disabled={busy || !accessCode || !/^[\w-]{21}$/.test(reviewId)} onClick={() => void hostedReview(true)}>Load saved review</button>
         {/^[\w-]{21}$/.test(reviewId) && <p><a href={`?coachingReview=${encodeURIComponent(reviewId)}#coaching-review`}>Saved review link</a> · workspace access code required</p>}
       </>}

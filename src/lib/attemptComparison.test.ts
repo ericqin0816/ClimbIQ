@@ -70,6 +70,41 @@ describe("attempt comparison", () => {
     expect(hasComparableTiming(makeSession("empty", {}))).toBe(false);
   });
 
+  it("filters eligibility without reading stored tracking for either timed or untimed attempts", () => {
+    for (const [times, expected] of [[{ start: 2, finish: 5 }, true], [{ start: 2, movement: 2.2 }, true], [{ start: 2 }, false]] as const) {
+      const session = makeSession("large stored analysis", times);
+      Object.defineProperty(session, "biomechanics", { get() { throw new Error("Eligibility must not load or traverse COM frames"); } });
+      expect(hasComparableTiming(session)).toBe(expected);
+    }
+  });
+
+  it("matches full-summary eligibility across invalid chronology, duration bounds, and incomplete or unaccepted markers", () => {
+    const starts = [undefined, -1, 0, 2, Number.NaN];
+    const finishes = [undefined, -1, 0, 2, 2.0005, 3, 5, Number.POSITIVE_INFINITY];
+    const movements = [undefined, 0, 2, 2.1, 5];
+    for (const start of starts) for (const finish of finishes) for (const movement of movements) {
+      for (const sourceState of ["accepted", "missing-start", "missing-finish", "missing-movement"] as const) {
+        for (const duration of [undefined, 3]) {
+          const session = makeSession("eligibility", { start, finish, movement, hold10: 2.5 }, "Low");
+          if (duration !== undefined) session.videoMetadata = { fileName: "clip.mp4", duration, videoWidth: 640, videoHeight: 480, metadataLoaded: false };
+          const missingId = sourceState === "missing-start" ? "startSignal" : sourceState === "missing-finish" ? "finishPad" : sourceState === "missing-movement" ? "firstMovement" : undefined;
+          if (missingId) session.timestamps.find(marker => marker.id === missingId)!.source = "Not set";
+          expect(hasComparableTiming(session), JSON.stringify({ start, finish, movement, duration, sourceState })).toBe(summarizeAttempt(session).metrics.length > 0);
+        }
+      }
+    }
+  });
+
+  it("keeps eligibility equivalent with valid, stale, invalid, and legacy tracking/contact evidence", () => {
+    const tracked = withRouteTracking(makeSession("tracked", { start: 2, movement: 2.2, hold10: 3.5, finish: 5 }), 2, 5);
+    const cases = [tracked, structuredClone(tracked), structuredClone(tracked), structuredClone(tracked), structuredClone(tracked)];
+    cases[1].timestamps.find(marker => marker.id === "finishPad")!.rawTime = 4.9;
+    cases[2].biomechanics!.calibration!.staticCameraConfirmed = false;
+    cases[3].timestamps.find(marker => marker.id === "hold10")!.source = "COM halfway estimate";
+    cases[4].timestamps.find(marker => marker.id === "startSignal")!.source = "Not set";
+    for (const session of cases) expect(hasComparableTiming(session)).toBe(summarizeAttempt(session).metrics.length > 0);
+  });
+
   it("describes an overall-only comparison without calling it a detailed split", () => {
     const baseline = makeSession("baseline", { start: 1, finish: 11 });
     const candidate = makeSession("candidate", { start: 2, finish: 11.8 });

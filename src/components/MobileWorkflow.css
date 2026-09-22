@@ -2,12 +2,30 @@
   display: none;
 }
 
+.mobile-workflow-enabled .visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
 .analysis-scope { display: grid; gap: 6px; min-width: 180px; color: var(--muted-text, #696c71); font-size: .76rem; }
 .analysis-scope select { min-height: 44px; }
 
 /* Keep visual and keyboard reading order aligned with the workflow in App. */
 .app-shell.mobile-workflow-enabled .layout-grid > * {
   order: 0;
+  min-width: 0;
+}
+
+.mobile-workflow-enabled .status-message {
+  overflow-wrap: anywhere;
 }
 
 /* Landscape iPhones can be wider than the bottom-navigation breakpoint. */

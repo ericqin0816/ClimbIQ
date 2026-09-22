@@ -36,6 +36,17 @@
   padding-top: 1rem;
 }
 
+.comparison-content > *,
+.comparison-selectors > * {
+  min-width: 0;
+}
+
+.comparison-selectors select {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+}
+
 .comparison-selectors {
   align-items: end;
   display: grid;
@@ -158,7 +169,7 @@
 @media (max-width: 720px) {
   .comparison-selectors,
   .comparison-quality {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .comparison-arrow {
@@ -174,6 +185,14 @@
   }
 
   .comparison-header > span:last-child {
-    display: none;
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    clip-path: inset(50%);
+    white-space: nowrap;
   }
 }
