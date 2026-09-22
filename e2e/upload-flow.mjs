@@ -1,55 +1,28 @@
-import { spawn } from "node:child_process";
 import path from "node:path";
-import { tmpdir } from "node:os";
 import { createProtocolClient } from "./cdp-client.mjs";
 import { auditDecodedSourceFrames } from "./frame-audit.mjs";
-import { closeTestBrowser } from "./browser-lifecycle.mjs";
+import { startTestBrowser } from "./test-browser.mjs";
 
-const chromePath = process.env.CLIMBIQ_CHROME ?? (process.platform === "darwin"
-  ? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
-  : process.platform === "win32" ? "C:/Program Files/Google/Chrome/Application/chrome.exe" : "/usr/bin/google-chrome");
 const sampleVideo = process.env.CLIMBIQ_E2E_VIDEO;
 const appUrl = process.env.CLIMBIQ_E2E_URL ?? "http://127.0.0.1:5173/";
 const auditFrames = process.argv.includes("--frame-audit");
-const port = 9333;
-const profile = path.join(tmpdir(), `climbiq-e2e-${Date.now()}`);
-let protocolSend;
-
-const chrome = spawn(chromePath, [
-  "--headless=new",
-  "--no-first-run",
-  "--no-default-browser-check",
-  `--remote-debugging-port=${port}`,
-  `--user-data-dir=${profile}`,
-  "about:blank",
-], { stdio: "ignore" });
+let browser, protocolSend, protocolSocket;
 
 const delay = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
-
-async function waitForDebugger() {
-  for (let attempt = 0; attempt < 80; attempt += 1) {
-    try {
-      const response = await fetch(`http://127.0.0.1:${port}/json/version`);
-      if (response.ok) return;
-    } catch {
-      // Chrome is still starting.
-    }
-    await delay(100);
-  }
-  throw new Error("Headless Chrome did not start.");
-}
 
 async function run() {
   if (!sampleVideo) {
     throw new Error("Set CLIMBIQ_E2E_VIDEO to an absolute path before running the upload smoke test.");
   }
-  await waitForDebugger();
+  browser = await startTestBrowser({ label: "upload" });
+  const { port } = browser;
   const targetResponse = await fetch(
     `http://127.0.0.1:${port}/json/new?${encodeURIComponent(appUrl)}`,
     { method: "PUT" },
   );
   const target = await targetResponse.json();
   const socket = new WebSocket(target.webSocketDebuggerUrl);
+  protocolSocket = socket;
   await new Promise((resolve, reject) => {
     socket.addEventListener("open", resolve, { once: true });
     socket.addEventListener("error", reject, { once: true });
@@ -133,12 +106,10 @@ async function run() {
   if (runtimeErrors.length) throw new Error(`Browser runtime errors: ${runtimeErrors.join(' | ')}`);
 
   console.log(JSON.stringify({ status: "passed", hitTargetIsInput, ...snapshot, sameFileRetry: retryReady, frameAudit }, null, 2));
-  await closeTestBrowser(chrome, send);
-  socket.close();
 }
 
 try {
   await run();
 } finally {
-  await closeTestBrowser(chrome, protocolSend);
+  try { await browser?.close(protocolSend); } finally { protocolSocket?.close(); }
 }

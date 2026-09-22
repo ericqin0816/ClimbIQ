@@ -5,6 +5,23 @@ observations are recorded in [benchmarks](benchmarks).
 
 ## Unreleased — iPhone beta foundation
 
+- Added an optional Start & finish only scope using the same timing acceptance
+  checks while skipping movement results, pose tracking, and hold splits. Full
+  analysis remains the default; a reviewed Start resumes the scope that requested
+  it even if the selector changes while review is pending.
+- A rerun that finds no confirmed Start or needs review preserves the prior
+  accepted analysis. Discovered lane calibration becomes active only after a
+  replacement Start is accepted; new suggestions remain separate from old timing.
+- Pose inference now uses a background worker on supported browsers, keeping the
+  interface responsive during model processing. Unsupported or blocked workers
+  fall back before processing; native remains on the existing path pending device
+  tests. Paired desktop crop/output checks matched; overall throughput is similar.
+- Opening a replacement video waits for a decoded frame before changing the
+  current analysis. Damaged or cancelled selections preserve unsaved work. Unknown
+  associations between a recording and saved timing require an explicit choice;
+  matching filenames alone no longer attach old measurements to new footage.
+- Made the total time more readable on phones, clarified timing status, and made
+  Duplicate include the current unsaved edits while preserving the original.
 - Added searchable saved attempts, timing filters, offline saved-run editing and
   review, and undo for the most recent deletion. Visual and keyboard workflow
   order now agree, with the saved library after the current analysis.

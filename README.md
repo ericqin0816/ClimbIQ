@@ -33,12 +33,20 @@ and proposed readiness gates; it contains no new accuracy measurements.
 
 1. Open the app and choose a local MOV or MP4 that your browser can decode.
 2. Use one unedited attempt with a fixed camera and the complete lane visible.
-3. Select **Run full analysis**. Review any uncertain markers in the video.
-4. Save the attempt or download its data. Saved attempts stay in that browser;
-   export the library to move them to another computer.
+3. Keep **Full analysis** for timing and motion, or choose **Start & finish only**
+   when you just need the timing. Both use the same Start/Finish acceptance checks.
+   Review uncertain markers in the video; you can run full analysis later.
+4. Save the attempt or export its data. Saved attempts stay on that device;
+   export the library to keep a backup or move them to another device.
 
 The default start search covers the first 12 seconds. For a longer recording,
 set the race's time window in **Review & advanced tools**.
+
+Use **Saved** to search by name, climber, gym, date, or notes and reopen measurements
+without the video. Keep original recordings separately for frame review. When an
+app cannot establish that a selected file belongs to an open attempt, choose
+**Attach to this attempt** only for the original recording, or start a new attempt.
+Matching filenames alone do not establish that they are the same climb.
 
 ## What it measures
 

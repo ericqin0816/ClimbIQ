@@ -15,6 +15,7 @@ import { readDecodedVideoFrameTime } from "./decodedVideoFrame";
 import { summarizeSourceSampleTiming } from "./sourceSampleTiming";
 import { resolveAppAssetUrl } from "./appAssets";
 import { verifiedPoseModelCache } from "./verifiedModelCache";
+import { configuredPoseExecutionMode, createPoseInference, type PoseExecutionMode } from "./poseInference";
 
 const MEDIAPIPE_WASM_RELATIVE_PATH = "mediapipe/wasm";
 const MODEL_RELATIVE_PATH = "models/pose_landmarker_full.task";
@@ -39,6 +40,9 @@ export interface AnalyzePoseVideoOptions {
   onProgress?: (progress: PoseAnalysisProgress) => void;
   isCancelled?: () => boolean;
   signal?: AbortSignal;
+  /** Explicit backend selection for paired runtime verification. */
+  executionMode?: PoseExecutionMode;
+  onBackendSelected?: (selection: { backend: "main-thread" | "worker"; fallbackReason?: string }) => void;
 }
 
 export class PoseAnalysisCancelledError extends Error {
@@ -59,6 +63,8 @@ export async function analyzePoseVideo({
   onProgress,
   isCancelled,
   signal,
+  executionMode = configuredPoseExecutionMode(import.meta.env.VITE_POSE_EXECUTION),
+  onBackendSelected,
 }: AnalyzePoseVideoOptions): Promise<BiomechanicsResult> {
   validateAnalysisInput(video, startRawTime, endRawTime, settings);
   const calibrationValidation = validateWallCalibration(calibration);
@@ -77,27 +83,15 @@ export async function analyzePoseVideo({
   onProgress?.({ phase: "loading", processed: 0, total: times.length });
   checkCancelled(isCancelled, signal);
 
-  // Resolve independent setup in parallel. Every analysis still creates a new
-  // VIDEO tracker; only integrity-checked model bytes are reusable.
-  const [{ FilesetResolver, PoseLandmarker }, modelAssetBuffer] = await Promise.all([
-    import("@mediapipe/tasks-vision"),
+  // Keep main-thread setup parallel with model loading. Worker runs load their
+  // SDK inside the worker so parsing it does not block this document.
+  const [, modelAssetBuffer] = await Promise.all([
+    !executionMode || executionMode === "main-thread" ? import("@mediapipe/tasks-vision") : Promise.resolve(),
     loadVerifiedModel(signal),
   ]);
   checkCancelled(isCancelled, signal);
-  const vision = await FilesetResolver.forVisionTasks(assetUrl(MEDIAPIPE_WASM_RELATIVE_PATH));
-  checkCancelled(isCancelled, signal);
-  const landmarker = await PoseLandmarker.createFromOptions(vision, {
-    baseOptions: {
-      modelAssetBuffer,
-      delegate: "CPU",
-    },
-    runningMode: "VIDEO",
-    numPoses: 2,
-    minPoseDetectionConfidence: 0.2,
-    minPosePresenceConfidence: 0.2,
-    minTrackingConfidence: 0.25,
-    outputSegmentationMasks: false,
-  });
+  const landmarker = await createPoseInference(modelAssetBuffer, assetUrl(MEDIAPIPE_WASM_RELATIVE_PATH), signal, executionMode)
+    .catch(error => { checkCancelled(isCancelled, signal); throw error; });
 
   const frames: BiomechanicsFrame[] = [];
   const runWarnings = new Set<string>();
@@ -111,6 +105,8 @@ export async function analyzePoseVideo({
   const cropContext = cropCanvas.getContext("2d", { alpha: false });
 
   try {
+    onBackendSelected?.({ backend: landmarker.backend, fallbackReason: landmarker.fallbackReason });
+    checkCancelled(isCancelled, signal);
     if (!cropContext) {
       throw new Error("Center-of-mass analysis could not create a video crop canvas on this device.");
     }
@@ -131,7 +127,7 @@ export async function analyzePoseVideo({
       renderPoseCrop(video, searchRegion, cropCanvas, cropContext);
       lastInferenceTimestamp = nextPoseInferenceTimestamp(requestedTime, lastInferenceTimestamp);
       let detectedLandmarks = mapPoseCandidatesFromRegion(
-        landmarker.detectForVideo(cropCanvas, lastInferenceTimestamp).landmarks,
+        await landmarker.detect(cropCanvas, lastInferenceTimestamp),
         searchRegion,
       );
       const elapsedSincePrevious = previousCenterTime === undefined
@@ -159,7 +155,7 @@ export async function analyzePoseVideo({
           renderPoseCrop(video, recoveryRegion, cropCanvas, cropContext);
           lastInferenceTimestamp = nextPoseInferenceTimestamp(requestedTime, lastInferenceTimestamp);
           const recoveryLandmarks = mapPoseCandidatesFromRegion(
-            landmarker.detectForVideo(cropCanvas, lastInferenceTimestamp).landmarks,
+            await landmarker.detect(cropCanvas, lastInferenceTimestamp),
             recoveryRegion,
           );
           const recoverySelection = selectTrackedPose(
@@ -220,6 +216,9 @@ export async function analyzePoseVideo({
       onProgress?.({ phase: "analyzing", processed: index + 1, total: times.length });
       await yieldToBrowser();
     }
+  } catch (error) {
+    checkCancelled(isCancelled, signal);
+    throw error;
   } finally {
     landmarker.close();
   }

@@ -54,8 +54,28 @@ The extra pixel readback changes baseline behavior itself: warm 12.24 passes ret
 
 The subsequent normal six-original application workflow passed with the cache. The two selected clips retained the full-workflow baseline's 46/62 and 44/52 usable COM frames and matching accepted timing. This distinguishes the normal UI regression result from the isolated direct-run harness's rendering sensitivity.
 
-## Worker experiment
+## Worker inference and its limits
 
-Worker transport and inference modules are being evaluated separately and are not yet selected by the normal pose-analysis path. A worker must own a fresh tracker per analysis, accept only one pending frame, release transferred images, and terminate immediately on cancellation. Automatic fallback is permitted only before frame processing begins; a mid-run worker failure must not silently mix outputs from a newly initialized tracker.
+Browser analysis now tries a fresh worker for each pose pass; Capacitor native apps keep main-thread inference by default until real-device verification. This uses `Capacitor.isNativePlatform()`, not browser-name guessing. Developers can deliberately build with `VITE_POSE_EXECUTION=main-thread`, `auto`, or `worker` to force a comparison or return to the original path. Do not mistake an override build for a verified native configuration.
 
-Before enabling a worker path, compare actual crop pixels, source timestamps, selected identity, usable COM coverage, derived outputs, and cancellation behavior with the main-thread baseline. Feature detection and startup failure must preserve a working main-thread path for unsupported devices. Desktop results cannot establish WKWebView or iPhone behavior.
+The worker uses the same Full model, CPU delegate, VIDEO tracker options, crop geometry, sampling, and identity checks. It accepts one frame at a time, closes transferred images, and terminates on completion or cancellation. A new task always gets a new tracker. Automatic fallback is allowed only during startup: missing worker/OffscreenCanvas/ImageBitmap support, blocked workers, or initialization failure selects the existing main-thread implementation before any inference result is used. Mid-run failure aborts that analysis rather than mixing outputs from another tracker.
+
+The installed MediaPipe 0.10.35 resolver's module mode uses `vision_wasm_module_internal.js` and `.wasm`, both already included in the bundled public assets. The `.js` loader is an ES module despite its extension. The iOS setup checker also verifies this pair is present.
+
+Detailed observations are in [pose-worker-2026-09-22.json](../benchmarks/pose-worker-2026-09-22.json):
+
+- Four paired main-thread/worker pixel-probe runs produced identical crop SHA-256 lists and identical complete frame outputs, including selected identity, COM, source times, and derived metrics. These checks cover two existing recordings and do not create accuracy labels.
+- In worker runs without pixel probing or CPU profiling, maximum event-loop delay was about 2–4 ms; corresponding main-thread runs had roughly 100–220 ms stalls. Whole pose passes still took about 3.9–5.5 s. The demonstrated improvement is responsiveness, not a blanket throughput speedup.
+- Real browser cancellation during worker initialization and inference settled in roughly 0.1–0.3 ms after the abort signal. A retry succeeded. Missing-API fallback and an actual `worker-src 'none'` CSP both completed using the main-thread backend. Every owned worker was terminated, with no pending workers or duplicate termination calls. This verifies ownership cleanup, not all native/GPU memory behavior.
+- A frozen **production build**, independent of Vite HMR, passed both normal full workflows: accepted timing, source provenance, dense Hold 10 retry, explicit contact review, saved attempts, reload, and lineage-aware comparison. It retained 46/62 and 45/52 usable COM frames. Hold 10 remained unaccepted until explicit review.
+- On that production build, an actual pointer click on the app's Cancel button while a worker inference was pending reached its handler in 3 ms. Cancellation was acknowledged after 1.654 s, including restoring the paused video's cursor. Accepted timing stayed intact and the worker was terminated.
+
+After selecting the final browser-auto/native-main defaults and adding the transactional video-import checks, a new frozen production build with **no execution override** passed both complete workflows again. Its actual pointer-cancel test reached the handler in 9 ms and completed cancellation/restoration in 1.645 s, with one worker created and terminated and no pending frame. These are individual local observations, not a guaranteed latency bound.
+
+Native WKWebView, device heat, battery, memory pressure, and actual iPhone responsiveness remain unverified. Native builds therefore retain the existing main-thread backend unless a developer explicitly overrides it for testing. The model cache applies to both platforms.
+
+## Production worker packaging smoke
+
+After `npm run build`, run `node e2e/pose-worker-build-smoke.mjs`. This synthetic-only check owns an ephemeral preview server and browser profile, finds the emitted worker through the built app's actual module graph, and verifies the served assets match the selected build. It initializes the packaged model and module WASM loader in a strict worker, sends two blank frames, requires valid array replies, and terminates the worker. It cannot silently pass using the main-thread fallback. No private recordings, labels, or pose-accuracy assertions are involved.
+
+Use `--build-dir path` for a frozen build or `--url http://127.0.0.1:port/` for an existing preview; an existing preview must serve the same selected build. The first local run checked 24 built assets and passed with one worker created and terminated. This catches production bundling/loader regressions; it does not replace the real-video parity or native-device checks above.

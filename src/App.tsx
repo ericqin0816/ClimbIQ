@@ -1,4 +1,4 @@
-import { ChangeEvent, CSSProperties, DragEvent, lazy, PointerEvent, Suspense, useEffect, useMemo, useRef, useState } from "react";
+import { ChangeEvent, CSSProperties, DragEvent, lazy, PointerEvent, Suspense, SyntheticEvent, useEffect, useMemo, useRef, useState } from "react";
 import { Capacitor } from "@capacitor/core";
 import { useSavedAttempts } from "./lib/useSavedAttempts";
 import { resolveAttemptLineageId, sanitizeAttemptLineageId } from "./lib/attemptIdentity";
@@ -7,6 +7,8 @@ import { MobileWorkflow, NextStepCard } from "./components/MobileWorkflow";
 import RecordingGuide from "./components/RecordingGuide";
 import SavedAttemptsPanel from "./components/SavedAttemptsPanel";
 import AnalysisActivity from "./components/AnalysisActivity";
+import VideoAttachmentChoice from "./components/VideoAttachmentChoice";
+import { prepareVideo, type PreparedVideo } from "./lib/preparedVideo";
 import "./components/SessionWorkflow.css";
 import TimestampReviewPanel from "./components/TimestampReviewPanel";
 import type { FinishReviewScan } from "./lib/finishReview";
@@ -127,6 +129,7 @@ const DETECTOR_DERIVED_START_SOURCES = new Set<TimestampSource>([
 const MOVEMENT_MARKER_IDS: TimestampMarker["id"][] = ["firstMovement", "committedLaunch"];
 
 type ZoneDisplayMode = "fit" | "scroll";
+type AnalysisScope = "full" | "timing-only";
 
 interface PointerDebugInfo {
   rawX: number;
@@ -145,6 +148,12 @@ interface CandidatePreviewFrames {
   error?: string;
 }
 
+interface DiscoveredStartLane {
+  zone: NormalizedZone;
+  calibration: StartLightCalibration;
+  label: string;
+}
+
 interface FusedStartEvidenceOutcome {
   decision: FusedStartDecision;
   automaticStart: StartSignalDetectionResult | null;
@@ -153,13 +162,16 @@ interface FusedStartEvidenceOutcome {
   analysisLightZone?: NormalizedZone;
   analysisLightCalibration?: StartLightCalibration;
   analysisLaneCandidates?: AnalysisLaneCandidate[];
+  discoveredStartLane?: DiscoveredStartLane;
 }
 
 interface PendingAutomaticAnalysisContext {
+  analysisScope?: AnalysisScope;
   analysisBodyZone?: NormalizedZone;
   analysisLightZone?: NormalizedZone;
   analysisLightCalibration?: StartLightCalibration;
   analysisLaneCandidates?: AnalysisLaneCandidate[];
+  discoveredStartLane?: DiscoveredStartLane;
 }
 
 interface AutomaticFinishOutcome {
@@ -168,6 +180,13 @@ interface AutomaticFinishOutcome {
   calibration: StartLightCalibration;
   confidence: Confidence;
   accepted: boolean;
+}
+
+interface PendingVideoAttachment {
+  prepared: PreparedVideo;
+  lineageId: string;
+  sessionName: string;
+  knownLineages: string[];
 }
 
 interface TimestampReviewTarget {
@@ -186,6 +205,9 @@ function App() {
   const zoneStageRef = useRef<HTMLDivElement | null>(null);
   const previousObjectUrl = useRef<string | null>(null);
   const videoFileRef = useRef<File | null>(null);
+  const videoPreparationAbortRef = useRef<AbortController | null>(null);
+  const pendingVideoAttachmentRef = useRef<PendingVideoAttachment | null>(null);
+  const recordingLineagesRef = useRef(new Set<string>());
   const obsidianDirectoryHandle = useRef<any>(null);
   const videoTaskQueueRef = useRef<Promise<void>>(Promise.resolve());
   const pendingSessionVideoMetadataRef = useRef<VideoMetadata | null>(null);
@@ -202,6 +224,8 @@ function App() {
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
   const [metadata, setMetadata] = useState<VideoMetadata | null>(null);
   const [videoLoadError, setVideoLoadError] = useState("");
+  const [videoPreparationPending, setVideoPreparationPending] = useState(false);
+  const [pendingVideoAttachment, setPendingVideoAttachment] = useState<PendingVideoAttachment | null>(null);
   const [videoDropActive, setVideoDropActive] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [reviewFrameReady, setReviewFrameReady] = useState(true);
@@ -271,6 +295,8 @@ function App() {
   const [biomechanics, setBiomechanics] = useState<BiomechanicsSession>(createDefaultBiomechanicsSession());
   const [biomechanicsRunning, setBiomechanicsRunning] = useState(false);
   const [autoAnalysisRunning, setAutoAnalysisRunning] = useState(false);
+  const [analysisScope, setAnalysisScope] = useState<AnalysisScope>("full");
+  const [activeAnalysisScope, setActiveAnalysisScope] = useState<AnalysisScope>("full");
   const [autoAnalysisStatus, setAutoAnalysisStatus] = useState("");
   const [startEvidenceStatus, setStartEvidenceStatus] = useState("");
   const [timestampReview, setTimestampReview] = useState<TimestampReviewTarget | null>(null);
@@ -299,6 +325,7 @@ function App() {
         autoAnalysisAbortRef.current?.abort();
         secondPassAbortRef.current?.abort();
         finishReviewAbortRef.current?.abort();
+        videoPreparationAbortRef.current?.abort();
       });
       if (disposed) await listener.remove();
       else removeListener = () => listener.remove();
@@ -311,6 +338,10 @@ function App() {
       autoAnalysisAbortRef.current?.abort();
       secondPassAbortRef.current?.abort();
       finishReviewAbortRef.current?.abort();
+      videoPreparationAbortRef.current?.abort();
+      videoPreparationAbortRef.current = null;
+      pendingVideoAttachmentRef.current?.prepared.dispose();
+      pendingVideoAttachmentRef.current = null;
       if (reviewSeekRequestRef.current !== null) window.cancelAnimationFrame(reviewSeekRequestRef.current);
       if (previousObjectUrl.current) {
         URL.revokeObjectURL(previousObjectUrl.current);
@@ -534,7 +565,8 @@ function App() {
       ? "Calibrated light transition"
       : "Generic color-distance detection";
   const videoTaskRunning = frameTestRunning || startRunning || movementRunning || movementPreviewRunning || finishRunning || biomechanicsRunning || autoAnalysisRunning || secondPassRunning || finishReviewRunning;
-  const videoAnalysisRunning = videoTaskRunning || librarySaving || importPending;
+  const videoReplacementBlocked = videoTaskRunning || librarySaving || importPending;
+  const videoAnalysisRunning = videoReplacementBlocked || videoPreparationPending || pendingVideoAttachment !== null;
   const visibleTimestampReview = timestampReview && (!timestampReview.secondPassBasis || timestampReview.secondPassBasis === activeHold10SecondPass) ? timestampReview : null;
   const framePresentation = useVideoFramePresentation(videoRef, videoUrl,
     !videoAnalysisRunning && (Boolean(visibleTimestampReview) || typeof globalThis.VideoFrame === "function"));
@@ -600,11 +632,12 @@ function App() {
     const nextDraftId = createSessionId();
     setDraftSessionId(nextDraftId);
     setAttemptLineageId(nextDraftId);
-    setSessionName(resolveNewVideoSessionName(sessionName, metadata?.fileName, fileName));
+    setSessionName(current => resolveNewVideoSessionName(current, metadata?.fileName, fileName));
+    return nextDraftId;
   }
 
   function handleVideoUpload(event: ChangeEvent<HTMLInputElement>) {
-    if (videoAnalysisRunning) {
+    if (videoReplacementBlocked) {
       setSessionStatus("Wait for the active analysis to finish before replacing the video.");
       event.target.value = "";
       return;
@@ -617,12 +650,12 @@ function App() {
     // Retain the File in app state/refs, then clear the native control so the
     // same clip can be selected again after a decode or metadata error.
     event.target.value = "";
-    selectVideoFile(file);
+    void selectVideoFile(file);
   }
 
   function handleVideoDragEnter(event: DragEvent<HTMLLabelElement>) {
     event.preventDefault();
-    if (videoAnalysisRunning) return;
+    if (videoReplacementBlocked) return;
     videoDragDepthRef.current += 1;
     setVideoDropActive(true);
   }
@@ -630,7 +663,7 @@ function App() {
   function handleVideoDragOver(event: DragEvent<HTMLLabelElement>) {
     event.preventDefault();
     if (event.dataTransfer) {
-      event.dataTransfer.dropEffect = videoAnalysisRunning ? "none" : "copy";
+      event.dataTransfer.dropEffect = videoReplacementBlocked ? "none" : "copy";
     }
   }
 
@@ -646,7 +679,7 @@ function App() {
     event.preventDefault();
     videoDragDepthRef.current = 0;
     setVideoDropActive(false);
-    if (videoAnalysisRunning) {
+    if (videoReplacementBlocked) {
       setSessionStatus("Wait for the active analysis to finish before replacing the video.");
       return;
     }
@@ -658,11 +691,27 @@ function App() {
         : "No video file was found in that drop.");
       return;
     }
-    selectVideoFile(files[0]);
+    void selectVideoFile(files[0]);
   }
 
-  function selectVideoFile(file: File) {
-    cancelPendingReviewSeek();
+  function clearVideoAttachment(dispose: boolean) {
+    if (dispose) pendingVideoAttachmentRef.current?.prepared.dispose();
+    pendingVideoAttachmentRef.current = null;
+    setPendingVideoAttachment(null);
+  }
+
+  function cancelVideoPreparation() {
+    videoPreparationAbortRef.current?.abort();
+    videoPreparationAbortRef.current = null;
+    setVideoPreparationPending(false);
+    setSessionStatus(`Opening cancelled.${metadata ? " Your current analysis is unchanged." : ""}`);
+  }
+
+  async function selectVideoFile(file: File) {
+    videoPreparationAbortRef.current?.abort();
+    videoPreparationAbortRef.current = null;
+    clearVideoAttachment(true);
+    setVideoPreparationPending(false);
     const validationError = validateVideoFile(file);
     if (validationError) {
       setVideoLoadError(validationError);
@@ -671,32 +720,63 @@ function App() {
     }
 
     setVideoLoadError("");
+    const controller = new AbortController();
+    videoPreparationAbortRef.current = controller;
+    setVideoPreparationPending(true);
+    const context = analysisContextRef.current;
+    // Neither the current decoder nor the accepted analysis changes until the
+    // candidate has supplied a real decoded frame. A failed replacement is inert.
+    try {
+      const prepared = await prepareVideo(file, { signal: controller.signal });
+      if (controller.signal.aborted || videoPreparationAbortRef.current !== controller || context !== analysisContextRef.current) {
+        prepared.dispose();
+        return;
+      }
+      const lineage = attemptLineageId ?? activeSessionId;
+      const hasExistingAnalysis = activeSessionId !== null || timestamps.some(marker => marker.rawTime !== null) ||
+        Boolean(biomechanics.result) || Object.keys(zones).length > 0;
+      const compatibleSavedAttempt = lineage && hasExistingAnalysis && metadata &&
+        videoMetadataMatches(prepared.metadata, metadata) && timestampsFitVideo(timestamps, prepared.metadata.duration);
+      if (compatibleSavedAttempt && lineage) {
+        const candidate = { prepared, lineageId: lineage, sessionName, knownLineages: [] };
+        pendingVideoAttachmentRef.current = candidate;
+        setPendingVideoAttachment(candidate);
+      } else {
+        adoptPreparedVideo(prepared, false);
+      }
+    } catch (error) {
+      if (videoPreparationAbortRef.current !== controller || controller.signal.aborted) return;
+      const message = error instanceof Error ? error.message : "This recording could not be opened.";
+      setVideoLoadError(message);
+      setSessionStatus(`${message}${metadata ? " Your current analysis is unchanged." : ""}`);
+    } finally {
+      if (videoPreparationAbortRef.current === controller) {
+        videoPreparationAbortRef.current = null;
+        setVideoPreparationPending(false);
+      }
+    }
+  }
+
+  function adoptPreparedVideo(prepared: PreparedVideo, preserveAnalysis: boolean, knownLineages: string[] = []) {
+    cancelPendingReviewSeek();
+    closeTimestampReview();
+    setAutomaticFinishReview(null);
     setHold10SecondPass(null);
     setSecondPassStatus("");
-
-    if (previousObjectUrl.current) {
+    if (previousObjectUrl.current && previousObjectUrl.current !== prepared.objectUrl) {
       URL.revokeObjectURL(previousObjectUrl.current);
     }
-
-    const expectedSessionVideo = activeSessionId && metadata && metadata.fileName === file.name
-      ? { ...metadata }
-      : null;
-    pendingSessionVideoMetadataRef.current = expectedSessionVideo;
-    pendingVideoFileNameRef.current = file.name;
-
-    const nextUrl = URL.createObjectURL(file);
-    videoFileRef.current = file;
-    previousObjectUrl.current = nextUrl;
+    pendingSessionVideoMetadataRef.current = { ...prepared.metadata };
+    pendingVideoFileNameRef.current = prepared.file.name;
+    videoFileRef.current = prepared.file;
+    previousObjectUrl.current = prepared.objectUrl;
+    recordingLineagesRef.current = new Set(knownLineages);
     setCurrentTime(0);
     setJumpInput("");
-    setVideoUrl(nextUrl);
-    setMetadata({
-      fileName: file.name,
-      duration: 0,
-      videoWidth: 0,
-      videoHeight: 0,
-      metadataLoaded: false,
-    });
+    setVideoUrl(prepared.objectUrl);
+    // The on-screen player must become ready independently of the probe.
+    setMetadata({ ...prepared.metadata, metadataLoaded: false });
+    setVideoLoadError("");
     setCapturedFrame(null);
     setFrameDebug(null);
     setStartResult(null);
@@ -706,19 +786,36 @@ function App() {
     setFinishStatus("");
     setMovementPreviewFrames({});
     setMovementPreviewRunning(false);
-    if (expectedSessionVideo) {
-      setSessionStatus(`Attaching ${file.name} to the loaded session. Verifying video metadata…`);
+    if (preserveAnalysis) {
+      if (attemptLineageId) recordingLineagesRef.current.add(attemptLineageId);
+      setSessionStatus(`Recording attached to "${sessionName}". Check the video against the saved timestamps before relying on them.`);
     } else {
-      resetAnalysisForNewVideo(file.name);
+      const lineage = resetAnalysisForNewVideo(prepared.file.name);
+      recordingLineagesRef.current.add(lineage);
+      setStartSearchEnd(Math.min(12, prepared.metadata.duration));
       setSessionStatus("");
     }
   }
 
-  function handleMetadataLoaded() {
-    const video = videoRef.current;
-    if (!video) {
+  function resolveVideoAttachment(attach: boolean) {
+    const candidate = pendingVideoAttachmentRef.current;
+    if (!candidate || videoReplacementBlocked) return;
+    if (attach && candidate.lineageId !== attemptLineageId) {
+      clearVideoAttachment(true);
+      setVideoLoadError("The open attempt changed. Choose its recording again.");
       return;
     }
+    clearVideoAttachment(false);
+    adoptPreparedVideo(candidate.prepared, attach, candidate.knownLineages);
+  }
+
+  function handleMetadataLoaded(event: SyntheticEvent<HTMLVideoElement>) {
+    const video = event.currentTarget;
+    if (video !== videoRef.current || video.src !== previousObjectUrl.current || video.currentSrc !== previousObjectUrl.current) {
+      return;
+    }
+    if (video.error) return;
+    if (!pendingSessionVideoMetadataRef.current && metadata?.metadataLoaded) return;
     if (!hasUsableVideoMetadata(video)) {
       const reason = "This file does not contain usable finite video metadata. Try converting it to an H.264 MP4.";
       setVideoLoadError(reason);
@@ -737,21 +834,24 @@ function App() {
     const expected = pendingSessionVideoMetadataRef.current;
     pendingSessionVideoMetadataRef.current = null;
     pendingVideoFileNameRef.current = null;
-    setMetadata(actualMetadata);
     if (expected && !videoMetadataMatches(actualMetadata, expected)) {
-      resetAnalysisForNewVideo(actualMetadata.fileName);
-      setStartSearchEnd(Math.min(12, video.duration));
-      setSessionStatus("The selected video does not match the loaded session metadata. Saved analysis was detached to prevent incorrect overlays.");
-    } else if (expected) {
-      setSessionStatus(`Matching video attached to "${sessionName}". Saved zones, timestamps, and biomechanics were preserved.`);
-    } else {
-      setStartSearchEnd(Math.min(12, video.duration));
+      setVideoLoadError("The player opened different recording details than expected. Choose the recording again.");
+      return;
     }
+    // Finite metadata does not mean the visible player has decoded a frame yet.
+    // loadeddata/canplay will finish adoption without enabling early review.
+    if (video.readyState < 2) return;
+    setMetadata(actualMetadata);
+  }
+
+  function isCurrentVideoReady(video: HTMLVideoElement | null): video is HTMLVideoElement {
+    return Boolean(video && video === videoRef.current && metadata?.metadataLoaded && !video.error &&
+      video.currentSrc === previousObjectUrl.current && video.readyState >= 2 && hasUsableVideoMetadata(video));
   }
 
   async function stepVideo(delta: number) {
     const video = videoRef.current;
-    if (!video) {
+    if (!isCurrentVideoReady(video)) {
       return;
     }
     video.pause();
@@ -761,7 +861,7 @@ function App() {
 
   function jumpTo(time: number | null | undefined) {
     const video = videoRef.current;
-    if (!video || time === null || time === undefined || !Number.isFinite(time)) {
+    if (!isCurrentVideoReady(video) || time === null || time === undefined || !Number.isFinite(time)) {
       return;
     }
     video.currentTime = clamp(time, 0, Math.max(0, video.duration - 0.001));
@@ -770,7 +870,7 @@ function App() {
 
   function reviewTimestamp(target: TimestampReviewTarget) {
     const video = videoRef.current;
-    if (!video) {
+    if (!isCurrentVideoReady(video)) {
       return;
     }
     video.pause();
@@ -830,7 +930,7 @@ function App() {
   }
 
   function openGuidedFinishReview() {
-    if (videoAnalysisRunning || !videoRef.current || startSignalRaw === null) return;
+    if (videoAnalysisRunning || !isCurrentVideoReady(videoRef.current) || startSignalRaw === null) return;
     const cursor = getTimestamp(timestamps, "finishPad")?.rawTime ??
       (activeFinishRecovery?.review ? activeFinishRecovery.review.start + .75 : undefined) ?? finishResult?.rawTime ??
       finishResult?.candidates?.[0]?.rawTime ?? finishSuggestion?.rawTime ??
@@ -1224,6 +1324,7 @@ function App() {
             analysisLightZone,
             analysisLightCalibration,
             analysisLaneCandidates,
+            discoveredStartLane,
           } = await gatherFusedStartEvidence(
             video,
             undefined,
@@ -1248,14 +1349,16 @@ function App() {
               ...automaticStart,
               debug: { ...automaticStart.debug, sceneContinuity: startAudit.scene },
             });
-            setMovementResult(startAudit.movement);
+            if (analysisScope === "full") setMovementResult(startAudit.movement);
             setStartEvidenceStatus(`${decision.reason} ${startAudit.reason} Audio: ${audioReason}`);
             if (!startAudit.safeToAutoAccept) {
               pendingAutomaticContextRef.current = {
+                analysisScope,
                 analysisBodyZone,
                 analysisLightZone,
                 analysisLightCalibration,
                 analysisLaneCandidates,
+                discoveredStartLane,
               };
               setSuggestedStartRawTime(decision.rawTime);
               reviewSeekTarget = decision.rawTime;
@@ -1275,14 +1378,17 @@ function App() {
                 observationIntervalSeconds: automaticStart.observationIntervalSeconds,
               },
             );
+            commitAcceptedStartContext({ analysisLaneCandidates, discoveredStartLane });
             setSuggestedStartRawTime(null);
             setAutoAnalysisStatus(`Start Signal accepted at ${acceptedStart.toFixed(3)}s. ${decision.reason}`);
           } else {
             pendingAutomaticContextRef.current = {
+              analysisScope,
               analysisBodyZone,
               analysisLightZone,
               analysisLightCalibration,
               analysisLaneCandidates,
+              discoveredStartLane,
             };
             setSuggestedStartRawTime(decision.rawTime);
             reviewSeekTarget = decision.rawTime;
@@ -1455,7 +1561,6 @@ function App() {
     signal: AbortSignal | undefined,
     onStatus: (message: string) => void,
   ): Promise<FusedStartEvidenceOutcome> {
-    automaticLaneCandidatesRef.current = [];
     const searchWindow = resolveStartSearchWindow({ startSearchStart, startSearchEnd }, video.duration);
     const searchStart = searchWindow.start;
     // Honor an absolute search end so timing resets and later races cannot
@@ -1652,7 +1757,6 @@ function App() {
     const laneAssociation = associateStartLanes(laneEvidence, decision, audioStart.searchHintTime, trustedBodyZone, automaticLight.detailRecovery?.selected);
     const closestColorRecord = colorRecords.find(record => record.label === laneAssociation.selected?.label);
     const analysisLaneCandidates = laneAssociation.candidates;
-    automaticLaneCandidatesRef.current = analysisLaneCandidates;
     // A discovered lane is safe to use for athlete tracking only when that
     // color cue actually supports the fused start decision. The detector may
     // still expose rejected candidates for diagnostics, but those candidates
@@ -1663,16 +1767,11 @@ function App() {
     const analysisLightCalibration = closestColorRecord?.result.debug.calibration ??
       closestColorRecord?.lane?.calibration ??
       (closestColorRecord?.label === "saved start-light zone" && calibrationReady ? startLightCalibration : undefined);
-    if (closestColorRecord?.lane) {
-      const selectedLane = closestColorRecord.lane;
-      clearFinishDependents();
-      setZones((current) => ({ ...current, startLight: selectedLane.zone }));
-      setStartLightCalibration(analysisLightCalibration ?? selectedLane.calibration);
-      setStartDetectionProfile("calibrated");
-      setCalibrationStatus(
-        `Verified ${closestColorRecord.label} near ${Math.round(((selectedLane.zone.x1 + selectedLane.zone.x2) / 2) * 100)}% across and ${Math.round(((selectedLane.zone.y1 + selectedLane.zone.y2) / 2) * 100)}% down the frame.`,
-      );
-    }
+    const discoveredStartLane = closestColorRecord?.lane ? {
+      zone: closestColorRecord.lane.zone,
+      calibration: analysisLightCalibration ?? closestColorRecord.lane.calibration,
+      label: closestColorRecord.label,
+    } : undefined;
     const supportsMotion = decision.supportingEvidence.some((item) => item.kind === "motion");
     const baseResult = closestColorRecord?.result ?? reviewColorRecords[0]?.result ??
       (supportsMotion && motionStart?.detected ? motionStart : buildAudioStartResult(audioStart));
@@ -1712,7 +1811,18 @@ function App() {
       analysisLightZone,
       analysisLightCalibration,
       analysisLaneCandidates,
+      discoveredStartLane,
     };
+  }
+
+  function commitAcceptedStartContext(context: PendingAutomaticAnalysisContext) {
+    automaticLaneCandidatesRef.current = context.analysisLaneCandidates ?? [];
+    const lane = context.discoveredStartLane;
+    if (!lane) return;
+    setZones(current => ({ ...current, startLight: lane.zone }));
+    setStartLightCalibration(lane.calibration);
+    setStartDetectionProfile("calibrated");
+    setCalibrationStatus(`Verified ${lane.label} near ${Math.round(((lane.zone.x1 + lane.zone.x2) / 2) * 100)}% across and ${Math.round(((lane.zone.y1 + lane.zone.y2) / 2) * 100)}% down the frame.`);
   }
 
   async function locateVisibleRouteHolds(
@@ -1789,6 +1899,8 @@ function App() {
       setAutoAnalysisStatus("Load a video and wait for its metadata first.");
       return;
     }
+    const requestedScope = analysisScope;
+    setActiveAnalysisScope(requestedScope);
 
     // Preflight may replace lane calibration and clear its old Finish/COM.
     // Until a replacement Start commits, cancellation must restore the whole
@@ -1818,6 +1930,7 @@ function App() {
       automaticLaneCandidatesRef.current = previousLaneCandidates;
     };
     let startReplacementCommitted = false;
+    closeTimestampReview();
     const abortController = new AbortController();
     autoAnalysisAbortRef.current = abortController;
     setAutoAnalysisRunning(true);
@@ -1845,6 +1958,7 @@ function App() {
             analysisLightZone,
             analysisLightCalibration,
             analysisLaneCandidates,
+            discoveredStartLane,
           } = await gatherFusedStartEvidence(
             video,
             abortController.signal,
@@ -1852,22 +1966,29 @@ function App() {
           );
           setStartEvidenceStatus(`${decision.reason} Audio: ${audioReason}`);
           if (!decision.found || decision.rawTime === undefined || !automaticStart) {
-            pendingAutomaticContextRef.current = null;
-            setAutoAnalysisStatus("Start could not be confirmed. Review the video, then open the marker editor to set the exact frame.");
+            restorePreviousAnalysis();
+            setStartEvidenceStatus(`${decision.reason} Audio: ${audioReason}`);
+            setAutoAnalysisStatus(`Start could not be confirmed. Review the video, then open the marker editor to set the exact frame.${hadPreviousAnalysis ? " Your previous analysis was kept." : ""}`);
             return;
           }
           setStartResult(automaticStart);
           if (!decision.autoAccept) {
+            restorePreviousAnalysis();
+            closeTimestampReview();
+            setStartResult(automaticStart);
+            setStartEvidenceStatus(`${decision.reason} Audio: ${audioReason}`);
             pendingAutomaticContextRef.current = {
+              analysisScope: requestedScope,
               analysisBodyZone,
               analysisLightZone,
               analysisLightCalibration,
               analysisLaneCandidates,
+              discoveredStartLane,
             };
             setSuggestedStartRawTime(decision.rawTime);
             reviewSeekTarget = decision.rawTime;
             setAutoAnalysisStatus(
-              `Start evidence needs review at ${decision.rawTime.toFixed(3)}s. Open “Review suggested start,” step to the exact frame, then accept the frame on screen.`,
+              `Start evidence needs review at ${decision.rawTime.toFixed(3)}s. Open “Review suggested start,” step to the exact frame, then accept the frame on screen.${hadPreviousAnalysis ? " Your previous analysis is kept until a replacement Start is accepted." : ""}`,
             );
             return;
           }
@@ -1885,19 +2006,28 @@ function App() {
             ...automaticStart,
             debug: { ...automaticStart.debug, sceneContinuity: startAudit.scene },
           });
-          setMovementResult(preflightMovement);
+          // Motion still validates Start in both scopes. Publishing this result
+          // also schedules preview seeks, so only the full workflow publishes it.
+          if (requestedScope === "full") setMovementResult(preflightMovement);
           setStartEvidenceStatus(`${decision.reason} ${startAudit.reason} Audio: ${audioReason}`);
           if (!startAudit.safeToAutoAccept) {
+            restorePreviousAnalysis();
+            closeTimestampReview();
+            setStartResult({ ...automaticStart, debug: { ...automaticStart.debug, sceneContinuity: startAudit.scene } });
+            if (!hadPreviousAnalysis && requestedScope === "full") setMovementResult(preflightMovement);
+            setStartEvidenceStatus(`${decision.reason} ${startAudit.reason} Audio: ${audioReason}`);
             pendingAutomaticContextRef.current = {
+              analysisScope: requestedScope,
               analysisBodyZone,
               analysisLightZone,
               analysisLightCalibration,
               analysisLaneCandidates,
+              discoveredStartLane,
             };
             setSuggestedStartRawTime(decision.rawTime);
             reviewSeekTarget = decision.rawTime;
             setAutoAnalysisStatus(
-              `Start cues need review before the timestamp can be accepted. ${startAudit.reason}`,
+              `Start cues need review before the timestamp can be accepted. ${startAudit.reason}${hadPreviousAnalysis ? " Your previous analysis is kept until a replacement Start is accepted." : ""}`,
             );
             return;
           }
@@ -1915,11 +2045,12 @@ function App() {
             },
           );
 
+          commitAcceptedStartContext({ analysisLaneCandidates, discoveredStartLane });
           pendingAutomaticContextRef.current = null;
           await continueAutomaticAnalysisAfterStart(
             video,
             acceptedStart,
-            { analysisBodyZone, analysisLightZone, analysisLightCalibration, analysisLaneCandidates },
+            { analysisScope: requestedScope, analysisBodyZone, analysisLightZone, analysisLightCalibration, analysisLaneCandidates, discoveredStartLane },
             "Automatically accepted by Quick Analyze.",
             abortController.signal,
             preflightMovement,
@@ -2037,6 +2168,14 @@ function App() {
     // next run; a genuinely user-drawn Start Body Zone stays authoritative.
     if (!trustedBodyZone && analysisBodyZone) {
       setZones((current) => ({ ...current, startBody: analysisBodyZone }));
+    }
+
+    if (context.analysisScope === "timing-only") {
+      if (signal?.aborted) throw new PoseAnalysisCancelledError();
+      setAutoAnalysisStatus(automaticFinish?.accepted
+        ? "Start & finish analysis complete. Check the accepted times against the video. Movement, tracking, and hold splits were not run."
+        : "Start & finish analysis complete: Start is accepted; Finish still needs review. Movement, tracking, and hold splits were not run.");
+      return;
     }
 
     setAutoAnalysisStatus("Start and lane identified. Detecting the first visible movement…");
@@ -2198,13 +2337,21 @@ function App() {
     }
   }
 
-  function handleVideoLoadError() {
-    const errorCode = videoRef.current?.error?.code;
+  function handleVideoLoadError(event: SyntheticEvent<HTMLVideoElement>) {
+    const video = event.currentTarget;
+    if (video !== videoRef.current || video.src !== previousObjectUrl.current ||
+        video.currentSrc && video.currentSrc !== previousObjectUrl.current) return;
+    const errorCode = video.error?.code;
     const reason = errorCode === MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED
       ? "This browser cannot decode the selected video format. Try an H.264 MP4 or choose another clip."
       : "The selected video could not be opened. Try choosing the file again.";
     setVideoLoadError(reason);
     setSessionStatus(reason);
+    setMetadata(current => current ? { ...current, metadataLoaded: false } : null);
+    setReviewFrameReady(false);
+    autoAnalysisAbortRef.current?.abort();
+    secondPassAbortRef.current?.abort();
+    finishReviewAbortRef.current?.abort();
   }
 
   async function detectAndMaybeAcceptFinish(
@@ -2438,6 +2585,7 @@ function App() {
       ? Math.max(0, roundTime(suggestedStartRawTime + startSignalOffset))
       : Math.max(0, roundTime(reviewedRawTime));
     const pendingContext = pendingAutomaticContextRef.current ?? {
+      analysisScope,
       analysisBodyZone: zones.startBody,
       analysisLightZone: zones.startLight,
       analysisLightCalibration: calibrationReady ? startLightCalibration : undefined,
@@ -2449,7 +2597,9 @@ function App() {
       note: `Suggested by Quick Analyze and accepted after review. ${frameTimeNote ?? ""}`,
       frameReviewed: reviewedRawTime !== undefined,
     });
+    commitAcceptedStartContext(pendingContext);
     setSuggestedStartRawTime(null);
+    setActiveAnalysisScope(pendingContext.analysisScope ?? "full");
     if (!video) {
       setAutoAnalysisStatus(`Start accepted at ${acceptedStart.toFixed(3)}s.`);
       return;
@@ -3096,12 +3246,23 @@ function App() {
     closeTimestampReview();
     setAutomaticFinishReview(null);
     const safeVideoMetadata = sanitizeVideoMetadata(session.videoMetadata);
+    const nextLineage = resolveAttemptLineageId(session);
+    const compatibleCurrentVideo = Boolean(videoUrl && metadata?.metadataLoaded && safeVideoMetadata &&
+      videoMetadataMatches(metadata, safeVideoMetadata) && timestampsFitVideo(session.timestamps, metadata.duration));
     const currentVideoMatches = Boolean(
-      videoUrl && metadata?.metadataLoaded && safeVideoMetadata && videoMetadataMatches(metadata, safeVideoMetadata),
+      compatibleCurrentVideo && recordingLineagesRef.current.has(nextLineage),
     );
+    let pendingAttachment: PendingVideoAttachment | null = null;
+    if (compatibleCurrentVideo && !currentVideoMatches && previousObjectUrl.current && videoFileRef.current && metadata) {
+      // Keep the decoded file available for an explicit association, while
+      // withholding saved overlays/seek links from an unconfirmed recording.
+      const objectUrl = previousObjectUrl.current;
+      pendingAttachment = { lineageId: nextLineage, sessionName: session.name, knownLineages: [...recordingLineagesRef.current],
+        prepared: { file: videoFileRef.current, metadata: { ...metadata, metadataLoaded: true }, objectUrl, previewDataUrl: "", dispose: () => URL.revokeObjectURL(objectUrl) } };
+    }
     if (!currentVideoMatches) {
       if (previousObjectUrl.current) {
-        URL.revokeObjectURL(previousObjectUrl.current);
+        if (!pendingAttachment) URL.revokeObjectURL(previousObjectUrl.current);
         previousObjectUrl.current = null;
       }
       setVideoUrl(null);
@@ -3110,9 +3271,10 @@ function App() {
       setCapturedFrame(null);
       pendingSessionVideoMetadataRef.current = null;
       pendingVideoFileNameRef.current = null;
+      recordingLineagesRef.current = new Set();
     }
     setActiveSessionId(session.id);
-    setAttemptLineageId(resolveAttemptLineageId(session));
+    setAttemptLineageId(nextLineage);
     setSessionName(session.name);
     setClimberName(session.climberName ?? "");
     setAttemptDate(session.date || todayDateString());
@@ -3153,7 +3315,9 @@ function App() {
     if (!currentVideoMatches) {
       setMetadata(safeVideoMetadata);
     }
-    setSessionStatus(currentVideoMatches
+    pendingVideoAttachmentRef.current = pendingAttachment;
+    setPendingVideoAttachment(pendingAttachment);
+    setSessionStatus(pendingAttachment ? `Loaded "${session.name}". Confirm whether the open recording belongs to this attempt.` : currentVideoMatches
       ? `Loaded "${session.name}" with the matching local video still attached.`
       : `Loaded "${session.name}". Reupload the matching local video before running frame or pose analysis.`);
   }
@@ -3415,6 +3579,7 @@ function App() {
 
   return (
     <main className="app-shell mobile-workflow-enabled" id="top" data-app-version={APP_VERSION}
+      data-analysis-running={autoAnalysisRunning} data-analysis-scope={activeAnalysisScope}
       data-session-storage-state={librarySaving ? "saving" : libraryError ? "error" : libraryReady ? "ready" : "loading"}>
       <a className="skip-link" href="#upload">Skip to analysis</a>
       <header className="site-header">
@@ -3471,7 +3636,7 @@ function App() {
       <section className="layout-grid">
         <Card id="upload" title={hasSelectedVideo ? "Video" : "Upload a video"} className="full launch-card">
           {!hasSelectedVideo && hasOpenAttempt && <p className="status-message" role="status">
-            Opened “{sessionName}”. Choose {metadata?.fileName || "the original recording"} to review its frames. Your saved results are shown below.
+            Opened “{sessionName}”. Choose {metadata?.fileName || "the original recording"} to review its frames. Its measurements are shown below.
           </p>}
           <label
             className={`upload-dropzone${hasSelectedVideo ? " loaded" : ""}${videoDropActive ? " drag-active" : ""}`}
@@ -3490,8 +3655,16 @@ function App() {
                 : "MOV, MP4, or any video your browser can play"}</small>
             </span>
             <span className="upload-action">{videoDropActive ? "Drop video" : hasSelectedVideo ? "Replace video" : "Choose video"}</span>
-            <input aria-label={hasSelectedVideo ? "Replace video" : "Choose video"} type="file" accept="video/*" onChange={handleVideoUpload} disabled={videoAnalysisRunning} />
+            <input aria-label={hasSelectedVideo ? "Replace video" : "Choose video"} type="file" accept="video/*" onChange={handleVideoUpload} disabled={videoReplacementBlocked} />
           </label>
+          {videoPreparationPending && <div className="video-selection-status" role="status">
+            <p>{hasOpenAttempt ? "Checking the recording before opening it. Your current analysis is kept in place." : "Checking that this recording can be opened…"}</p>
+            <button type="button" onClick={cancelVideoPreparation}>Cancel opening video</button>
+          </div>}
+          {pendingVideoAttachment && <VideoAttachmentChoice fileName={pendingVideoAttachment.prepared.file.name}
+            previewDataUrl={pendingVideoAttachment.prepared.previewDataUrl} sessionName={pendingVideoAttachment.sessionName}
+            onAttach={() => resolveVideoAttachment(true)} onNewAttempt={() => resolveVideoAttachment(false)}
+            onCancel={() => { clearVideoAttachment(true); setSessionStatus("Recording attachment cancelled. Your analysis is unchanged."); }} />}
           {!hasSelectedVideo && (
             <p className="muted recording-guidance">
               Best accuracy: use one unedited, fixed-camera attempt with the full selected lane, start lights, and finish area visible.
@@ -3510,8 +3683,9 @@ function App() {
           <div className="quick-analysis-box">
             <div>
               <strong>{autoAnalysisRunning ? "Analyzing the run" : "Automatic analysis"}</strong>
-              <p className="muted">
-                Finds timing, first movement, the correct lane, athlete tracking, center of mass, and route splits.
+              <p className="muted" id="analysis-scope-description">
+                {analysisScope === "full" ? "Finds timing, first movement, the correct lane, athlete tracking, center of mass, and route splits."
+                  : "Finds Start and Finish with the same timing checks. Skips movement results, athlete tracking, and hold splits; you can run full analysis later."}
               </p>
               {displayedStartSearchWindow && (
                 <p className="muted">
@@ -3520,12 +3694,19 @@ function App() {
               )}
             </div>
             <div className="button-row">
+              <label className="analysis-scope">Analysis scope
+                <select aria-label="Analysis scope" aria-describedby="analysis-scope-description" value={analysisScope}
+                  onChange={event => setAnalysisScope(event.target.value as AnalysisScope)} disabled={videoAnalysisRunning}>
+                  <option value="full">Full analysis</option>
+                  <option value="timing-only">Start &amp; finish only</option>
+                </select>
+              </label>
               <button
                 className="primary analyze-button"
                 onClick={runAutomaticAnalysis}
                 disabled={!hasLoadedVideo || videoAnalysisRunning}
               >
-                {autoAnalysisRunning ? "Analyzing climb…" : hasLoadedVideo ? "Run full analysis" : hasSelectedVideo ? "Loading video…" : "Upload a video to begin"}
+                {autoAnalysisRunning ? "Analyzing climb…" : hasLoadedVideo ? analysisScope === "timing-only" ? "Find start & finish" : "Run full analysis" : hasSelectedVideo ? "Loading video…" : "Upload a video to begin"}
               </button>
               {autoAnalysisRunning && (
                 <button onClick={() => autoAnalysisAbortRef.current?.abort()}>Cancel</button>
@@ -3558,17 +3739,17 @@ function App() {
               <h2>Results</h2>
               <p>{calculatedClimbTime === null
                 ? "Run the analysis to calculate timing, tracking, and route splits."
-                : `Timing is locked from ${acceptedStart.source.toLowerCase()} to ${acceptedFinish.source.toLowerCase()}.`}</p>
+                : "Based on the accepted start and finish times."}</p>
             </div>
             <span className={calculatedClimbTime === null ? "summary-status" : "summary-status ready"}>
-              <i /> {calculatedClimbTime === null ? analysisStage : "Analysis ready"}
+              <i /> {calculatedClimbTime === null ? analysisStage : "Timing available"}
             </span>
           </div>
           <div className="summary-metrics">
             <div className="summary-primary-metric">
               <span>Total climb</span>
               <strong>{calculatedClimbTime === null ? "—" : calculatedClimbTime.toFixed(3)}<small>{calculatedClimbTime === null ? "" : "s"}</small></strong>
-              <small>{timingConfidence(acceptedStart, acceptedFinish)} detection confidence</small>
+              <small>Confidence: {timingConfidence(acceptedStart, acceptedFinish)}</small>
             </div>
             <div><span>First movement</span><strong>{acceptedReactionTime === null ? "—" : `${acceptedReactionTime.toFixed(3)}s`}</strong><small>after start</small></div>
             <div><span>Hold 10</span><strong>{acceptedHold10.climbTime === null ? "—" : `${acceptedHold10.climbTime.toFixed(3)}s`}</strong><small>{acceptedHold10.rawTime === null ? "awaiting contact" : "split time"}</small></div>
@@ -3584,7 +3765,7 @@ function App() {
         {!hasOpenAttempt && new URLSearchParams(location.search).has("coachingReview") && (
           <Card id="coaching-review" title="Saved coaching review" className="full secondary-card">
             <Suspense fallback={<p className="muted">Preparing saved review…</p>}>
-              <CoachingReviewPanel getCurrentSession={() => buildSessionSnapshot("current-coaching")} sessions={[]} onJump={jumpTo} disabled />
+              <CoachingReviewPanel getCurrentSession={() => buildSessionSnapshot()} sessions={[]} onJump={jumpTo} disabled />
             </Suspense>
           </Card>
         )}
@@ -3664,7 +3845,7 @@ function App() {
           <Suspense fallback={<p className="muted">Preparing evidence review…</p>}>
             <CoachingReviewPanel
               key={JSON.stringify([videoUrl, activeSessionId, timestamps, zones.startBody, biomechanics.result?.createdAt, biomechanics.calibration, biomechanics.settings, videoAnalysisRunning, savedSessions.map(s => [s.id, s.updatedAt])])}
-              getCurrentSession={() => buildSessionSnapshot(activeSessionId ?? "current-coaching")}
+              getCurrentSession={() => buildSessionSnapshot()}
               sessions={savedSessions}
               onJump={jumpTo}
               disabled={videoAnalysisRunning}
@@ -3685,10 +3866,12 @@ function App() {
               ref={videoRef}
               src={videoUrl ?? undefined}
               className="video-player"
-              preload="metadata"
+              preload="auto"
               playsInline
               controls={!videoAnalysisRunning}
               onLoadedMetadata={handleMetadataLoaded}
+              onLoadedData={handleMetadataLoaded}
+              onCanPlay={handleMetadataLoaded}
               onError={handleVideoLoadError}
               onTimeUpdate={(event) => setCurrentTime(event.currentTarget.currentTime)}
               onSeeking={() => { if (timestampReview) setReviewFrameReady(false); }}
@@ -3774,7 +3957,7 @@ function App() {
           {activeHold10SecondPass && <Suspense fallback={<p className="muted">Preparing Hold 10 evidence…</p>}>
             <Hold10SecondPassPanel result={activeHold10SecondPass} disabled={videoAnalysisRunning} onReview={reviewRefinedHold10} />
           </Suspense>}
-          {!visibleTimestampReview && <button disabled={videoAnalysisRunning || startSignalRaw === null} onClick={openGuidedFinishReview}>Review finish / mark pad</button>}
+          {!visibleTimestampReview && <button disabled={videoAnalysisRunning || !hasLoadedVideo || startSignalRaw === null} onClick={openGuidedFinishReview}>Review finish / mark pad</button>}
           {videoRestoreStatus && <p className="status-message">{videoRestoreStatus}</p>}
         </Card>
 
@@ -5602,6 +5785,11 @@ function videoMetadataMatches(actual: VideoMetadata, expected: VideoMetadata): b
   const durationTolerance = Math.max(0.1, Math.abs(expected.duration) * 0.005);
   const durationMatches = !expected.duration || Math.abs(actual.duration - expected.duration) <= durationTolerance;
   return dimensionsMatch && durationMatches;
+}
+
+function timestampsFitVideo(markers: TimestampMarker[], duration: number): boolean {
+  return Number.isFinite(duration) && duration > 0 && markers.every(marker => marker.rawTime === null ||
+    typeof marker.rawTime === "number" && Number.isFinite(marker.rawTime) && marker.rawTime >= 0 && marker.rawTime <= duration);
 }
 
 function normalizedZonesEqual(left?: NormalizedZone, right?: NormalizedZone): boolean {

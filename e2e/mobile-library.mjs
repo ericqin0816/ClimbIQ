@@ -329,11 +329,14 @@ try {
   assert.equal(draft.attemptLineageId, peerAttempt.attemptLineageId ?? editedId, "Detached copies must retain their attempt identity.");
   report.checks.push("two tabs preserve newer saves, retain the unsaved draft, and save it as a separate copy after reload");
 
+  await evaluate(notesExpression("Unsaved notes to keep in the duplicate"));
   const beforeDuplicate = await readSessionLibraryJson(evaluate);
   await evaluate("[...document.querySelectorAll('#save-analysis button')].find(button => button.textContent === 'Duplicate Session').click()");
   const withDuplicate = JSON.parse(await waitForSessionLibraryChange(evaluate, beforeDuplicate));
   const duplicate = withDuplicate.find(session => !withDraft.some(previous => previous.id === session.id));
   assert.equal(duplicate.attemptLineageId, draft.attemptLineageId);
+  assert.equal(duplicate.notes, "Unsaved notes to keep in the duplicate", "Duplicate must include the current editor, including unsaved notes.");
+  assert.equal(withDuplicate.find(session => session.id === draft.id).notes, draft.notes, "Duplicating an edited draft must not overwrite its original saved record.");
   await evaluate(`(() => { const create = URL.createObjectURL; URL.createObjectURL = function(blob) {
     if (blob.type === 'application/json') window.__libraryExport = blob.text(); return create.call(this, blob); }; })()`);
   await evaluate("[...document.querySelectorAll('#save-analysis button')].find(button => button.textContent === 'Export current session').click()");

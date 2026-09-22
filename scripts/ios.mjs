@@ -103,7 +103,7 @@ function checkNative() {
     assert(bundled.appId === config.appId && !bundled.server?.url, "Native bundle configuration is stale or remote. Run npm run ios:sync.");
   }
   if (existsSync(join(nativeRoot, "public/index.html"))) {
-    for (const asset of ["models/pose_landmarker_full.task", "mediapipe/wasm/vision_wasm_internal.js", "mediapipe/wasm/vision_wasm_internal.wasm", "mediapipe/wasm/vision_wasm_nosimd_internal.js", "mediapipe/wasm/vision_wasm_nosimd_internal.wasm"]) {
+    for (const asset of ["models/pose_landmarker_full.task", "mediapipe/wasm/vision_wasm_internal.js", "mediapipe/wasm/vision_wasm_internal.wasm", "mediapipe/wasm/vision_wasm_nosimd_internal.js", "mediapipe/wasm/vision_wasm_nosimd_internal.wasm", "mediapipe/wasm/vision_wasm_module_internal.js", "mediapipe/wasm/vision_wasm_module_internal.wasm"]) {
       assert(existsSync(join(nativeRoot, "public", asset)), `Packaged analysis asset missing: ${asset}. Restore public assets and run npm run ios:sync.`);
     }
   } else {

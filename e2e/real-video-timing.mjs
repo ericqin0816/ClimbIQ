@@ -1,9 +1,7 @@
 import { readFile, readdir, mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { spawn } from "node:child_process";
-import { tmpdir } from "node:os";
 import { createProtocolClient } from "./cdp-client.mjs";
-import { closeTestBrowser } from "./browser-lifecycle.mjs";
+import { startTestBrowser } from "./test-browser.mjs";
 import { readSessionLibraryJson, saveCurrentSession, waitForSessionLibraryChange } from "./session-library.mjs";
 import { verifyReviewPresentation } from "./review-presentation.mjs";
 import { createReadStream } from "node:fs";
@@ -11,12 +9,6 @@ import { createHash } from "node:crypto";
 import { analysisFailureFromOutcome, evaluateKnownVideoFailure } from "../scripts/lib/known-video-failures.mjs";
 import { assessUserVideoReference, isUnverifiedReviewCursor, sourceFingerprintMatches } from "../scripts/lib/user-video-reference.mjs";
 
-const defaultChromePath = process.platform === "darwin"
-  ? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
-  : process.platform === "win32"
-    ? "C:/Program Files/Google/Chrome/Application/chrome.exe"
-    : "/usr/bin/google-chrome";
-const chromePath = process.env.CLIMBIQ_CHROME ?? defaultChromePath;
 const appUrl = process.env.CLIMBIQ_E2E_URL ?? "http://127.0.0.1:5173/";
 const videoDirectory = path.resolve(process.env.CLIMBIQ_VIDEO_DIR ?? "node_modules/.climbiq-private-videos");
 const fullWorkflow = process.argv.includes("--full");
@@ -30,38 +22,12 @@ const reportFile = process.argv.find(value => value.startsWith("--report="))?.sl
 const commandLineFiles = process.argv.slice(2).filter((value) => value !== "--full" && !value.startsWith("--fps=") && !value.startsWith("--report=")).map((value) => value.trim()).filter(Boolean);
 const environmentFiles = process.env.CLIMBIQ_BENCHMARK_FILES?.split(",").map((value) => value.trim()).filter(Boolean);
 const requestedFiles = commandLineFiles.length ? commandLineFiles : environmentFiles;
-const port = Number(process.env.CLIMBIQ_E2E_PORT ?? 9334);
-if (!Number.isInteger(port) || port < 1024 || port > 65535) throw new Error("CLIMBIQ_E2E_PORT must be an integer from 1024 to 65535.");
-const profile = path.join(process.env.TMPDIR ?? process.env.TEMP ?? tmpdir(), `climbiq-timing-${Date.now()}`);
 const delay = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
-
-const chrome = spawn(chromePath, [
-  "--headless=new",
-  "--disable-background-timer-throttling",
-  "--disable-backgrounding-occluded-windows",
-  "--disable-renderer-backgrounding",
-  "--no-first-run",
-  "--no-default-browser-check",
-  `--remote-debugging-port=${port}`,
-  `--user-data-dir=${profile}`,
-  "about:blank",
-], { stdio: "ignore" });
-
-async function waitForDebugger() {
-  for (let attempt = 0; attempt < 100; attempt += 1) {
-    try {
-      const response = await fetch(`http://127.0.0.1:${port}/json/version`);
-      if (response.ok) return;
-    } catch {
-      // Browser is still starting.
-    }
-    await delay(100);
-  }
-  throw new Error("Headless Chrome did not start.");
-}
+let browser, protocolSocket;
 
 async function openProtocol() {
-  await waitForDebugger();
+  browser = await startTestBrowser({ label: "timing", args: ["--disable-background-timer-throttling", "--disable-backgrounding-occluded-windows", "--disable-renderer-backgrounding"] });
+  const { port } = browser;
   const targetResponse = await fetch(
     `http://127.0.0.1:${port}/json/new?${encodeURIComponent(disableFrameCallback || disableVideoFrame || rejectAnalysisAudioRate ? "about:blank" : appUrl)}`,
     { method: "PUT" },
@@ -69,6 +35,7 @@ async function openProtocol() {
   if (!targetResponse.ok) throw new Error(`Could not open ${appUrl}. Start the development server first.`);
   const target = await targetResponse.json();
   const socket = new WebSocket(target.webSocketDebuggerUrl);
+  protocolSocket = socket;
   await new Promise((resolve, reject) => {
     socket.addEventListener("open", resolve, { once: true });
     socket.addEventListener("error", reject, { once: true });
@@ -375,6 +342,8 @@ async function verifySavedWorkflow({ evaluate, send }) {
       select.value = ${JSON.stringify(saved.id)};
       select.dispatchEvent(new Event('change', { bubbles: true }));
     })()`);
+    await waitUntil(evaluate, `Boolean(document.querySelector('[data-video-attachment-choice]'))`, 10000, "explicit saved recording association");
+    await evaluate(`([...document.querySelectorAll('[data-video-attachment-choice] button')].find(button => button.textContent === 'Attach to this attempt')).click()`);
     const inspectReady = `([...document.querySelectorAll('button')].some(b => b.textContent.trim() === 'Inspect Hold 10 more closely' && !b.disabled))`;
     await waitUntil(evaluate, inspectReady, 15000, "restored Hold 10 inspection control");
     const priorTime = await evaluate(`document.querySelector('video').currentTime`);
@@ -581,8 +550,7 @@ async function main() {
     console.log(JSON.stringify(report, null, 2));
     if (failures.length) process.exitCode = 1;
   } finally {
-    await closeTestBrowser(chrome, protocol.send);
-    protocol.socket.close();
+    try { await browser.close(protocol.send); } finally { protocol.socket.close(); }
   }
 }
 
@@ -693,5 +661,5 @@ function compareText(errors, label, actual, expected) {
 try {
   await main();
 } finally {
-  chrome.kill();
+  try { await browser?.close(); } finally { protocolSocket?.close(); }
 }

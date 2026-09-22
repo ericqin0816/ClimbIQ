@@ -1,30 +1,20 @@
-import { spawn } from "node:child_process";
 import path from "node:path";
-import { tmpdir } from "node:os";
 import { mkdir, writeFile } from "node:fs/promises";
 import { createProtocolClient } from "./cdp-client.mjs";
-import { closeTestBrowser } from "./browser-lifecycle.mjs";
+import { startTestBrowser } from "./test-browser.mjs";
 import { readSessionLibraryJson, saveCurrentSession } from "./session-library.mjs";
 
 const url = process.env.CLIMBIQ_E2E_URL ?? "http://127.0.0.1:5173/";
 const disableNative = process.env.CLIMBIQ_E2E_DISABLE_VIDEO_FRAME === "1";
 const directory = path.resolve(process.env.CLIMBIQ_VIDEO_DIR ?? "node_modules/.climbiq-private-videos");
 const recoveryVideo = path.resolve(process.env.CLIMBIQ_RECOVERY_VIDEO ?? "node_modules/.climbiq-robustness/IMG_9076--control-720.mp4");
-const chromePath = process.env.CLIMBIQ_CHROME ?? (process.platform === "darwin" ? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
-  : process.platform === "win32" ? "C:/Program Files/Google/Chrome/Application/chrome.exe" : "/usr/bin/google-chrome");
-const port = 9336;
-const chrome = spawn(chromePath, ["--headless=new", "--no-first-run", "--no-default-browser-check", "--disable-background-timer-throttling",
-  "--disable-renderer-backgrounding", `--remote-debugging-port=${port}`, `--user-data-dir=${path.join(tmpdir(), `climbiq-finish-review-${Date.now()}`)}`, "about:blank"], { stdio: "ignore", windowsHide: true });
+let browser;
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 const report = { appUrl: url, isGroundTruthLabel: false, disableNative };
 let socket; let send;
 try {
-  let connected = false;
-  for (let i = 0; i < 100; i++) {
-    try { if ((await fetch(`http://127.0.0.1:${port}/json/version`)).ok) { connected = true; break; } } catch {}
-    await delay(100);
-  }
-  if (!connected) throw new Error("Chrome did not start.");
+  browser = await startTestBrowser({ label: "finish-review", args: ["--disable-background-timer-throttling", "--disable-renderer-backgrounding"] });
+  const { port } = browser;
   const target = await (await fetch(`http://127.0.0.1:${port}/json/new?${encodeURIComponent(disableNative ? "about:blank" : url)}`, { method: "PUT" })).json();
   socket = new WebSocket(target.webSocketDebuggerUrl);
   await new Promise((resolve, reject) => { socket.addEventListener("open", resolve, { once: true }); socket.addEventListener("error", reject, { once: true }); });
@@ -44,6 +34,13 @@ try {
   const until = async (expression, label, timeout = 20000) => {
     const started = Date.now();
     while (Date.now() - started < timeout) { if (await evaluate(expression)) return; await delay(100); }
+    report.failureDiagnostic = { label, ...await evaluate(`(()=>{const video=document.querySelector('video');const buttons=[...document.querySelectorAll('button')];const rescan=buttons.find(button=>button.textContent==='Rescan near current frame');return {
+      video:video?{readyState:video.readyState,duration:Number.isFinite(video.duration)?video.duration:null,currentTime:video.currentTime,seeking:video.seeking,paused:video.paused,source:video.src,currentSource:video.currentSrc}:null,
+      timestampReview:document.querySelector('.timestamp-review')?.textContent??document.querySelector('.timestamp-review-actions')?.parentElement?.textContent??null,
+      finishTools:document.querySelector('[data-finish-review-tools]')?.textContent??null,
+      rescan:rescan?{disabled:rescan.disabled,text:rescan.textContent}:null,
+      metadata:document.querySelector('.video-meta-line')?.textContent??null,
+      error:document.querySelector('.upload-error')?.textContent??null};})()`) };
     throw new Error(`Timed out: ${label}. ${await evaluate("document.querySelector('.quick-analysis-box')?.textContent ?? ''")}`);
   };
   const button = name => `[...document.querySelectorAll('button')].find(b => b.textContent.trim() === ${JSON.stringify(name)})`;
@@ -124,6 +121,8 @@ try {
   await upload("IMG_9199.MOV");
   await until("Boolean(document.querySelector('.session-load-row select:not(:disabled)'))", "saved attempts loaded");
   await evaluate(`(() => { const s = document.querySelector('.session-load-row select'); s.value = ${JSON.stringify(saved.id)}; s.dispatchEvent(new Event('change',{bubbles:true})); })()`);
+  await until("Boolean(document.querySelector('[data-video-attachment-choice]'))", "saved recording confirmation");
+  await click("Attach to this attempt");
   await until(`${button("Review finish / mark pad")} && !${button("Review finish / mark pad")}.disabled`, "restored session");
   await click("Review finish / mark pad"); await until(ready, "restored pad region");
   report.padAreaSurvivesReload = true;
@@ -207,4 +206,4 @@ try {
   if (errors.length) throw new Error(`Browser exceptions: ${errors.join(', ')}`);
   report.passed = true;
 } catch (error) { report.passed = false; report.error = String(error); process.exitCode = 1; }
-finally { await closeTestBrowser(chrome, send); socket?.close(); chrome.kill(); console.log(JSON.stringify(report, null, 2)); }
+finally { try { await browser?.close(send); } finally { socket?.close(); } console.log(JSON.stringify(report, null, 2)); }

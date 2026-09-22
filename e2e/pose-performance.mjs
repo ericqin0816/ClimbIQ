@@ -5,6 +5,7 @@ import path from "node:path";
 import { tmpdir } from "node:os";
 import { createProtocolClient } from "./cdp-client.mjs";
 import { closeTestBrowser } from "./browser-lifecycle.mjs";
+import { verifyPoseWorkerContract } from "./pose-worker-contract.mjs";
 
 // Isolates pose setup/sampling with the exact reviewed workflow's calibration.
 // Source recordings stay local; this does not label timing or establish accuracy.
@@ -15,6 +16,7 @@ const outputPath = option("report", `test-results/pose-performance-${Date.now()}
 const repeats = Number(option("repeats", "3"));
 const profiling = args.includes("--profile");
 const pixelProbe = args.includes("--pixel-probe");
+const workerContract = args.includes("--worker-contract");
 const poseModule = option("module", "/src/lib/poseAnalysis.ts");
 const executionMode = option("execution", "main-thread");
 if (!["main-thread", "worker", "auto"].includes(executionMode)) throw new Error("Choose main-thread, worker or auto execution.");
@@ -133,6 +135,7 @@ try {
       }
       console.log(`${input.fileName} repeat ${repeat + 1}: ${Math.round(result.elapsedMs)} ms; ${result.metrics.validFrames}/${result.metrics.requestedFrames} COM; max event-loop delay ${Math.round(result.maxEventLoopDelayMs)} ms`);
     }
+    if (workerContract) outcome.workerContract = await verifyPoseWorkerContract(evaluate, { options, poseModule });
     report.outcomes.push(outcome);
   }
   await mkdir(path.dirname(path.resolve(outputPath)), { recursive: true });

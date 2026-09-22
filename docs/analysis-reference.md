@@ -10,11 +10,15 @@ measured accuracy percentage.
 
 Save at least two timed sessions, then open **Attempt comparison**. Choose the older run as the baseline and the newer run as the candidate. ClimbIQ compares only measurements available in both sessions: total time, first movement, reviewed Start → Hold 10 and Hold 10 → Finish phases, and medium/high-confidence COM wall thirds. A negative time means the newer attempt was faster.
 
+Copies retain their attempt lineage. Comparing two versions of the same attempt shows annotation differences without claiming a performance gain or loss, even if their timestamps were edited. Older sessions with matching recording metadata and overlapping attempt ranges require a separate confirmation that they represent distinct attempts. Metadata alone cannot establish file identity; disjoint attempts within one long recording remain eligible.
+
 Low-confidence values remain visible for review but never receive a gained/lost claim. The headline reports the overall result first, then the largest qualifying contact-phase change (or other available detailed split). Contact phases and COM wall thirds overlap and must not be added together. Attempts default to race-date order; choosing the other selected attempt swaps the comparison direction.
 
 Small differences are displayed as **Below threshold**, not proof of improvement or equality. Comparison uses conservative display rules: at least 0.100 s for accepted timing, 0.200 s when body-motion estimates define a boundary, and two pose sample intervals for COM sections (0.400 s at 5 fps). Recorded boundary observation intervals can increase those thresholds; for example, a 200 ms Finish observation raises the total-time comparison floor to at least 400 ms. These thresholds are policy choices, not validated accuracy bounds or confidence intervals. Both endpoints' confidence limits the section confidence, and legacy markers without interval metadata do not gain verified precision.
 
 Saved COM timing and athlete identity must pass the same freshness check as the main analysis and have valid wall calibration. Corrected or mismatched results withhold both wall splits and the old tracking-quality badge until reanalysis. Session imports and reloads sanitize stored biomechanics before comparison. The panel works without reopening either video.
+
+Saved results, notes, exports, and local coaching remain accessible without a video. Reopening a file with matching metadata does not silently attach it to an unknown saved recording: choose **Attach to this attempt**, **Analyze as a new attempt**, or **Cancel**. Failed or cancelled video preparation keeps the existing analysis. Duplicate and import operations preserve known lineage; a storage-conflict reload keeps the open edits as an unsaved copy.
 
 ## Timing Does Not Depend on Pose
 
@@ -26,9 +30,15 @@ Speed climbing phone videos are difficult for pose detection. The climber can be
 
 ClimbIQ now includes optional pose analysis, but pose never changes accepted timing markers. This separation prevents a missed or occluded landmark from silently moving the authoritative Start Signal, First Movement, or Finish Pad timestamps.
 
+### Choose an analysis scope
+
+**Full analysis** remains the default. Choose **Start & finish only** to keep the same fused Start evidence, motion/scene checks, and Finish acceptance gates while skipping movement results, pose/COM, route registration, and Hold 10 inspection. Motion may still be sampled to validate Start; this scope does not relax timing checks. Unverified Finish evidence remains a review suggestion.
+
+You can run Full later. A successful timing-only rerun clears the previous movement, COM, Hold 10, and preview output so it cannot be mistaken for fresh analysis. If Start needs review, continuation uses the scope chosen when that run began, even if the selector changes while review is paused. See the [paired timing-scope measurements](../benchmarks/TIMING_SCOPE_2026_09_22.md) for tested desktop performance and limitations.
+
 ## Experimental Biomechanics
 
-Quick Analyze runs MediaPipe Pose Landmarker locally after it has an accepted finish or official total. An unaccepted review cursor cannot silently become the end of a measured climb; review and accept Finish first. It never falls back to the full video when finish evidence is missing. It estimates the selected 3 m lane from separated upper timing-marker groups and the wall-to-mat edge, follows the athlete through the climb range, and builds the center-of-mass path and speed charts. Automatic wall scale is explicitly approximate.
+Full analysis runs MediaPipe Pose Landmarker locally after it has an accepted finish or official total. An unaccepted review cursor cannot silently become the end of a measured climb; review and accept Finish first. It never falls back to the full video when finish evidence is missing. It estimates the selected 3 m lane from separated upper timing-marker groups and the wall-to-mat edge, follows the athlete through the climb range, and builds the center-of-mass path and speed charts. Automatic wall scale is explicitly approximate.
 
 Before automatic wall calibration, ClimbIQ compares robust fixed-scene edges near the start and finish. Frame-wide translation that is materially better explained by a shifted image is treated as camera movement; timing remains available, but COM, metre-per-second output, route registration, and Hold 10 splits pause rather than using one invalid homography for a panned or tilted recording. Local athlete motion and exposure changes are trimmed out of this check.
 
@@ -66,7 +76,7 @@ After the broad pose scan, ClimbIQ revisits a likely Hold 10 event in a window n
 
 Click a preview to open the full video at its cursor. No timestamp is accepted by clicking a preview. Changing the timing, athlete, wall calibration, target, or underlying analysis invalidates the evidence and any open second-pass review. Cancelling a closer scan restores the video position and keeps accepted timing.
 
-The three previews are temporary local images, excluded from exports and saved sessions. Dataset JSON includes `hold10SecondPassEvidence` while current; a reviewed marker preserves the provenance in its note. After a page reload, upload the matching video, load the saved analysis in **Session details & saved analyses**, and choose **Inspect Hold 10 more closely** to regenerate evidence. The separate full-climb COM trajectory remains unchanged by the short rescan. The full-workflow benchmark checks preview generation, no unreviewed acceptance, cancellation with video-position restoration, and regeneration after loading the saved analysis.
+The three previews are temporary local images, excluded from exports and saved sessions. Dataset JSON includes `hold10SecondPassEvidence` while current; a reviewed marker preserves the provenance in its note. After a page reload, reopen the saved analysis, choose its local recording, confirm **Attach to this attempt** when asked, and choose **Inspect Hold 10 more closely** to regenerate evidence. The separate full-climb COM trajectory remains unchanged by the short rescan. The full-workflow benchmark checks preview generation, no unreviewed acceptance, cancellation with video-position restoration, and regeneration after loading the saved analysis.
 
 ## Visually Registered Holds And Hold 10 Contact
 
@@ -96,7 +106,7 @@ Browser seek behavior still matters: variable-rate test footage can return a dec
 
 Pose samples also retain `decodedFrameRawTime` and `sourceFrameDurationSeconds` when available, separately from their sampling cursor. Compact save/load preserves valid metadata; dataset JSON includes a `sourceFrameTimingAudit`. Repeated seeks into the same source image cannot count as separate Hold 10 dwell observations. Legacy samples without native metadata retain their existing interpretation, and malformed imported coordinates/validity flags cannot become valid COM measurements through JavaScript coercion.
 
-Cancelling or failing a rerun before it commits a replacement Start restores the previous analysis context, including its accepted Finish. After a new Start commits, completed stages remain available and unfinished stages may need another run. This prevents preflight lane-calibration changes from silently erasing prior timing on cancellation.
+A rerun that finds no acceptable Start or pauses for review preserves the previous accepted timing, lane calibration, and dependent analysis. Discovered lane changes are committed only when a replacement Start is accepted, automatically or after frame review. Cancelling or failing before that point also preserves the prior analysis, including Finish. After a new Start commits, completed stages remain available and unfinished stages may need another run.
 
 ## Start Signal Detection
 
@@ -243,7 +253,7 @@ npm run dev
 npm run check
 ```
 
-Open the dev server URL, choose or drag in one local climbing video, and press **Run full analysis**. Zones are optional unless another person appears in frame or automatic light discovery needs manual help.
+Open the dev server URL, choose or drag in one local climbing video, and press **Run full analysis**. For timing without movement output, choose **Start & finish only** and press **Find start & finish**. Zones are optional unless another person appears in frame or automatic light discovery needs manual help.
 
 ### Work from another computer
 
@@ -286,7 +296,7 @@ npm run benchmark:timing -- --full --fps=10 IMG_9199.MOV
 npm run benchmark:timing -- --full --fps=15 IMG_9199.MOV
 ```
 
-Unlike timing-only mode, `--full` does not cancel the pose stage. It checks saved timestamps survive reload and identical saved attempts cannot claim a gain or loss. Known reference clips have explicit coverage requirements; exploratory clips report legitimate tracking/calibration refusals separately. It also tests Hold 10 review, decoded-frame/fallback timestamp provenance, saving, and stale-evidence clearing. It uses an isolated temporary browser profile.
+The legacy benchmark runner's default stops by cancelling after timing; `--full` allows pose to finish. It checks saved timestamps survive reload and identical saved attempts cannot claim a gain or loss. Known reference clips have explicit coverage requirements; exploratory clips report legitimate tracking/calibration refusals separately. It also tests Hold 10 review, decoded-frame/fallback timestamp provenance, saving, and stale-evidence clearing. It uses an isolated temporary browser profile. The separate [timing-scope harness](../benchmarks/TIMING_SCOPE_2026_09_22.md#reproduce) exercises the app's actual **Start & finish only** option without cancellation.
 
 Regression observations are not independent accuracy labels. The old 8903 finish reference is disputed after direct frame inspection. Benchmark summaries now require explicit independent review provenance before reporting accuracy; see [the label audit](../REAL_VIDEO_BENCHMARK.md).
 
@@ -376,7 +386,7 @@ The dataset JSON includes:
 - detection warnings
 - athlete notes
 
-Use **Import session or library** to load one previous session export or a complete saved-library backup. Imported sessions restore metadata, zones, calibration, settings, timestamps, notes, and splits where possible. They do not restore video files; reupload the matching local video if you want to review frames.
+Use **Import session or library** to load one previous session export or a complete saved-library backup. Imported sessions restore metadata, zones, calibration, settings, timestamps, notes, and splits where possible. They do not restore video files; choose the matching local recording and confirm **Attach to this attempt** when asked before reviewing frames.
 
 ## Local Privacy
 
@@ -385,7 +395,7 @@ ClimbIQ Detection Lab is local-first:
 - videos are not uploaded
 - videos are not stored in localStorage
 - exports store metadata, timestamps, zones, calibration, settings, notes, and debug data
-- local saved sessions stay in the browser's `localStorage`
+- local saved sessions use IndexedDB in browsers and local file snapshots in the native app; legacy browser `localStorage` sessions migrate on load
 - optional folder saving uses the browser File System Access API when supported
 
 ClimbIQ does not train a custom AI model. Pose inference uses the bundled MediaPipe Pose Landmarker Full model on the user's device. The analyzer follows a moving wall crop so a climber does not become too small when the complete 15 m wall is visible. Dataset exports include calibration, compact trajectory data, quality metrics, warnings, and pose landmarks when available so future versions can improve analysis and coaching workflows.

@@ -1,9 +1,7 @@
-import { spawn } from "node:child_process";
 import { access } from "node:fs/promises";
 import path from "node:path";
-import { tmpdir } from "node:os";
 import { createProtocolClient } from "./cdp-client.mjs";
-import { closeTestBrowser } from "./browser-lifecycle.mjs";
+import { startTestBrowser } from "./test-browser.mjs";
 
 // Real browser interruption tests. No video pixels or user library are exported.
 const directory = path.resolve(process.env.CLIMBIQ_VIDEO_DIR ?? "node_modules/.climbiq-private-videos");
@@ -12,26 +10,17 @@ const replacement = path.join(directory, "IMG_9076.MOV");
 const recoveryVideo = path.resolve(process.env.CLIMBIQ_RECOVERY_VIDEO ?? "node_modules/.climbiq-robustness/IMG_9076--control-720.mp4");
 await Promise.all([access(primary), access(replacement)]);
 const url = process.env.CLIMBIQ_E2E_URL ?? "http://127.0.0.1:5173/";
-const chromePath = process.env.CLIMBIQ_CHROME ?? (process.platform === "darwin"
-  ? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
-  : process.platform === "win32" ? "C:/Program Files/Google/Chrome/Application/chrome.exe" : "/usr/bin/google-chrome");
-const port = 9335;
-const chrome = spawn(chromePath, ["--headless=new", "--no-first-run", "--no-default-browser-check",
-  "--disable-background-timer-throttling", "--disable-renderer-backgrounding",
-  `--remote-debugging-port=${port}`, `--user-data-dir=${path.join(tmpdir(), `climbiq-cancel-${Date.now()}`)}`, "about:blank"],
-{ stdio: "ignore", windowsHide: true });
+const stageOnly = process.argv.find(value => value.startsWith("--stage-only="))?.slice("--stage-only=".length);
+if (stageOnly !== undefined && !["start", "detail", "motion", "target", "finish", "pose"].includes(stageOnly)) throw new Error("--stage-only must name start, detail, motion, target, finish, or pose.");
+let browser;
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 let socket;
 let sendCommand;
 const report = { appUrl: url, isGroundTruthLabel: false, stages: [] };
 
 try {
-  let debuggerReady = false;
-  for (let index = 0; index < 100; index++) {
-    try { if ((await fetch(`http://127.0.0.1:${port}/json/version`)).ok) { debuggerReady = true; break; } } catch {}
-    await delay(100);
-  }
-  if (!debuggerReady) throw new Error("Chrome debugger did not start.");
+  browser = await startTestBrowser({ label: "cancel", args: ["--disable-background-timer-throttling", "--disable-renderer-backgrounding"] });
+  const { port } = browser;
   const response = await fetch(`http://127.0.0.1:${port}/json/new?${encodeURIComponent(url)}`, { method: "PUT" });
   if (!response.ok) throw new Error("Could not open the test app.");
   const target = await response.json();
@@ -61,7 +50,16 @@ try {
     const input = await send("Runtime.evaluate", { expression: "document.querySelector('input[accept=\"video/*\"]')" });
     if (!input.result.objectId) throw new Error("Video upload control is missing.");
     await send("DOM.setFileInputFiles", { files: [file], objectId: input.result.objectId });
-    if (ready) await until(`document.querySelector('video')?.src !== ${JSON.stringify(oldSource)} && document.querySelector('.upload-copy strong')?.textContent === ${JSON.stringify(path.basename(file))} && document.querySelector('.video-meta-line')?.textContent.includes('Ready')`, "video ready");
+    if (ready) {
+      const readyExpression = `document.querySelector('video')?.src !== ${JSON.stringify(oldSource)} && document.querySelector('.upload-copy strong')?.textContent === ${JSON.stringify(path.basename(file))} && document.querySelector('.video-meta-line')?.textContent.includes('Ready')`;
+      await until(`Boolean(document.querySelector('[data-video-attachment-choice]')) || (${readyExpression})`, "video ready or association choice");
+      if (await evaluate("Boolean(document.querySelector('[data-video-attachment-choice]'))")) {
+        // Each cancellation phase intentionally starts fresh. A same-file choice
+        // must not silently retain the preceding phase's accepted measurements.
+        await evaluate("[...document.querySelectorAll('[data-video-attachment-choice] button')].find(button=>button.textContent==='Analyze as a new attempt').click()");
+      }
+      await until(readyExpression, "video ready");
+    }
   };
   const stateExpression = `(() => {
     const v = document.querySelector('video');
@@ -75,7 +73,7 @@ try {
   await until("Boolean(document.querySelector('input[accept=\"video/*\"]'))", "app load");
   report.version = await evaluate("document.querySelector('main[data-app-version]')?.dataset.appVersion");
 
-  const stages = process.argv.includes("--rerun-only") ? [] : process.argv.includes("--target-only")
+  const stages = stageOnly ? [stageOnly] : process.argv.includes("--rerun-only") ? [] : process.argv.includes("--target-only")
     ? ["target"] : ["start", "detail", "motion", "target", "finish", "pose"];
   for (const stage of stages) {
     console.error(`Testing ${stage} cancellation`);
@@ -111,6 +109,7 @@ try {
       replacementBlocked: true, markersRetained: true, status: after.status });
   }
 
+  if (!stageOnly) {
   // Establish a complete unsaved result, including COM and contact previews.
   if (!stages.length || stages.at(-1) === "target") await upload(primary);
   await evaluate("[...document.querySelectorAll('button')].find(b => b.textContent.includes('Run full analysis')).click()");
@@ -171,6 +170,7 @@ try {
   if (replacedLedger?.entries?.length || replacedLedger?.activeLightLaneId) throw new Error('Lane evidence leaked into a replacement video.');
   report.replacementClearedLaneEvidence = true;
   report.invalidReplacementPreservedVideo = true;
+  }
   if (errors.length) throw new Error(`Browser exceptions: ${errors.join(' | ')}`);
   report.passed = true;
 } catch (error) {
@@ -178,8 +178,6 @@ try {
   report.error = String(error);
   process.exitCode = 1;
 } finally {
-  await closeTestBrowser(chrome, sendCommand);
-  socket?.close();
-  chrome.kill();
+  try { await browser?.close(sendCommand); } finally { socket?.close(); }
   console.log(JSON.stringify(report, null, 2));
 }

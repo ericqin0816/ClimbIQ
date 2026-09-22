@@ -51,9 +51,20 @@ Keep `ios/` in Git. Xcode project settings, Swift files, app icons, and privacy 
 
 The video input uses the system file picker. The Info.plist purpose strings cover selecting a recording and the picker's optional **Take Video** action, including its audio. These strings do not automatically request access when the app launches. Test Photos, Files, capture, denied access, and cancellation on your target iOS versions. No background-processing entitlement, full-filesystem access, contacts, location, or photo-library write access is added. Library files stay in the app's private storage; the share sheet exposes only the selected export.
 
+Opening a recording first checks it in a temporary decoder. A damaged, cancelled,
+or superseded selection should leave the current video and unsaved measurements
+intact. A filename, duration, and resolution do not prove that a file belongs to a
+saved attempt. When that association is unknown, choose **Attach to this attempt**
+only for its original recording, or **Analyze as a new attempt** to start fresh.
+Reopening an already associated attempt while its current recording remains open
+does not require another confirmation. This is a local association, not a persisted
+content fingerprint. Confirm this preparation/attachment flow on an actual iPhone.
+
 The App target includes `PrivacyInfo.xcprivacy` with the Filesystem plugin's file-timestamp API category and reason `C617.1` for files within the app container. `scripts/ios-privacy.xcprivacy` is the template used if a new native project is generated. The [Filesystem documentation](https://capacitorjs.com/docs/apis/filesystem) and [privacy manifest guide](https://capacitorjs.com/docs/ios/privacy-manifest) explain the requirement. Review the archived app's privacy report before upload. This manifest does not replace App Store Connect privacy answers or a privacy policy. If you add analytics, remote coaching, accounts, or another SDK, review their actual data behavior and update those disclosures.
 
 The pose model and MediaPipe WASM files are packaged from `public/models` and `public/mediapipe`, and asset URLs preserve the `capacitor://localhost` scheme. Native execution still needs a real-device test, especially WebAssembly, Web Crypto, audio decoding, and frame seeking. The website's `/api/coaching` server is not part of the native app. Hosted coaching is disabled in the native beta until a separately configured, tested backend and consent flow are available. Do not put server secrets into `VITE_*` variables or the app bundle.
+
+The browser version can run pose inference in a worker to keep controls responsive. **Native builds keep the existing main-thread inference path by default**, with a cache of integrity-verified model bytes. Worker behavior on an actual iPhone has not been verified. `VITE_POSE_EXECUTION=main-thread|auto|worker` is an intentional developer build override for comparisons and fallback; leave it unset for the normal native handoff. See the [performance evidence and limits](pose-performance.md).
 
 Keep `server.url` out of the committed Capacitor config. Loading the public site would bypass the bundled build. This branch does not grant remote pages navigation access to the native bridge or weaken App Transport Security.
 
@@ -63,6 +74,7 @@ Record the device model, iOS version, app version/build, video format, file size
 
 - Fresh install: launch without a permission prompt; confirm notch, home indicator, keyboard, landscape, larger text, and VoiceOver do not block key controls.
 - Import a portrait MOV/HEVC recording from Photos, an MP4 from Files, a slow-motion clip, and a video stored only in iCloud. Check orientation, duration, decoded audio, scrubbing, and cancellation of the picker. Try a damaged or unsupported file and confirm the error is useful.
+- Replace an edited attempt with a damaged nonempty video file and verify the original video and unsaved markers remain. Cancel opening, choose two files quickly, and reopen a saved attempt with a different clip of the same filename. Verify the attachment choice and that unconfirmed recordings never supply saved overlays or review links.
 - If the picker offers Take Video, accept and deny camera/microphone access separately; confirm the app returns safely to import. A denied microphone should not crash the app.
 - Analyze the same independently annotated speed-climbing recordings used in the web benchmark. Compare event frames and reported times with the reference labels; record uncertainty and correction effort. Passing software tests does not establish timing accuracy.
 - Cancel midway through analysis and load another video. Lock the phone or switch apps during analysis, then return; confirm interrupted work does not publish partial results as complete or overwrite a different recording.

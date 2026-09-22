@@ -2,6 +2,9 @@
   display: none;
 }
 
+.analysis-scope { display: grid; gap: 6px; min-width: 180px; color: var(--muted-text, #696c71); font-size: .76rem; }
+.analysis-scope select { min-height: 44px; }
+
 /* Keep visual and keyboard reading order aligned with the workflow in App. */
 .app-shell.mobile-workflow-enabled .layout-grid > * {
   order: 0;
@@ -206,6 +209,36 @@
 
   .mobile-workflow-enabled .video-player {
     max-height: 54svh;
+  }
+
+  .mobile-workflow-enabled .summary-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .app-shell.mobile-workflow-enabled .summary-metrics > div {
+    min-width: 0;
+    border-right: 0;
+    border-bottom: 1px solid #36383b;
+  }
+
+  .mobile-workflow-enabled .summary-metrics > .summary-primary-metric,
+  .mobile-workflow-enabled .summary-metrics > div:last-child {
+    grid-column: 1 / -1;
+  }
+
+  .app-shell.mobile-workflow-enabled .summary-metrics > div:last-child {
+    border-bottom: 0;
+  }
+
+  .mobile-workflow-enabled .summary-primary-metric > strong {
+    font-size: 2.5rem;
+    line-height: 1.1;
+    letter-spacing: -.035em;
+  }
+
+  .mobile-workflow-enabled .summary-primary-metric > strong > small {
+    font-size: 1rem;
+    margin-left: 5px;
   }
 
   .mobile-workflow-enabled .player-controls {

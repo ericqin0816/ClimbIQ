@@ -1,0 +1,215 @@
+{
+  "schemaVersion": 1,
+  "capturedAt": "2026-09-22T06:21:16.735Z",
+  "baseCommit": "a41734e",
+  "environment": {
+    "os": "Windows",
+    "cpu": "AMD Ryzen 7 8700F, 8 cores / 16 threads",
+    "browser": "Chrome/153.0.8010.53",
+    "nativeIOS": false
+  },
+  "interpretation": "Worker inference reduces main-thread blocking in these desktop tests. No general throughput, accuracy, or native iPhone claim. Source-pixel probing adds readback and is excluded from speed comparisons.",
+  "defaultPolicy": {
+    "browser": "auto worker with startup fallback",
+    "capacitorNative": "main-thread until real-device verification",
+    "explicitBuildOverride": "VITE_POSE_EXECUTION=main-thread|auto|worker",
+    "midRunFallback": false
+  },
+  "unprobedWorkerRuns": [
+    {
+      "fileName": "12.24.mov",
+      "sourceSha256": "b981cc57f8d3d4fe9c57e4e6414f23457ad8bc7eb7cbec5a95c969707d21b333",
+      "elapsedMs": 5534.6,
+      "firstSampleMs": 688.1,
+      "maxEventLoopDelayMs": 1.7,
+      "longTaskCount": 0,
+      "longTaskMs": 0,
+      "maxLongTaskMs": 0,
+      "validFrames": 45,
+      "requestedFrames": 62,
+      "backend": {
+        "backend": "worker"
+      }
+    },
+    {
+      "fileName": "IMG_9199.MOV",
+      "sourceSha256": "c906a632d57519e75a8ea95da28a1059a613b7bdb0d63781681b6c71ece8ec26",
+      "elapsedMs": 3854.7,
+      "firstSampleMs": 289.7,
+      "maxEventLoopDelayMs": 3.8,
+      "longTaskCount": 0,
+      "longTaskMs": 0,
+      "maxLongTaskMs": 0,
+      "validFrames": 42,
+      "requestedFrames": 52,
+      "backend": {
+        "backend": "worker"
+      }
+    }
+  ],
+  "pairedPixelParity": [
+    {
+      "fileName": "12.24.mov",
+      "repeats": [
+        {
+          "cropSamples": 80,
+          "pixelsAndMetadataIdentical": true,
+          "allFrameOutputsIdentical": true,
+          "baselineFingerprint": "15e235c993619cfdcd32e74bc0fa64c97103e981950ea6c2a3416253483fc796",
+          "workerFingerprint": "15e235c993619cfdcd32e74bc0fa64c97103e981950ea6c2a3416253483fc796"
+        },
+        {
+          "cropSamples": 80,
+          "pixelsAndMetadataIdentical": true,
+          "allFrameOutputsIdentical": true,
+          "baselineFingerprint": "15e235c993619cfdcd32e74bc0fa64c97103e981950ea6c2a3416253483fc796",
+          "workerFingerprint": "15e235c993619cfdcd32e74bc0fa64c97103e981950ea6c2a3416253483fc796"
+        }
+      ]
+    },
+    {
+      "fileName": "IMG_9199.MOV",
+      "repeats": [
+        {
+          "cropSamples": 54,
+          "pixelsAndMetadataIdentical": true,
+          "allFrameOutputsIdentical": true,
+          "baselineFingerprint": "c5a225584f2a7b4dc9be62b70c4de423f85c0fa7589d9f4ad93b4b41bf5d8e10",
+          "workerFingerprint": "c5a225584f2a7b4dc9be62b70c4de423f85c0fa7589d9f4ad93b4b41bf5d8e10"
+        },
+        {
+          "cropSamples": 53,
+          "pixelsAndMetadataIdentical": true,
+          "allFrameOutputsIdentical": true,
+          "baselineFingerprint": "aec15956ac71e409d34b2112689893584735a0ae35dc33cf864f2b748a6d3679",
+          "workerFingerprint": "aec15956ac71e409d34b2112689893584735a0ae35dc33cf864f2b748a6d3679"
+        }
+      ]
+    }
+  ],
+  "browserLifecycleContract": {
+    "passed": true,
+    "cases": [
+      {
+        "stage": "initialize",
+        "cancelled": true,
+        "cancellationLatencyMs": 0.20000001788139343,
+        "activeWorkers": 0
+      },
+      {
+        "stage": "detect",
+        "cancelled": true,
+        "cancellationLatencyMs": 0.09999999403953552,
+        "activeWorkers": 0
+      }
+    ],
+    "retry": {
+      "selection": {
+        "backend": "worker"
+      },
+      "validFrames": 35,
+      "requestedFrames": 62
+    },
+    "fallback": {
+      "selection": {
+        "backend": "main-thread",
+        "fallbackReason": "Worker, OffscreenCanvas or ImageBitmap is unavailable."
+      },
+      "validFrames": 35,
+      "requestedFrames": 62
+    },
+    "cspFallback": {
+      "selection": {
+        "backend": "main-thread",
+        "fallbackReason": "The background pose task stopped. Retry the analysis."
+      },
+      "validFrames": 35,
+      "requestedFrames": 62
+    },
+    "created": 4,
+    "terminated": 4,
+    "activeWorkers": 0,
+    "duplicateTerminations": 0
+  },
+  "productionBundle": {
+    "sourceSnapshot": ".local-npm/worker-preview-20260922-0116",
+    "workerAsset": "assets/poseInference.worker-DZLvgW3R.js",
+    "flag": "worker",
+    "fullWorkflowPassed": true,
+    "outcomes": [
+      {
+        "fileName": "12.24.mov",
+        "start": "9.400s",
+        "finish": "21.655s",
+        "validFrames": 46,
+        "requestedFrames": 62,
+        "hold10Kind": "inconclusive",
+        "hold10AutomaticallyAccepted": false,
+        "secondPassRetryPassed": true,
+        "manualReviewWorkflowPassed": true
+      },
+      {
+        "fileName": "IMG_9199.MOV",
+        "start": "7.121s",
+        "finish": "17.472s",
+        "validFrames": 45,
+        "requestedFrames": 52,
+        "hold10Kind": "contact-candidate",
+        "hold10AutomaticallyAccepted": false,
+        "secondPassRetryPassed": true,
+        "manualReviewWorkflowPassed": true
+      }
+    ]
+  },
+  "productionPointerCancellation": {
+    "passed": true,
+    "pointerHandlerLatencyMs": 3,
+    "cancellationAcknowledgedMs": 1654,
+    "pendingAtPointerDown": 1,
+    "workersCreated": 1,
+    "workersTerminated": 1,
+    "restoredCursor": 2.5
+  },
+  "limitations": [
+    "Two existing private videos; no independent event labels.",
+    "Native WKWebView/iPhone worker behavior and memory were not tested; default native execution remains main-thread.",
+    "Readback changes baseline rendering behavior, so pixel-probe times must not be compared with normal runs.",
+    "Owned-worker termination is verified; this does not measure every native/GPU memory allocation."
+  ],
+  "finalDefaultBuild": {
+    "snapshot": ".local-npm/worker-default-preview-20260922-0132",
+    "override": null,
+    "fullWorkflowPassed": true,
+    "outcomes": [
+      {
+        "fileName": "12.24.mov",
+        "start": "9.400s",
+        "finish": "21.655s",
+        "validFrames": 46,
+        "requestedFrames": 62,
+        "secondPassKind": "inconclusive",
+        "secondPassRetryPassed": true,
+        "manualReviewPassed": true
+      },
+      {
+        "fileName": "IMG_9199.MOV",
+        "start": "7.121s",
+        "finish": "17.472s",
+        "validFrames": 45,
+        "requestedFrames": 52,
+        "secondPassKind": "contact-candidate",
+        "secondPassRetryPassed": true,
+        "manualReviewPassed": true
+      }
+    ],
+    "pointerCancellation": {
+      "passed": true,
+      "pointerHandlerLatencyMs": 9,
+      "cancellationAcknowledgedMs": 1645,
+      "pendingAtPointerDown": 1,
+      "workersCreated": 1,
+      "workersTerminated": 1,
+      "restoredCursor": 2.5
+    }
+  }
+}
