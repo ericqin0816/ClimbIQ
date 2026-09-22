@@ -5,6 +5,12 @@ observations are recorded in [benchmarks](benchmarks).
 
 ## Unreleased — iPhone beta foundation
 
+- Manual center-of-mass and calibration controls now honor video preparation,
+  attachment, review, and library-save activity. Their own analysis still supports
+  cancellation and publishes completed results.
+- Native exports use secure random bytes when the browser's UUID helper is
+  unavailable. Local coaching works without UUID generation; online request IDs
+  are created only when an online review is requested.
 - Saved comparison and coaching selectors use accepted timing directly instead
   of processing every stored motion trace. Full tracking summaries are still
   calculated for the selected attempts.

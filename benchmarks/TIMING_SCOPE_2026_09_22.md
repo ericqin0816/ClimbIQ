@@ -4,7 +4,31 @@ The **Start & finish only** scope completed sooner than **Full analysis** on
 both tested recordings while preserving exactly the same accepted Start and
 Finish evidence. Full analysis remains the default.
 
-## Measured results
+## Integrated build follow-up
+
+The later integrated build (`assets/index-BH1g6XZT.js`) includes the software
+crop preference documented in [pose performance](../docs/pose-performance.md).
+The same harness passed again with two fresh-document pairs per recording:
+
+| Recording | Timing-only median | Timing-only range | Full median | Full range | Median paired difference |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `12.24.mov` | 5.509 | 5.282–5.737 | 16.650 | 16.549–16.751 | 11.141 |
+| `IMG_9199.MOV` | 14.096 | 13.965–14.228 | 25.215 | 25.123–25.307 | 11.119 |
+
+Accepted timing and provenance matched exactly in all four pairs, at the same
+boundaries listed below. Full runs returned 44/62 and 44/52 usable COM frames
+respectively in both repeats. Timing-only still produced no movement, pose,
+route, or Hold 10 output and no model requests, workers, or PNG preview work.
+The later Full upgrade (17.224 s), reverse timing-only run (5.742 s), and paused
+Start continuation also passed; these are excluded from the paired medians.
+
+The local report is `test-results/timing-scope-integrated-2026-09-22.json`.
+These remain small desktop observations, not iPhone measurements or accuracy
+evidence. Do not subtract the earlier table from this table to isolate the
+canvas setting's cost: these complete application runs were collected at
+different times. The dedicated crop experiment reports its own controls.
+
+## Initial scope measurement
 
 Two paired repeats per recording, in seconds from Analyze click to fully idle UI:
 

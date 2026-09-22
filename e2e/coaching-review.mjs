@@ -60,8 +60,15 @@ try {
   const click = async text => { await evaluate(`[...document.querySelectorAll('button')].find(b=>b.textContent===${JSON.stringify(text)}).click()`); await delay(40); };
   const text = () => evaluate("document.querySelector('.coaching-panel').innerText");
   const check = (condition, message) => { if (!condition) throw new Error(message); };
+  await evaluate(`(()=>{
+    window.__cryptoDescriptors={uuid:Object.getOwnPropertyDescriptor(crypto,'randomUUID'),bytes:Object.getOwnPropertyDescriptor(crypto,'getRandomValues')};
+    Object.defineProperty(crypto,'randomUUID',{configurable:true,value:undefined});
+    Object.defineProperty(crypto,'getRandomValues',{configurable:true,value:undefined});
+  })()`);
   await click("Review my run");
   check((await text()).includes("12.255s") && (await text()).includes("Bottom/top-half conclusions are withheld"), "Local facts or contact gate missing.");
+  check(await evaluate("document.querySelector('.coaching-panel > p[role=status]').textContent===''") , "Local evidence review incorrectly requires UUID or secure randomness.");
+  await evaluate("if(window.__cryptoDescriptors.bytes)Object.defineProperty(crypto,'getRandomValues',window.__cryptoDescriptors.bytes);else delete crypto.getRandomValues");
   await click("View Start"); check((await evaluate("window.__jumps[0]")) === 9.4, "Evidence link did not preserve raw time.");
   await evaluate("document.querySelector('.coaching-hosted').open=true");
   check(await evaluate("[...document.querySelectorAll('button')].find(b=>b.textContent==='Prioritize with NIM').disabled"), "Hosted action lacks opt-in gate.");
@@ -105,6 +112,8 @@ try {
   check(await evaluate("!![...document.querySelectorAll('button')].find(b=>b.textContent==='Stop waiting') && !document.body.innerText.includes('AI-prioritized review')"), "An old response interrupted the replacement request.");
   await evaluate("window.__holdResponse=false;window.__heldResponses.shift()()");
   await wait("document.body.innerText.includes('AI-prioritized review')");
+  check(await evaluate("/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(window.__calls[0].requestId)"), "The secure fallback did not produce a valid v4 request ID.");
+  await evaluate("if(window.__cryptoDescriptors.uuid)Object.defineProperty(crypto,'randomUUID',window.__cryptoDescriptors.uuid);else delete crypto.randomUUID");
 
   await click("Review my run");
   await evaluate("window.__holdResponse=true;window.__nativeSetTimeout=window.setTimeout;window.setTimeout=(fn,ms,...args)=>window.__nativeSetTimeout(fn,ms===35000?100:ms,...args)");

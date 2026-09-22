@@ -27,6 +27,7 @@
     "test:mobile-library": "node e2e/mobile-library.mjs",
     "test:library-concurrency": "node e2e/library-concurrency.mjs",
     "test:video-attachment": "node e2e/video-attachment.mjs",
+    "test:biomechanics-ownership": "node e2e/biomechanics-ownership.mjs",
     "test:browser-harness": "vitest run e2e/test-browser.test.mjs",
     "test:pose-worker-build": "node e2e/pose-worker-build-smoke.mjs",
     "test:analysis-transaction": "node e2e/analysis-transaction.mjs",

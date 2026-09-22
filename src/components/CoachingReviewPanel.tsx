@@ -4,6 +4,7 @@ import type { SavedAnalysisSession } from "../types";
 import { buildCoachingEvidence, coachingBaselineOptions, coachingEvidenceFingerprint, type CoachingEvidence } from "../lib/coachingEvidence";
 import { buildCoachingCatalog, parseCoachingPacket, validateCoachingPlan, type CoachingGoal, type CoachingPlan } from "../lib/coachingPolicy";
 import { readCoachingResponse } from "../lib/coachingRequest";
+import { createUUID } from "../lib/createUUID";
 import "./CoachingReviewPanel.css";
 
 const LOCAL_APP = Capacitor.isNativePlatform();
@@ -85,7 +86,7 @@ export default function CoachingReviewPanel({ getCurrentSession, sessions, onJum
         distinctAttemptsConfirmed: !!baseline && distinctAttemptFingerprint === coachingEvidenceFingerprint(current, baseline),
       });
       evidenceBaselineId.current = baseline?.id ?? "";
-      setEvidence(next); setPlan(next.catalog.defaultPlan); requestId.current = crypto.randomUUID();
+      setEvidence(next); setPlan(next.catalog.defaultPlan);
     } catch (error) { setMessage(error instanceof Error ? error.message : "This analysis does not yet contain usable evidence. Review the timing markers first."); }
   }
   async function hostedReview(loadSaved = false) {
@@ -96,6 +97,9 @@ export default function CoachingReviewPanel({ getCurrentSession, sessions, onJum
     const requestedReviewId = reviewId;
     setBusy(true); setMessage("");
     try {
+      // Local evidence review needs no secure browser API. Reserve a stable ID
+      // only when an online generation is requested, retaining it for retries.
+      if (!loadSaved && !requestId.current) requestId.current = createUUID();
       const { data, ...response } = await readCoachingResponse(loadSaved ? `/api/coaching?id=${encodeURIComponent(requestedReviewId)}` : "/api/coaching", {
         method: loadSaved ? "GET" : "POST", signal: controller.signal,
         headers: { Authorization: `Bearer ${accessCode}`, ...(loadSaved ? {} : { "Content-Type": "application/json" }) },

@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { exportTextFile, exportResultMessage } from "./exportFile";
 
 const mocks = vi.hoisted(() => ({ native: vi.fn(), write: vi.fn(), share: vi.fn(), remove: vi.fn(), rmdir: vi.fn() }));
@@ -7,6 +7,7 @@ vi.mock("@capacitor/filesystem", () => ({ Filesystem: { writeFile: mocks.write, 
 vi.mock("@capacitor/share", () => ({ Share: { share: mocks.share } }));
 
 describe("native file exports", () => {
+  afterEach(() => vi.unstubAllGlobals());
   beforeEach(() => {
     vi.resetAllMocks();
     mocks.native.mockReturnValue(true);
@@ -46,5 +47,19 @@ describe("native file exports", () => {
     const path = mocks.write.mock.calls[0][0].path;
     expect(path.split("/")).toHaveLength(3);
     expect(path).not.toContain("/../");
+  });
+  it("exports on older iOS WebViews that have secure random bytes but no randomUUID", async () => {
+    vi.stubGlobal("crypto", { getRandomValues: (bytes: Uint8Array) => bytes.fill(0xa5) });
+    await expect(exportTextFile("attempt.json", "{}", "application/json")).resolves.toBe("shared");
+    const path = "climbiq-exports/a5a5a5a5-a5a5-45a5-a5a5-a5a5a5a5a5a5/attempt.json";
+    expect(mocks.write).toHaveBeenCalledWith(expect.objectContaining({ path }));
+    expect(mocks.remove).toHaveBeenCalledWith({ path, directory: "CACHE" });
+    expect(mocks.rmdir).toHaveBeenCalledWith({ path: path.slice(0, path.lastIndexOf("/")), directory: "CACHE" });
+  });
+  it("does not write or share an export if no secure ID can be created", async () => {
+    vi.stubGlobal("crypto", undefined);
+    await expect(exportTextFile("attempt.json", "{}", "application/json")).rejects.toThrow("Secure random IDs are unavailable");
+    expect(mocks.write).not.toHaveBeenCalled();
+    expect(mocks.share).not.toHaveBeenCalled();
   });
 });

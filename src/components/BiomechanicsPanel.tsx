@@ -100,6 +100,7 @@ export function BiomechanicsPanel({
   const cancelledRef = useRef(false);
   const abortControllerRef = useRef<AbortController | null>(null);
   const identityZoneRef = useRef(identityZone);
+  const controlsBlocked = running || analysisBlocked;
 
   useEffect(() => {
     return () => {
@@ -167,7 +168,7 @@ export function BiomechanicsPanel({
 
   function captureCalibrationFrame() {
     const video = videoRef.current;
-    if (analysisBlocked || running) {
+    if (controlsBlocked || abortControllerRef.current) {
       setError("Wait for the active video analysis to finish before capturing a calibration frame.");
       return;
     }
@@ -185,7 +186,7 @@ export function BiomechanicsPanel({
   }
 
   function handleCalibrationPointer(event: PointerEvent<HTMLDivElement>) {
-    if (draftPoints.length >= WALL_CORNER_TEMPLATE.length) {
+    if (controlsBlocked || abortControllerRef.current || draftPoints.length >= WALL_CORNER_TEMPLATE.length) {
       return;
     }
     const rect = event.currentTarget.getBoundingClientRect();
@@ -203,7 +204,7 @@ export function BiomechanicsPanel({
   }
 
   function updateDraftCoordinate(index: number, axis: "x" | "y", percent: number) {
-    if (!Number.isFinite(percent)) {
+    if (controlsBlocked || abortControllerRef.current || !Number.isFinite(percent)) {
       return;
     }
     setDraftPoints((current) => {
@@ -215,6 +216,7 @@ export function BiomechanicsPanel({
   }
 
   function saveCalibration() {
+    if (controlsBlocked || abortControllerRef.current) return;
     try {
       const calibration = buildWallCalibration(draftPoints, calibrationFrameTime, staticCameraConfirmed);
       const validation = validateWallCalibration(calibration);
@@ -234,6 +236,7 @@ export function BiomechanicsPanel({
     key: K,
     value: BiomechanicsSession["settings"][K],
   ) {
+    if (controlsBlocked || abortControllerRef.current) return;
     onSessionChange({
       ...session,
       settings: { ...session.settings, [key]: value },
@@ -243,8 +246,11 @@ export function BiomechanicsPanel({
   }
 
   async function runAnalysis() {
+    // The ref also closes synchronous re-entry before React publishes running.
+    if (controlsBlocked || abortControllerRef.current) return;
     const video = videoRef.current;
-    if (!video || !session.calibration || !calibrationValidation.valid || !rangeValid) {
+    if (!video || !metadata?.metadataLoaded || video.error || video.readyState < 2 ||
+        !session.calibration || !calibrationValidation.valid || !rangeValid) {
       setError(calibrationValidation.error ?? "Load a video, calibrate the wall, and choose a valid range.");
       return;
     }
@@ -351,7 +357,7 @@ export function BiomechanicsPanel({
                   : `Saved from video time ${session.calibration!.frameRawTime.toFixed(3)}s. Reuse it while the camera stays fixed.`}
               </span>
             </div>
-            <button onClick={() => setShowCalibrationEditor(true)} disabled={running || analysisBlocked}>Edit calibration</button>
+            <button onClick={() => { if (!controlsBlocked) setShowCalibrationEditor(true); }} disabled={controlsBlocked}>Edit calibration</button>
           </div>
         ) : (
         <section className="biomechanics-step" aria-labelledby="wall-calibration-heading">
@@ -360,26 +366,27 @@ export function BiomechanicsPanel({
               <p className="eyebrow">One-time setup</p>
               <h3 id="wall-calibration-heading">Mark the four wall corners</h3>
             </div>
-            {calibrationReady && <button onClick={() => setShowCalibrationEditor(false)}>Close</button>}
+            {calibrationReady && <button onClick={() => { if (!controlsBlocked) setShowCalibrationEditor(false); }} disabled={controlsBlocked}>Close</button>}
           </div>
           <p className="muted">
             Side angles are supported when the camera is fixed. Pause on a frame showing the whole selected lane, then click its actual bottom left, bottom right, top right, and top left corners. Follow the sloped wall edges you see; do not make the top or bottom artificially horizontal.
           </p>
           <div className="button-row">
-            <button className="primary" onClick={captureCalibrationFrame} disabled={!metadata?.metadataLoaded || running || analysisBlocked}>
+            <button className="primary" onClick={captureCalibrationFrame} disabled={!metadata?.metadataLoaded || controlsBlocked}>
               {calibrationFrame ? "Capture a different frame" : "Capture current full-wall frame"}
             </button>
             {draftPoints.length > 0 && (
               <>
-                <button onClick={() => setDraftPoints((points) => points.slice(0, -1))} disabled={running}>
+                <button onClick={() => { if (!controlsBlocked) setDraftPoints((points) => points.slice(0, -1)); }} disabled={controlsBlocked}>
                   Undo last point
                 </button>
                 <button
                   onClick={() => {
+                    if (controlsBlocked || abortControllerRef.current) return;
                     setDraftPoints([]);
                     setStatus("Draft wall corners cleared.");
                   }}
-                  disabled={running}
+                  disabled={controlsBlocked}
                 >
                   Start over
                 </button>
@@ -402,6 +409,7 @@ export function BiomechanicsPanel({
               <div
                 className="wall-calibration-overlay"
                 onPointerDown={handleCalibrationPointer}
+                aria-disabled={controlsBlocked}
                 aria-label="Wall calibration image. Mark bottom left, bottom right, top right, then top left."
               >
                 {draftPoints.map((point, index) => (
@@ -432,7 +440,7 @@ export function BiomechanicsPanel({
                     step="0.1"
                     value={draftPoints[index] ? (draftPoints[index].x * 100).toFixed(1) : ""}
                     onChange={(event) => updateDraftCoordinate(index, "x", Number(event.target.value))}
-                    disabled={running}
+                    disabled={controlsBlocked}
                   />
                 </label>
                 <label>
@@ -444,7 +452,7 @@ export function BiomechanicsPanel({
                     step="0.1"
                     value={draftPoints[index] ? (draftPoints[index].y * 100).toFixed(1) : ""}
                     onChange={(event) => updateDraftCoordinate(index, "y", Number(event.target.value))}
-                    disabled={running}
+                    disabled={controlsBlocked}
                   />
                 </label>
               </fieldset>
@@ -456,23 +464,24 @@ export function BiomechanicsPanel({
             <input
               type="checkbox"
               checked={staticCameraConfirmed}
-              onChange={(event) => setStaticCameraConfirmed(event.target.checked)}
-              disabled={running}
+              onChange={(event) => { if (!controlsBlocked) setStaticCameraConfirmed(event.target.checked); }}
+              disabled={controlsBlocked}
             />
             The camera stays fixed from the accepted start through the finish (no pan, tilt, shake, or zoom during the climb).
           </label>
           <div className="button-row">
-            <button className="primary" onClick={saveCalibration} disabled={draftPoints.length !== 4 || !staticCameraConfirmed || running}>
+            <button className="primary" onClick={saveCalibration} disabled={draftPoints.length !== 4 || !staticCameraConfirmed || controlsBlocked}>
               Save wall calibration
             </button>
             {session.calibration && (
               <button
                 onClick={() => {
+                  if (controlsBlocked || abortControllerRef.current) return;
                   onSessionChange({ ...session, calibration: undefined, result: undefined });
                   setDraftPoints([]);
                   setStatus("Saved wall calibration and center-of-mass results cleared.");
                 }}
-                disabled={running}
+                disabled={controlsBlocked}
               >
                 Remove saved calibration
               </button>
@@ -514,8 +523,8 @@ export function BiomechanicsPanel({
                 min="0"
                 step="0.001"
                 value={rangeStart}
-                onChange={(event) => setRangeStart(Number(event.target.value))}
-                disabled={running}
+                onChange={(event) => { if (!controlsBlocked) setRangeStart(Number(event.target.value)); }}
+                disabled={controlsBlocked}
               />
             </label>
             <label>
@@ -525,8 +534,8 @@ export function BiomechanicsPanel({
                 min="0"
                 step="0.001"
                 value={rangeEnd}
-                onChange={(event) => setRangeEnd(Number(event.target.value))}
-                disabled={running}
+                onChange={(event) => { if (!controlsBlocked) setRangeEnd(Number(event.target.value)); }}
+                disabled={controlsBlocked}
               />
             </label>
             <label>
@@ -534,7 +543,7 @@ export function BiomechanicsPanel({
               <select
                 value={session.settings.sampleFps}
                 onChange={(event) => updateSetting("sampleFps", Number(event.target.value))}
-                disabled={running}
+                disabled={controlsBlocked}
               >
                 <option value={5}>5 fps — recommended for phone video</option>
                 <option value={10}>10 fps — finer timing</option>
@@ -546,7 +555,7 @@ export function BiomechanicsPanel({
               <select
                 value={session.settings.minVisibility}
                 onChange={(event) => updateSetting("minVisibility", Number(event.target.value))}
-                disabled={running}
+                disabled={controlsBlocked}
               >
                 <option value={0.2}>20% - distant upper wall</option>
                 <option value={0.25}>25% — recommended for distant climbers</option>
@@ -560,7 +569,7 @@ export function BiomechanicsPanel({
               <select
                 value={session.settings.minMassCoverage}
                 onChange={(event) => updateSetting("minMassCoverage", Number(event.target.value))}
-                disabled={running}
+                disabled={controlsBlocked}
               >
                 <option value={0.7}>70% - distant upper wall</option>
                 <option value={0.75}>75% — recommended</option>
@@ -575,7 +584,7 @@ export function BiomechanicsPanel({
               <select
                 value={session.settings.smoothingWindowSeconds}
                 onChange={(event) => updateSetting("smoothingWindowSeconds", Number(event.target.value))}
-                disabled={running}
+                disabled={controlsBlocked}
               >
                 <option value={0.15}>±0.15s</option>
                 <option value={0.2}>±0.20s — recommended</option>
@@ -594,7 +603,7 @@ export function BiomechanicsPanel({
               <button
                 className="primary"
                 onClick={runAnalysis}
-                disabled={running || analysisBlocked}
+                disabled={controlsBlocked}
               >
                 {running ? "Analyzing center of mass…" : automaticRangeReady ? "Analyze center of mass" : "Analyze selected range"}
               </button>
@@ -606,9 +615,10 @@ export function BiomechanicsPanel({
             }}>Cancel</button>}
             {!running && session.result && (
               <button onClick={() => {
+                if (controlsBlocked || abortControllerRef.current) return;
                 onSessionChange({ ...session, result: undefined });
                 setStatus("Center-of-mass result cleared. Wall calibration was kept.");
-              }}>
+              }} disabled={controlsBlocked}>
                 Clear result
               </button>
             )}
@@ -644,7 +654,8 @@ export function BiomechanicsPanel({
           result={visibleResult}
           calibrationConfidence={session.calibration?.confidence ?? "High"}
           currentTime={currentTime}
-          onJump={onJump}
+          onJump={time => { if (!controlsBlocked && !abortControllerRef.current) onJump(time); }}
+          controlsBlocked={controlsBlocked}
         />
       )}
     </div>
@@ -818,11 +829,13 @@ function BiomechanicsResultView({
   calibrationConfidence,
   currentTime,
   onJump,
+  controlsBlocked,
 }: {
   result: BiomechanicsResult;
   calibrationConfidence: Confidence;
   currentTime: number;
   onJump: (time: number) => void;
+  controlsBlocked: boolean;
 }) {
   const { metrics } = result;
   const hasComData = result.frames.some((frame) => Boolean(frame.smoothedWallCom));
@@ -859,7 +872,7 @@ function BiomechanicsResultView({
         {Number.isFinite(metrics.pathEfficiency) && <ResultMetric label="Path efficiency" value={formatPercent(metrics.pathEfficiency)} />}
       </div>
 
-      {hasComData && <RouteSplitsPanel analysis={routeSplits} onJump={onJump} />}
+      {hasComData && <RouteSplitsPanel analysis={routeSplits} onJump={onJump} controlsBlocked={controlsBlocked} />}
 
       {hasComData ? (
         <>
@@ -915,7 +928,7 @@ function BiomechanicsResultView({
                   <td>{formatMetric(frame.speedMps, "m/s")}</td>
                   <td>{formatPercent(frame.massCoverage)}</td>
                   <td>{frame.valid ? frame.warning ?? "Valid" : frame.warning ?? "Needs review"}</td>
-                  <td><button onClick={() => onJump(frame.rawTime)}>Jump</button></td>
+                  <td><button disabled={controlsBlocked} onClick={() => onJump(frame.rawTime)}>Jump</button></td>
                 </tr>
               ))}
             </tbody>
@@ -1046,9 +1059,11 @@ function ResultMetric({ label, value }: { label: string; value: string }) {
 function RouteSplitsPanel({
   analysis,
   onJump,
+  controlsBlocked,
 }: {
   analysis: RouteSplitAnalysis;
   onJump: (time: number) => void;
+  controlsBlocked: boolean;
 }) {
   const reviewOnly = analysis.confidence === "Low" || analysis.confidence === "None";
   const slowest = analysis.sections.find((section) => section.id === analysis.slowestSectionId);
@@ -1086,7 +1101,7 @@ function RouteSplitsPanel({
           <small>This is a wall-section split only. Hold 10 is timed separately from sustained hand contact.</small>
         </div>
         {analysis.halfway.rawTime !== undefined && (
-          <button onClick={() => onJump(analysis.halfway.rawTime!)}>Review halfway</button>
+          <button disabled={controlsBlocked} onClick={() => onJump(analysis.halfway.rawTime!)}>Review halfway</button>
         )}
       </div>
 
@@ -1098,6 +1113,7 @@ function RouteSplitsPanel({
             slowest={section.id === analysis.slowestSectionId}
             reviewOnly={reviewOnly}
             onJump={onJump}
+            controlsBlocked={controlsBlocked}
           />
         ))}
       </div>
@@ -1110,11 +1126,13 @@ function RouteSectionCard({
   slowest,
   reviewOnly,
   onJump,
+  controlsBlocked,
 }: {
   section: RouteSectionSplit;
   slowest: boolean;
   reviewOnly: boolean;
   onJump: (time: number) => void;
+  controlsBlocked: boolean;
 }) {
   return (
     <article className={`route-section-card${slowest ? " slowest" : ""}`}>
@@ -1139,7 +1157,7 @@ function RouteSectionCard({
               : "Vertical pace needs more continuous tracking"}
           </p>
           {section.startRawTime !== undefined && (
-            <button onClick={() => onJump(section.startRawTime!)}>Review {section.label.toLowerCase()}</button>
+            <button disabled={controlsBlocked} onClick={() => onJump(section.startRawTime!)}>Review {section.label.toLowerCase()}</button>
           )}
         </>
       ) : (

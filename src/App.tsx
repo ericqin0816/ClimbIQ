@@ -4705,7 +4705,7 @@ function App() {
               session={biomechanics}
               displayResult={effectiveBiomechanicsResult}
               finishCutoff={finishTrimmedBiomechanics?.cutoff}
-              analysisBlocked={startRunning || movementRunning || movementPreviewRunning || frameTestRunning || autoAnalysisRunning || secondPassRunning || finishRunning}
+              analysisBlocked={videoAnalysisRunning}
               onSessionChange={(nextSession) => {
                 if (nextSession.calibration !== biomechanics.calibration) {
                   setRouteAlignment(null);
@@ -5854,7 +5854,7 @@ function isSavedAnalysisSession(value: unknown): value is SavedAnalysisSession {
 }
 
 function createSessionId() {
-  return typeof crypto !== "undefined" && "randomUUID" in crypto
+  return typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
     ? crypto.randomUUID()
     : `session-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }

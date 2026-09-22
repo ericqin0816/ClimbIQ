@@ -1,4 +1,5 @@
 import { Capacitor } from "@capacitor/core";
+import { createUUID } from "./createUUID";
 
 export type FileExportResult = "shared" | "downloaded" | "cancelled";
 
@@ -24,7 +25,7 @@ export async function exportTextFile(fileName: string, content: string, type: st
     import("@capacitor/filesystem"), import("@capacitor/share"),
   ]);
   const safeName = fileName.replace(/[^a-zA-Z0-9._-]/g, "-").replace(/^\.+/, "") || "climbiq-export.json";
-  const path = `climbiq-exports/${crypto.randomUUID()}/${safeName}`;
+  const path = `climbiq-exports/${createUUID()}/${safeName}`;
   const file = await Filesystem.writeFile({ path, data: content, directory: Directory.Cache, encoding: Encoding.UTF8, recursive: true });
   try {
     await Share.share({ title: fileName, files: [file.uri], dialogTitle: "Export from ClimbIQ" });

@@ -59,6 +59,7 @@ jobs:
           npm run test:mobile-library
           npm run test:library-concurrency
           npm run test:video-attachment
+          npm run test:biomechanics-ownership
           # Repetition catches decoder/readback races; a failure stops the step.
           for pass in 1 2 3; do
             npm run test:source-frames
