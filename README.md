@@ -19,6 +19,16 @@ summary. NVIDIA NIM can prioritize approved review points when a private server
 workspace is configured. That opt-in sends numeric evidence, never the video;
 hosted AI is disabled by default.
 
+## iPhone beta branch
+
+The `codex/ios-app` branch adds an iPhone app using Capacitor, with the analysis
+assets bundled locally, native saved-attempt storage, and the iOS share sheet.
+A branch keeps this work separate until it is reviewed and merged; it does not
+publish an app. Follow the [Mac/Xcode and TestFlight handoff](docs/ios-beta.md).
+Native signing and real-iPhone testing are still required. The
+[beta evaluation plan](docs/beta-validation.md) includes an empty label worksheet
+and proposed readiness gates; it contains no new accuracy measurements.
+
 ## Try a recording
 
 1. Open the app and choose a local MOV or MP4 that your browser can decode.

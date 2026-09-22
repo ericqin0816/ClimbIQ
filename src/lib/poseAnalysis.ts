@@ -13,6 +13,7 @@ import { sampleFramesInRange, seekTo } from "./videoFrameSampler";
 import { validateWallCalibration } from "./wallCalibration";
 import { readDecodedVideoFrameTime } from "./decodedVideoFrame";
 import { summarizeSourceSampleTiming } from "./sourceSampleTiming";
+import { resolveAppAssetUrl } from "./appAssets";
 
 const MEDIAPIPE_WASM_RELATIVE_PATH = "mediapipe/wasm";
 const MODEL_RELATIVE_PATH = "models/pose_landmarker_full.task";
@@ -923,8 +924,7 @@ function fitRegion(centerX: number, centerY: number, width: number, height: numb
 }
 
 function assetUrl(relativePath: string): string {
-  const base = import.meta.env.BASE_URL.endsWith("/") ? import.meta.env.BASE_URL : `${import.meta.env.BASE_URL}/`;
-  return new URL(`${base}${relativePath.replace(/^\//, "")}`, window.location.origin).toString();
+  return resolveAppAssetUrl(relativePath, import.meta.env.BASE_URL, document.baseURI || window.location.href);
 }
 
 function checkCancelled(isCancelled?: () => boolean, signal?: AbortSignal): void {

@@ -1,8 +1,11 @@
 import { useEffect, useRef, useState } from "react";
+import { Capacitor } from "@capacitor/core";
 import type { SavedAnalysisSession } from "../types";
 import { buildCoachingEvidence, type CoachingEvidence } from "../lib/coachingEvidence";
 import { buildCoachingCatalog, parseCoachingPacket, validateCoachingPlan, type CoachingGoal, type CoachingPlan } from "../lib/coachingPolicy";
 import "./CoachingReviewPanel.css";
+
+const LOCAL_APP = Capacitor.isNativePlatform();
 
 export default function CoachingReviewPanel({ getCurrentSession, sessions, onJump, disabled }: {
   getCurrentSession: () => SavedAnalysisSession; sessions: SavedAnalysisSession[];
@@ -23,6 +26,8 @@ export default function CoachingReviewPanel({ getCurrentSession, sessions, onJum
   const request = useRef<AbortController | null>(null);
   const requestId = useRef("");
   useEffect(() => {
+    // Packaged builds have no same-origin server API. Keep all evidence local.
+    if (LOCAL_APP) return () => { request.current?.abort(); };
     const controller = new AbortController();
     fetch("/api/coaching?status=1", { signal: controller.signal }).then(r => r.ok ? r.json() : null)
       .then(data => setEnabled(data?.enabled === true)).catch(() => {});
@@ -91,7 +96,7 @@ export default function CoachingReviewPanel({ getCurrentSession, sessions, onJum
       {focus && <article className="coaching-focus"><h3>Next focus: {focus.title}</h3><p>{focus.text}</p><div className="button-row">{focus.evidenceIds.map(links)}</div></article>}
       <details open><summary>Limits of this review</summary>{evidence.catalog.limitations.map(l => <p key={l.id}><strong>{l.title}.</strong> {l.text}</p>)}</details>
     </section>}
-    <details className="coaching-hosted"><summary>Optional NVIDIA NIM review</summary>
+    {!LOCAL_APP && <details className="coaching-hosted"><summary>Optional NVIDIA NIM review</summary>
       <p>{enabled ? "Private demo workspace. Anyone with its access code and a review link can read that saved review. This is not a public multi-user account system." : "Hosted AI is not enabled here. Server credentials, durable review storage, and workspace access controls must be configured first."}</p>
       {enabled && <>
         <label>Workspace access code (not your NVIDIA API key)<input type="password" autoComplete="off" value={accessCode} onChange={e => setAccessCode(e.target.value)} /></label>
@@ -101,7 +106,7 @@ export default function CoachingReviewPanel({ getCurrentSession, sessions, onJum
         <button disabled={busy || !accessCode || !/^[\w-]{21}$/.test(reviewId)} onClick={() => void hostedReview(true)}>Load saved review</button>
         {/^[\w-]{21}$/.test(reviewId) && <p><a href={`?coachingReview=${encodeURIComponent(reviewId)}#coaching-review`}>Saved review link</a> · workspace access code required</p>}
       </>}
-    </details>
+    </details>}
     <p role="status" aria-live="polite">{message}</p>
   </div>;
 }

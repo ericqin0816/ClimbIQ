@@ -10,3 +10,16 @@ test-results/
 
 .vercel
 .env*
+
+# Native build products and local Xcode state; keep the iOS project in Git.
+ios/**/build/
+ios/**/DerivedData/
+ios/**/xcuserdata/
+ios/**/.swiftpm/
+ios/**/*.xcuserstate
+ios/App/App/public/
+ios/App/App/capacitor.config.json
+ios/capacitor-cordova-ios-plugins/
+*.ipa
+*.dSYM.zip
+*.mobileprovision

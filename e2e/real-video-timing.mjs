@@ -4,6 +4,7 @@ import { spawn } from "node:child_process";
 import { tmpdir } from "node:os";
 import { createProtocolClient } from "./cdp-client.mjs";
 import { closeTestBrowser } from "./browser-lifecycle.mjs";
+import { readSessionLibraryJson, saveCurrentSession, waitForSessionLibraryChange } from "./session-library.mjs";
 import { verifyReviewPresentation } from "./review-presentation.mjs";
 import { createReadStream } from "node:fs";
 import { createHash } from "node:crypto";
@@ -291,12 +292,7 @@ async function verifySavedWorkflow({ evaluate, send }) {
   })()`, 20000, "visible Save Session and released video tasks");
   const presentation = process.env.CLIMBIQ_E2E_PRESENTATION_QA === "1" && secondPass.available
     ? await verifyReviewPresentation({evaluate,send}) : undefined;
-  await evaluate(`(() => {
-    const button = [...document.querySelectorAll('button')].find(b => b.textContent.trim() === 'Save Session');
-    if (!button || !button.getClientRects().length || button.disabled) throw new Error('Save Session is not visibly available.');
-    button.click();
-  })()`);
-  const saved = await evaluate(`JSON.parse(localStorage.getItem('climbiq.analysisSessions.v1') ?? '[]')[0]`);
+  const saved = JSON.parse(await saveCurrentSession(evaluate))[0];
   if (!saved) throw new Error("Full workflow failed to save the analysis.");
   if (saved.timestamps.some(marker => marker.rawTime !== null && marker.acceptanceMode !== 'automatic')) {
     throw new Error('Automatic analysis did not record automatic acceptance provenance.');
@@ -334,6 +330,7 @@ async function verifySavedWorkflow({ evaluate, send }) {
   // Timing can validly complete while camera/calibration checks withhold COM.
   // Known-reference coverage assertions below still catch a lost pose result;
   // exploratory clips report availability separately from save/reload failures.
+  const beforeDuplicate = await readSessionLibraryJson(evaluate);
   await evaluate(`(() => {
     const details = document.querySelector('.session-details');
     if (details && !details.open) details.querySelector('summary').click();
@@ -341,19 +338,21 @@ async function verifySavedWorkflow({ evaluate, send }) {
     if (!button?.getClientRects().length) throw new Error('Duplicate Session is hidden after opening session management.');
     button.click();
   })()`);
+  await waitForSessionLibraryChange(evaluate, beforeDuplicate);
   await evaluate(`window.__climbiqReloadSentinel = true`);
   await send("Page.reload");
   await waitUntil(evaluate, `window.__climbiqReloadSentinel !== true && document.readyState === 'complete' && Boolean(document.querySelector('.comparison-card'))`, 15000, "saved workflow reload");
+  await waitUntil(evaluate, `!document.querySelector('[data-session-storage-state]') || document.querySelector('[data-session-storage-state]').dataset.sessionStorageState === 'ready'`, 10000, "saved library load");
   if (hasFinish) {
     await waitUntil(evaluate, `Boolean(document.querySelector('.comparison-details'))`, 10000, "reloaded comparison");
     await evaluate(`document.querySelector('.comparison-details').open = true`);
   }
+  const restoredSessions = JSON.parse(await readSessionLibraryJson(evaluate));
   const restored = await evaluate(`(() => {
-    const sessions = JSON.parse(localStorage.getItem('climbiq.analysisSessions.v1') ?? '[]');
-    return { sessions, comparison: document.querySelector('.comparison-content')?.innerText ?? '',
+    return { comparison: document.querySelector('.comparison-content')?.innerText ?? '',
       gainLossClaims: document.querySelectorAll('.comparison-row.gained, .comparison-row.lost').length };
   })()`);
-  const original = restored.sessions.find(session => session.id === saved.id);
+  const original = restoredSessions.find(session => session.id === saved.id);
   if (!original || JSON.stringify(original.timestamps) !== JSON.stringify(saved.timestamps)) {
     throw new Error("Full workflow changed accepted timestamps after save/reload.");
   }
@@ -418,7 +417,7 @@ async function verifySavedWorkflow({ evaluate, send }) {
 }
 
 async function verifyHold10Review({ evaluate, send }, saved) {
-  const savedLibrary = await evaluate(`localStorage.getItem('climbiq.analysisSessions.v1')`);
+  const savedLibrary = await readSessionLibraryJson(evaluate);
   const expectedNativeFrames = saved.biomechanics?.result?.frames?.filter(frame => Number.isFinite(frame.decodedFrameRawTime)).length ?? 0;
   const restoredTimingAudit = (await captureDatasetExport(evaluate)).sourceFrameTimingAudit;
   if (expectedNativeFrames && restoredTimingAudit?.nativeTimingFrames !== expectedNativeFrames) {
@@ -470,11 +469,10 @@ async function verifyHold10Review({ evaluate, send }, saved) {
       Math.abs(accepted.phases[0] + accepted.phases[1] - (finish - start)) > 0.001) {
     throw new Error('Reviewed Hold 10 did not produce consistent bottom/top race phases.');
   }
-  if (await evaluate(`localStorage.getItem('climbiq.analysisSessions.v1')`) !== savedLibrary) {
+  if (await readSessionLibraryJson(evaluate) !== savedLibrary) {
     throw new Error('Unsaved frame review unexpectedly overwrote the saved library.');
   }
-  await evaluate(`([...document.querySelectorAll('button')].find(b => b.textContent.trim() === 'Save Session')).click()`);
-  const savedAfterReview = await evaluate(`localStorage.getItem('climbiq.analysisSessions.v1')`);
+  const savedAfterReview = await saveCurrentSession(evaluate);
   const reviewedMarker = JSON.parse(savedAfterReview).find(s => s.id === saved.id)?.timestamps.find(m => m.id === 'hold10');
   if (reviewedMarker?.rawTime !== accepted.rawTime) throw new Error('Saving the reviewed contact did not preserve its timestamp.');
   if (reviewedMarker.acceptanceMode !== 'frame-review') throw new Error('Saving the reviewed contact lost its interactive review provenance.');
@@ -498,7 +496,7 @@ async function verifyHold10Review({ evaluate, send }, saved) {
   await waitUntil(evaluate, `!document.querySelector('.hold10-second-pass') && !document.querySelector('.hold10-phase-grid')`, 10000, "stale Hold 10 evidence and phases to clear after Start edit");
   const draftCleared = await evaluate(`document.querySelector('input[aria-label="Start Signal raw video time"]').value === ''`);
   if (!draftCleared) throw new Error('The committed marker input retained stale text.');
-  if (await evaluate(`localStorage.getItem('climbiq.analysisSessions.v1')`) !== savedAfterReview) {
+  if (await readSessionLibraryJson(evaluate) !== savedAfterReview) {
     throw new Error('An unsaved Start edit unexpectedly overwrote the saved library.');
   }
   const editedDataset = await captureDatasetExport(evaluate);

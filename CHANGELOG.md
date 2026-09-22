@@ -3,6 +3,27 @@
 User-facing changes and their limits. Detailed experiments and regression
 observations are recorded in [benchmarks](benchmarks).
 
+## Unreleased — iPhone beta foundation
+
+- Added a Capacitor iPhone project with bundled analysis assets, official App,
+  Filesystem and Share plugins, privacy metadata, and portable setup/check commands.
+- Added a phone workflow with larger touch controls, safe-area spacing, recording
+  guidance, and quick navigation between analysis, review, and saved attempts.
+- Moved the saved library to IndexedDB on the web and private filesystem snapshots
+  on iOS. Existing localStorage records are retained during migration; failed
+  loads or writes are surfaced without claiming the library was saved.
+- Added native Share / Save to Files exports and explicit cancelled-export handling.
+- Cancelled automatic analysis and cancellable frame-review passes when the native app becomes inactive, and disabled
+  hosted coaching in the native shell until its backend is configured separately.
+- Fixed model/WASM URLs for Capacitor's custom scheme and patched Vitest to 4.1.11.
+- Added the [iPhone handoff](docs/ios-beta.md), [beta study plan](docs/beta-validation.md),
+  and empty reviewer worksheet. These are preparation, not newly measured accuracy.
+
+The bundle ID and native icon/launch artwork remain placeholders. Xcode compilation,
+signing, permission prompts, and real-device performance have not been verified on
+Windows. Three moderate development-only Capacitor CLI dependency advisories remain
+documented in the handoff; production dependencies pass the setup-time npm audit.
+
 ## 0.29.0 — 2026-09-08
 
 - Added a local evidence-review panel with accepted timing, frame-reviewed
