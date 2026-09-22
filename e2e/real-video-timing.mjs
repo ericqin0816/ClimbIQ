@@ -353,11 +353,15 @@ async function verifySavedWorkflow({ evaluate, send }) {
       gainLossClaims: document.querySelectorAll('.comparison-row.gained, .comparison-row.lost').length };
   })()`);
   const original = restoredSessions.find(session => session.id === saved.id);
+  const copy = restoredSessions.find(session => session.id !== saved.id);
   if (!original || JSON.stringify(original.timestamps) !== JSON.stringify(saved.timestamps)) {
     throw new Error("Full workflow changed accepted timestamps after save/reload.");
   }
-  if (hasFinish && (!restored.comparison.includes("Below threshold") || restored.gainLossClaims)) {
-    throw new Error("Identical saved attempts did not compare as below threshold after reload.");
+  if (!copy || copy.attemptLineageId !== (original.attemptLineageId ?? original.id)) {
+    throw new Error("Duplicating and reloading an analysis lost its original attempt identity.");
+  }
+  if (hasFinish && (!restored.comparison.includes("Annotation difference") || !restored.comparison.includes("same attempt") || restored.gainLossClaims)) {
+    throw new Error("Copied analyses must show annotation differences without performance gain/loss claims after reload.");
   }
   let secondPassRetryPassed;
   let manualReviewWorkflow;

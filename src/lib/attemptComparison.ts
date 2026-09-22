@@ -4,6 +4,7 @@ import { isBiomechanicsResultFresh } from "./biomechanicsFreshness";
 import { sanitizeTimestampSequence } from "./timestampIntegrity";
 import { validateWallCalibration } from "./wallCalibration";
 import { observationComparisonFloor } from "./timingEvidence";
+import { assessAttemptIdentity, type AttemptIdentityAssessment } from "./attemptIdentity";
 
 export type AttemptMetricId =
   | "total"
@@ -42,7 +43,7 @@ export interface AttemptComparisonRow {
   candidate?: AttemptMetric;
   deltaSeconds?: number;
   comparisonFloorSeconds?: number;
-  outcome: "gained" | "lost" | "similar" | "unavailable" | "review";
+  outcome: "gained" | "lost" | "similar" | "unavailable" | "review" | "identity-review";
   explanation: string;
 }
 
@@ -52,6 +53,8 @@ export interface AttemptComparison {
   rows: AttemptComparisonRow[];
   comparableMetricCount: number;
   primaryInsight: string;
+  identity: AttemptIdentityAssessment;
+  performanceComparisonAllowed: boolean;
 }
 
 const METRIC_ORDER: AttemptMetricId[] = [
@@ -165,17 +168,22 @@ export function summarizeAttempt(session: SavedAnalysisSession): AttemptSummary 
 export function compareAttempts(
   baselineSession: SavedAnalysisSession,
   candidateSession: SavedAnalysisSession,
+  options: { distinctAttemptsConfirmed?: boolean } = {},
 ): AttemptComparison {
   const baseline = summarizeAttempt(baselineSession);
   const candidate = summarizeAttempt(candidateSession);
   const baselineById = new Map(baseline.metrics.map((item) => [item.id, item]));
   const candidateById = new Map(candidate.metrics.map((item) => [item.id, item]));
+  const identity = assessAttemptIdentity(baselineSession, candidateSession);
+  const performanceComparisonAllowed = identity.relationship !== "same-attempt" &&
+    (!identity.requiresDistinctAttemptConfirmation || options.distinctAttemptsConfirmed === true);
   const rows = METRIC_ORDER.map((id) => compareMetric(
     id,
     baselineById.get(id),
     candidateById.get(id),
     candidate.name,
-  ));
+  )).map(row => !performanceComparisonAllowed && row.deltaSeconds !== undefined
+    ? { ...row, outcome: "identity-review" as const, explanation: identity.explanation } : row);
   const comparable = rows.filter((row) => row.deltaSeconds !== undefined);
   const total = comparable.find((row) => row.id === "total");
   // Contact phases partition the race. Prefer these over overlapping COM thirds
@@ -190,8 +198,9 @@ export function compareAttempts(
     baseline,
     candidate,
     rows,
-    comparableMetricCount: comparable.length,
-    primaryInsight: insights.length ? insights.join(" ")
+    identity, performanceComparisonAllowed,
+    comparableMetricCount: performanceComparisonAllowed ? comparable.length : 0,
+    primaryInsight: !performanceComparisonAllowed ? identity.explanation : insights.length ? insights.join(" ")
       : comparable.length ? "The available differences are below the comparison thresholds. No gain or loss is established."
       : "No comparable timing meets the evidence requirements in both saved attempts.",
   };

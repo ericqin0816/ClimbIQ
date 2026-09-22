@@ -1,6 +1,7 @@
 import { memo, useMemo, useState } from "react";
 import type { SavedAnalysisSession } from "../types";
 import { compareAttempts, hasComparableTiming, type AttemptComparisonRow } from "../lib/attemptComparison";
+import { attemptIdentityConfirmationKey } from "../lib/attemptIdentity";
 import "./AttemptComparisonPanel.css";
 
 export default memo(function AttemptComparisonPanel({ sessions }: { sessions: SavedAnalysisSession[] }) {
@@ -12,6 +13,7 @@ export default memo(function AttemptComparisonPanel({ sessions }: { sessions: Sa
   );
   const [selectedBaselineId, setSelectedBaselineId] = useState("");
   const [selectedCandidateId, setSelectedCandidateId] = useState("");
+  const [confirmedIdentityKey, setConfirmedIdentityKey] = useState("");
 
   if (eligibleSessions.length < 2) {
     return (
@@ -29,10 +31,12 @@ export default memo(function AttemptComparisonPanel({ sessions }: { sessions: Sa
   const candidateId = selectedCandidateId && sessionById.has(selectedCandidateId) && selectedCandidateId !== baselineId
     ? selectedCandidateId
     : eligibleSessions.find((session) => session.id !== baselineId)!.id;
-  const comparison = compareAttempts(sessionById.get(baselineId)!, sessionById.get(candidateId)!);
+  const identityKey = attemptIdentityConfirmationKey(sessionById.get(baselineId)!, sessionById.get(candidateId)!);
+  const comparison = compareAttempts(sessionById.get(baselineId)!, sessionById.get(candidateId)!, { distinctAttemptsConfirmed: identityKey === confirmedIdentityKey });
   const visibleRows = comparison.rows.filter((row) => row.baseline || row.candidate);
 
   function chooseBaseline(nextId: string) {
+    setConfirmedIdentityKey("");
     setSelectedBaselineId(nextId);
     if (nextId === candidateId) {
       setSelectedCandidateId(baselineId);
@@ -40,6 +44,7 @@ export default memo(function AttemptComparisonPanel({ sessions }: { sessions: Sa
   }
 
   function chooseCandidate(nextId: string) {
+    setConfirmedIdentityKey("");
     setSelectedCandidateId(nextId);
     if (nextId === baselineId) {
       setSelectedBaselineId(candidateId);
@@ -51,7 +56,7 @@ export default memo(function AttemptComparisonPanel({ sessions }: { sessions: Sa
       <summary>
         <span>
           <strong>Compare saved attempts</strong>
-          <small>{comparison.comparableMetricCount} metrics meet the comparison requirements.</small>
+          <small>{comparison.performanceComparisonAllowed ? `${comparison.comparableMetricCount} metrics meet the comparison requirements.` : "Saved timing is shown; performance changes need distinct attempts."}</small>
         </span>
         <span>Compare</span>
       </summary>
@@ -80,8 +85,12 @@ export default memo(function AttemptComparisonPanel({ sessions }: { sessions: Sa
           </label>
         </div>
 
+        {comparison.identity.requiresDistinctAttemptConfirmation && <label className="comparison-identity-check">
+          <input type="checkbox" checked={confirmedIdentityKey === identityKey} onChange={event => setConfirmedIdentityKey(event.target.checked ? identityKey : "")} />
+          These overlapping recording details belong to two distinct climbing attempts, not edited analyses of one attempt
+        </label>}
         <div className="comparison-insight" aria-live="polite">
-          <span>Overall result & phase changes</span>
+          <span>{comparison.performanceComparisonAllowed ? "Overall result & phase changes" : "Annotation comparison only"}</span>
           <strong>{comparison.primaryInsight}</strong>
         </div>
 
@@ -142,6 +151,8 @@ function formatMetric(metric: AttemptComparisonRow["baseline"]): string {
 }
 
 function formatDelta(row: AttemptComparisonRow): string {
+  if (row.outcome === "identity-review") return row.deltaSeconds === undefined ? "Confirm distinct attempts"
+    : `${row.deltaSeconds > 0 ? "+" : row.deltaSeconds < 0 ? "−" : ""}${Math.abs(row.deltaSeconds).toFixed(3)}s · Annotation difference`;
   if (row.outcome === "review") return "Review confidence";
   if (row.deltaSeconds === undefined) return "Not comparable";
   if (row.outcome === "similar") return `${row.deltaSeconds > 0 ? "+" : row.deltaSeconds < 0 ? "−" : ""}${Math.abs(row.deltaSeconds).toFixed(3)}s · Below threshold`;

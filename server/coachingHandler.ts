@@ -1,6 +1,6 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 import { nanoid } from "nanoid";
-import { buildCoachingCatalog, COACHING_POLICY_VERSION, parseCoachingPacket, validateCoachingPlan } from "../src/lib/coachingPolicy.js";
+import { coachingPlanForClient, COACHING_POLICY_VERSION, parseCoachingPacket } from "../src/lib/coachingPolicy.js";
 import { generateNimReview } from "./coachingNim.js";
 import { RedisReviewStore, type ReviewRecord, type ReviewStore } from "./coachingStore.js";
 
@@ -23,7 +23,7 @@ const json = (body: unknown, status = 200) => Response.json(body, { status, head
 function publicRecord(record: ReviewRecord) {
   const packet = parseCoachingPacket(record.packet);
   return { id: record.id, status: record.status, createdAt: record.createdAt, model: record.model, packet,
-    plan: record.status === "complete" ? validateCoachingPlan(record.plan, buildCoachingCatalog(packet)) : null };
+    plan: record.status === "complete" ? coachingPlanForClient(packet, record.plan) : null };
 }
 async function boundedBody(request: Request) {
   const reader = request.body?.getReader();

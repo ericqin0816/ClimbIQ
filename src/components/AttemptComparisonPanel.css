@@ -120,9 +120,13 @@
 }
 
 .comparison-row.review .comparison-delta,
+.comparison-row.identity-review .comparison-delta,
 .comparison-row.unavailable {
   color: var(--muted-text, #667085);
 }
+
+.comparison-identity-check { display: flex; align-items: flex-start; gap: 10px; padding: 14px; border: 1px solid #d8c8a7; border-radius: 7px; background: #faf7f0; font-size: .82rem; line-height: 1.6; }
+.comparison-identity-check input { flex-shrink: 0; width: auto; margin-top: 4px; }
 
 .comparison-quality {
   display: grid;

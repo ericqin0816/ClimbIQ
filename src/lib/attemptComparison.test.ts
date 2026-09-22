@@ -5,6 +5,24 @@ import { compactBiomechanicsSession, sanitizeBiomechanicsSession } from "./biome
 import { sanitizeTimestampSequence } from "./timestampIntegrity";
 
 describe("attempt comparison", () => {
+  it("retains diagnostic timing but withholds gain claims for annotation copies", () => {
+    const original = makeSession("original", { start: 1, finish: 11 });
+    const copy = makeSession("copy", { start: 1, finish: 10.6 }); copy.attemptLineageId = original.id;
+    const result = compareAttempts(original, copy, { distinctAttemptsConfirmed: true });
+    expect(result.performanceComparisonAllowed).toBe(false);
+    expect(result.comparableMetricCount).toBe(0);
+    expect(row(result, "total")).toMatchObject({ deltaSeconds: -.4, outcome: "identity-review", baseline: { valueSeconds: 10 }, candidate: { valueSeconds: 9.6 } });
+    expect(result.primaryInsight).toContain("annotation differences");
+  });
+  it("needs explicit distinct-attempt confirmation for overlapping recording details", () => {
+    const a = makeSession("a", { start: 1, finish: 11 }), b = makeSession("b", { start: 1, finish: 10.6 });
+    a.videoMetadata = b.videoMetadata = { fileName: "meet.mp4", duration: 120, videoWidth: 640, videoHeight: 480, metadataLoaded: true };
+    expect(row(compareAttempts(a, b), "total")?.outcome).toBe("identity-review");
+    expect(row(compareAttempts(a, b, { distinctAttemptsConfirmed: true }), "total")?.outcome).toBe("gained");
+    b.timestamps.find(marker => marker.id === "startSignal")!.rawTime = 31;
+    b.timestamps.find(marker => marker.id === "finishPad")!.rawTime = 40.6;
+    expect(compareAttempts(a, b).performanceComparisonAllowed).toBe(true);
+  });
   it("does not call a 150 ms difference a gain when finish observations were 200 ms apart", () => {
     const baseline=makeSession("baseline",{start:1,finish:11});
     const candidate=makeSession("candidate",{start:1,finish:10.85});
@@ -141,7 +159,7 @@ describe("attempt comparison", () => {
 
   it("uses pose sample spacing for the COM comparison floor", () => {
     const a = withRouteTracking(makeSession("a", { start: 2, finish: 5 }), 2, 5);
-    const result = compareAttempts(a, structuredClone(a));
+    const result = compareAttempts(a, { ...structuredClone(a), id: "another-recording" });
     expect(row(result, "lower-third")).toMatchObject({ outcome: "similar", comparisonFloorSeconds: 0.4 });
   });
 

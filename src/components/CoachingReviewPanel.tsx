@@ -15,6 +15,7 @@ export default function CoachingReviewPanel({ getCurrentSession, sessions, onJum
   const [currentSnapshot, setCurrentSnapshot] = useState(getCurrentSession);
   const [baselineId, setBaselineId] = useState("");
   const [comparable, setComparable] = useState(false);
+  const [distinctAttemptFingerprint, setDistinctAttemptFingerprint] = useState("");
   const [evidence, setEvidence] = useState<CoachingEvidence | null>(null);
   const [plan, setPlan] = useState<CoachingPlan | null>(null);
   const [enabled, setEnabled] = useState(false);
@@ -32,6 +33,11 @@ export default function CoachingReviewPanel({ getCurrentSession, sessions, onJum
   useEffect(() => { latestSources.current = { getCurrentSession, sessions }; }, [getCurrentSession, sessions]);
   const baselineOptions = useMemo(() => coachingBaselineOptions(currentSnapshot, sessions), [currentSnapshot, sessions]);
   const selectedBaseline = baselineOptions.find(option => option.id === baselineId);
+  const selectedIdentityFingerprint = useMemo(() => {
+    const baseline = sessions.find(session => session.id === baselineId);
+    return baseline ? coachingEvidenceFingerprint(currentSnapshot, baseline) : "";
+  }, [baselineId, currentSnapshot, sessions]);
+  const distinctAttemptsConfirmed = selectedIdentityFingerprint !== "" && distinctAttemptFingerprint === selectedIdentityFingerprint;
   useEffect(() => {
     // Packaged builds have no same-origin server API. Keep all evidence local.
     if (LOCAL_APP) return () => { request.current?.abort(); };
@@ -64,10 +70,12 @@ export default function CoachingReviewPanel({ getCurrentSession, sessions, onJum
         setMessage("Choose a different timed attempt and confirm that its climber, route, and recording setup are comparable.");
         return;
       }
-      const next = buildCoachingEvidence(current, goal, baseline);
+      const next = buildCoachingEvidence(current, goal, baseline, {
+        distinctAttemptsConfirmed: !!baseline && distinctAttemptFingerprint === coachingEvidenceFingerprint(current, baseline),
+      });
       evidenceBaselineId.current = baseline?.id ?? "";
       setEvidence(next); setPlan(next.catalog.defaultPlan); requestId.current = crypto.randomUUID();
-    } catch { setMessage("This analysis does not yet contain usable evidence. Review the timing markers first."); }
+    } catch (error) { setMessage(error instanceof Error ? error.message : "This analysis does not yet contain usable evidence. Review the timing markers first."); }
   }
   async function hostedReview(loadSaved = false) {
     if (accessCode.trim().toLowerCase().startsWith("nvapi")) { setMessage("Do not enter your NVIDIA API key here. It belongs in server settings. This field takes a separate workspace access code."); return; }
@@ -115,7 +123,7 @@ export default function CoachingReviewPanel({ getCurrentSession, sessions, onJum
       <label>Review focus<select value={goal} onChange={e => { invalidate(); setGoal(e.target.value as CoachingGoal); }}>
         <option value="overview">Overview</option><option value="start">Start</option><option value="halves">Sections around Hold 10</option><option value="consistency">Repeatability</option>
       </select></label>
-      <label>Optional saved baseline<select value={baselineId} onChange={e => { invalidate(); setBaselineId(e.target.value); setComparable(false); }}>
+      <label>Optional saved baseline<select value={baselineId} onChange={e => { invalidate(); setBaselineId(e.target.value); setComparable(false); setDistinctAttemptFingerprint(""); }}>
         <option value="">Single-run review</option>{baselineOptions.map(option => <option key={option.id} value={option.id} disabled={!option.eligible}>
           {option.name}{option.date ? ` · ${option.date}` : ""}{option.totalSeconds !== null ? ` · ${option.totalSeconds.toFixed(3)}s` : ""}{option.reason ? ` — ${option.reason}` : ""}
         </option>)}
@@ -124,8 +132,12 @@ export default function CoachingReviewPanel({ getCurrentSession, sessions, onJum
     <p className="coaching-baseline-note">{baselineId ? `Baseline: ${selectedBaseline?.name ?? "unavailable"}. Compare the same climber on the same route with comparable recording conditions.`
       : baselineOptions.some(option => option.eligible) ? "A baseline adds measured differences. Choosing one does not replace your current attempt."
         : "No different timed baseline is ready yet. You can still review this run locally."}</p>
-    {baselineId && <label className="coaching-check"><input type="checkbox" checked={comparable} onChange={e => { invalidate(); setComparable(e.target.checked); }} />I confirm the same climber, route, and a comparable recording setup</label>}
-    <button className="primary" disabled={disabled || (!!baselineId && (!comparable || !selectedBaseline?.eligible))} onClick={localReview}>Review my run</button>
+    {baselineId && <label className="coaching-check"><input type="checkbox" checked={comparable} onChange={e => { invalidate(); setComparable(e.target.checked); }} />I am comparing two distinct attempts by the same climber on the same route with comparable recording conditions</label>}
+    {selectedBaseline?.requiresDistinctAttemptConfirmation && <div className="coaching-identity-check">
+      <p>{selectedBaseline.warning}</p><label className="coaching-check"><input type="checkbox" checked={distinctAttemptsConfirmed}
+        onChange={e => { invalidate(); setDistinctAttemptFingerprint(e.target.checked ? selectedIdentityFingerprint : ""); }} />These overlapping recording details belong to different climbing attempts, not edited copies of one attempt</label>
+    </div>}
+    <button className="primary" disabled={disabled || (!!baselineId && (!comparable || !selectedBaseline?.eligible || (selectedBaseline.requiresDistinctAttemptConfirmation && !distinctAttemptsConfirmed)))} onClick={localReview}>Review my run</button>
     <p className="coaching-privacy-note">Local review uses saved measurements. It does not upload your video or require an AI account.</p>
     {evidence && plan && <section className="coaching-result" aria-label="Evidence review">
       <p className="coaching-mode">{ai ? "AI-prioritized review · NVIDIA NIM" : "Local evidence review · rule based"}</p>
@@ -138,7 +150,7 @@ export default function CoachingReviewPanel({ getCurrentSession, sessions, onJum
         <tbody>{evidence.catalog.comparisonRows.map(row => <tr key={row.id}>
           <th scope="row">{row.label}</th><td>{row.baselineSeconds.toFixed(3)}s</td><td>{row.currentSeconds.toFixed(3)}s</td>
           <td className={`coaching-delta ${row.outcome}`}><strong>{row.deltaSeconds > 0 ? "+" : row.deltaSeconds < 0 ? "−" : ""}{Math.abs(row.deltaSeconds).toFixed(3)}s</strong>
-            <small>{row.outcome === "similar" ? "Within comparison rule" : row.outcome}</small></td>
+            <small>{row.outcome === "similar" ? "Within comparison rule" : row.outcome}<br />Rule: {row.thresholdSeconds.toFixed(3)}s</small></td>
         </tr>)}</tbody>
       </table></div>}
       <div className="coaching-observations"><h3 className="coaching-section-label">What the measurements show</h3>

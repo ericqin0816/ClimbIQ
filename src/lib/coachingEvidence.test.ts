@@ -41,14 +41,18 @@ describe("coaching session adapter", () => {
     expect(() => buildCoachingEvidence(current, "overview", current)).toThrow("different saved attempt");
     expect(() => buildCoachingEvidence(current, "overview", missing)).toThrow("different saved attempt");
   });
-  it("marks identical saved copies without mistaking equal totals on different recordings", () => {
+  it("requests distinct-attempt confirmation for ambiguous metadata collisions", () => {
     const current = session();
     current.videoMetadata = { fileName: "run.mov", duration: 25, videoWidth: 640, videoHeight: 480, metadataLoaded: true };
     const copy = { ...current, id: "copy", name: "Copy" };
     const independent = { ...copy, id: "independent", videoMetadata: { ...current.videoMetadata, fileName: "next.mov" } };
     expect(coachingBaselineOptions(current, [copy, independent])).toMatchObject([
-      { eligible: false, reason: "Same recording details and timing" }, { eligible: true },
+      { eligible: true, requiresDistinctAttemptConfirmation: true }, { eligible: true, requiresDistinctAttemptConfirmation: false },
     ]);
+    expect(() => buildCoachingEvidence(current, "overview", copy)).toThrow("two distinct climbing attempts");
+    expect(buildCoachingEvidence(current, "overview", copy, { distinctAttemptsConfirmed: true }).packet.baseline).not.toBeNull();
+    copy.attemptLineageId = current.id;
+    expect(() => buildCoachingEvidence(current, "overview", copy, { distinctAttemptsConfirmed: true })).toThrow("different saved attempt");
   });
   it("invalidates changed source identity and raw timing even when numeric intervals match", () => {
     const current = session();
@@ -64,12 +68,36 @@ describe("coaching session adapter", () => {
     const before = buildCoachingEvidence(current, "overview", baseline);
     baseline.timestamps = baseline.timestamps.map(marker => marker.id === "finishPad" ? { ...marker, rawTime: 22 } : marker);
     expect(coachingEvidenceFingerprint(current, baseline)).not.toBe(before.sourceFingerprint);
-    expect(JSON.stringify(before.packet)).not.toMatch(/PRIVATE|sourceFingerprint|rawTime|fileName|location|notes/);
+    expect(JSON.stringify(before.packet)).not.toMatch(/PRIVATE|sourceFingerprint|attemptLineageId|rawTime|fileName|location|notes/);
   });
   it("does not alter accepted markers while producing review links", () => {
     const current = session();
     const before = JSON.stringify(current);
     buildCoachingEvidence(current, "halves");
     expect(JSON.stringify(current)).toBe(before);
+  });
+  it("keeps a coarse Hold 10 interval out of the total comparison rule", () => {
+    const current = session();
+    current.timestamps.forEach(marker => { marker.observationIntervalSeconds = 1 / 60; });
+    const hold = current.timestamps.find(marker => marker.id === "hold10")!;
+    hold.acceptanceMode = "frame-review"; hold.observationIntervalSeconds = .35;
+    const facts = coachingRunFacts(current);
+    expect(facts.comparisonFloorsSeconds.total).toBe(.1);
+    expect(facts.comparisonFloorsSeconds.bottom).toBeCloseTo(.733333);
+    expect(facts.comparisonFloorsSeconds.top).toBeCloseTo(.733333);
+    const baseline = { ...session(), id: "baseline", timestamps: current.timestamps.map(marker => marker.id === "finishPad" ? { ...marker, rawTime: marker.rawTime! + .3 } : { ...marker }) };
+    const evidence = buildCoachingEvidence(current, "overview", baseline);
+    expect(evidence.packet.version).toBe(2);
+    expect(evidence.catalog.comparisonRows[0]).toMatchObject({ outcome: "shorter", thresholdSeconds: .1, deltaSeconds: -.3 });
+  });
+  it.each(["startSignal", "finishPad"] as const)("raises only comparisons that use a coarse %s boundary", boundary => {
+    const current = session();
+    current.timestamps.forEach(marker => { marker.observationIntervalSeconds = 1 / 60; });
+    current.timestamps.find(marker => marker.id === "hold10")!.acceptanceMode = "frame-review";
+    current.timestamps.find(marker => marker.id === boundary)!.observationIntervalSeconds = .35;
+    const floors = coachingRunFacts(current).comparisonFloorsSeconds;
+    expect(floors.total).toBeCloseTo(.733333);
+    expect(floors[boundary === "startSignal" ? "bottom" : "top"]).toBeCloseTo(.733333);
+    expect(floors[boundary === "startSignal" ? "top" : "bottom"]).toBe(.1);
   });
 });

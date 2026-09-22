@@ -17,6 +17,7 @@ const profile = path.join(temporaryRoot, "profile");
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 const report = { status: "running", appUrl, checks: [] };
 let socket;
+let peerSocket;
 let sendCommand;
 let spawnError;
 const chrome = spawn(chromePath, [
@@ -268,13 +269,134 @@ try {
   const byId = values => [...values].sort((a,b) => a.id.localeCompare(b.id));
   assert.deepEqual(byId(restoredLibrary), byId(JSON.parse(beforeDelete)), "Undo must restore exact saved measurements, without replacing other attempts.");
   report.checks.push("saved-only coaching hides video links and undo restores exact deleted measurements");
+
+  // Two independently loaded app instances must never silently replace each
+  // other's library. Keep the unsaved editor available after reloading storage.
+  const editedId = restoredLibrary[0].id;
+  const chooseAttempt = id => `(() => { const buttons = [...document.querySelectorAll('.attempt-library-list button')];
+    const wanted = ${JSON.stringify(restoredLibrary)}.find(session => session.id === ${JSON.stringify(id)});
+    const button = buttons.find(button => button.querySelector('strong')?.textContent === wanted.name);
+    if (!button) throw new Error('Saved attempt is missing'); button.click(); })()`;
+  await evaluate(chooseAttempt(editedId));
+  const peerTargetResponse = await fetch(`http://127.0.0.1:${port}/json/new?${encodeURIComponent(appUrl)}`, { method: "PUT" });
+  const peerTarget = await peerTargetResponse.json();
+  peerSocket = new WebSocket(peerTarget.webSocketDebuggerUrl);
+  await new Promise((resolve, reject) => {
+    peerSocket.addEventListener("open", resolve, { once: true });
+    peerSocket.addEventListener("error", reject, { once: true });
+  });
+  const peer = createProtocolClient(peerSocket);
+  const evaluatePeer = async expression => {
+    const response = await peer.send("Runtime.evaluate", { expression, returnByValue: true, awaitPromise: true, userGesture: true });
+    if (response.exceptionDetails) throw new Error(response.exceptionDetails.exception?.description ?? response.exceptionDetails.text);
+    return response.result.value;
+  };
+  for (let wait = 0; wait < 150; wait++) {
+    if (await evaluatePeer("document.querySelector('[data-session-storage-state]')?.dataset.sessionStorageState === 'ready'")) break;
+    if (wait === 149) throw new Error("Second tab did not open the saved library.");
+    await delay(80);
+  }
+  await evaluatePeer(chooseAttempt(editedId));
+  const notesExpression = text => `(() => { const input = document.querySelector('#save-analysis textarea');
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(input, ${JSON.stringify(text)});
+    input.dispatchEvent(new Event('input', {bubbles:true})); })()`;
+  await evaluate(notesExpression("Unsaved notes from the first tab"));
+  await evaluatePeer(notesExpression("Newer notes saved by the second tab"));
+  const saveButton = "document.querySelector('#save-analysis .session-save-summary button')";
+  const beforePeerSave = await readSessionLibraryJson(evaluate);
+  await evaluatePeer(`${saveButton}.click()`);
+  const peerSaved = JSON.parse(await waitForSessionLibraryChange(evaluate, beforePeerSave));
+  const peerAttempt = peerSaved.find(session => session.id === editedId);
+  assert.equal(peerAttempt.notes, "Newer notes saved by the second tab");
+  await evaluate(`${saveButton}.click()`);
+  await until("document.querySelector('#saved-attempts [role=alert]')?.textContent.includes('another tab')", "stale write conflict");
+  assert.equal(await evaluate(`${saveButton}.disabled`), true, "Conflict must disable stale writes until reload.");
+  assert.equal(await evaluate("document.querySelector('#save-analysis textarea').value"), "Unsaved notes from the first tab");
+  assert.deepEqual(JSON.parse(await readSessionLibraryJson(evaluate)), peerSaved, "Conflict must preserve the other tab's exact committed data.");
+  assert.equal(await evaluate("[...document.querySelectorAll('#save-analysis button')].find(button => button.textContent === 'Export current session').disabled"), false, "The unsaved analysis must remain exportable after conflict.");
+  await evaluate("document.querySelector('#saved-attempts [role=alert] button').click()");
+  await libraryReady();
+  assert.equal(await evaluate("document.querySelector('.session-load-row select').value"), "", "Reload must detach the stale editor from the newer saved attempt.");
+  assert.equal(await evaluate("document.querySelector('#save-analysis textarea').value"), "Unsaved notes from the first tab");
+  assert.equal(await evaluate("Boolean(document.querySelector('#results')) && Boolean(document.querySelector('#coaching-review'))"), true, "The detached saved-only draft must remain visible without a video.");
+  const beforeDraftSave = await readSessionLibraryJson(evaluate);
+  await evaluate(`${saveButton}.click()`);
+  const withDraft = JSON.parse(await waitForSessionLibraryChange(evaluate, beforeDraftSave));
+  const preserved = withDraft.find(session => session.id === editedId);
+  const draft = withDraft.find(session => session.notes === "Unsaved notes from the first tab");
+  assert.deepEqual(preserved, peerAttempt, "Saving the draft after reload must not overwrite the other editor's attempt.");
+  assert.ok(draft && draft.id !== editedId);
+  assert.equal(draft.attemptLineageId, peerAttempt.attemptLineageId ?? editedId, "Detached copies must retain their attempt identity.");
+  report.checks.push("two tabs preserve newer saves, retain the unsaved draft, and save it as a separate copy after reload");
+
+  const beforeDuplicate = await readSessionLibraryJson(evaluate);
+  await evaluate("[...document.querySelectorAll('#save-analysis button')].find(button => button.textContent === 'Duplicate Session').click()");
+  const withDuplicate = JSON.parse(await waitForSessionLibraryChange(evaluate, beforeDuplicate));
+  const duplicate = withDuplicate.find(session => !withDraft.some(previous => previous.id === session.id));
+  assert.equal(duplicate.attemptLineageId, draft.attemptLineageId);
+  await evaluate(`(() => { const create = URL.createObjectURL; URL.createObjectURL = function(blob) {
+    if (blob.type === 'application/json') window.__libraryExport = blob.text(); return create.call(this, blob); }; })()`);
+  await evaluate("[...document.querySelectorAll('#save-analysis button')].find(button => button.textContent === 'Export current session').click()");
+  await until("Boolean(window.__libraryExport)", "current session export");
+  const exported = await evaluate("(async () => JSON.parse(await window.__libraryExport))()");
+  assert.equal(exported.attemptLineageId, draft.attemptLineageId);
+  const exportedPath = path.join(temporaryRoot, "lineage-roundtrip.json");
+  await writeFile(exportedPath, JSON.stringify({ ...exported, id: "roundtrip-lineage-copy" }));
+  const beforeRoundtrip = await readSessionLibraryJson(evaluate);
+  await importFixture(exportedPath);
+  const roundtrip = JSON.parse(await waitForSessionLibraryChange(evaluate, beforeRoundtrip));
+  assert.equal(roundtrip.find(session => session.id === "roundtrip-lineage-copy").attemptLineageId, draft.attemptLineageId);
+  report.checks.push("duplicate, session export, and import retain the original attempt lineage");
+
+  const datasetPath = path.join(temporaryRoot, "lineage-dataset-roundtrip.json");
+  await writeFile(datasetPath, JSON.stringify({ appVersion: "0.29.0", exportTimestamp: exported.updatedAt,
+    session: { sessionId: "dataset-lineage-copy", sessionName: "Dataset lineage copy", attemptLineageId: exported.attemptLineageId },
+    video: exported.videoMetadata, settings: exported.settings,
+    acceptedTimestamps: exported.timestamps.map(marker => ({ markerId: marker.id, acceptedRawTime: marker.rawTime,
+      source: marker.source, confidence: marker.confidence, acceptanceMode: marker.acceptanceMode, observationIntervalSeconds: marker.observationIntervalSeconds })),
+  }));
+  const beforeDataset = await readSessionLibraryJson(evaluate);
+  await importFixture(datasetPath);
+  const withDataset = JSON.parse(await waitForSessionLibraryChange(evaluate, beforeDataset));
+  assert.equal(withDataset.find(session => session.id === "dataset-lineage-copy").attemptLineageId, draft.attemptLineageId);
+  const invalidLineagePath = path.join(temporaryRoot, "invalid-lineage.json");
+  await writeFile(invalidLineagePath, JSON.stringify({ ...exported, id: "invalid-lineage-copy", attemptLineageId: "bad\u0000identity" }));
+  const beforeInvalidLineage = await readSessionLibraryJson(evaluate);
+  await importFixture(invalidLineagePath);
+  const withInvalidLineage = JSON.parse(await waitForSessionLibraryChange(evaluate, beforeInvalidLineage));
+  assert.equal(withInvalidLineage.find(session => session.id === "invalid-lineage-copy").attemptLineageId, undefined,
+    "Import must drop malformed lineage rather than normalize it into another attempt's identity.");
+  report.checks.push("dataset import preserves lineage and malformed lineage is discarded without truncation");
+
+  const legacyCopyPath = path.join(temporaryRoot, "legacy-copy-update.json");
+  await writeFile(legacyCopyPath, JSON.stringify({ ...exported, id: "roundtrip-lineage-copy", attemptLineageId: undefined,
+    videoMetadata: null, notes: "Legacy edit of the same copied attempt" }));
+  const beforeLegacyCopy = await readSessionLibraryJson(evaluate);
+  await importFixture(legacyCopyPath);
+  const legacyCopyLibrary = JSON.parse(await waitForSessionLibraryChange(evaluate, beforeLegacyCopy));
+  const updatedCopy = legacyCopyLibrary.find(session => session.id === "roundtrip-lineage-copy");
+  assert.equal(updatedCopy.attemptLineageId, draft.attemptLineageId, "A legacy same-ID session import must not erase established lineage.");
+  const newerLibraryPath = path.join(temporaryRoot, "newer-copy-library.json");
+  await writeFile(newerLibraryPath, JSON.stringify({ format: "climbiq-session-library", version: 1,
+    exportedAt: "2099-01-01T00:00:00.000Z", sessions: [{ ...updatedCopy, attemptLineageId: "conflicting-imported-lineage",
+      updatedAt: "2099-01-01T00:00:00.000Z", notes: "Newer measurements from another device" }] }));
+  const beforeNewerLibrary = await readSessionLibraryJson(evaluate);
+  await importFixture(newerLibraryPath);
+  const newerLibrary = JSON.parse(await waitForSessionLibraryChange(evaluate, beforeNewerLibrary));
+  assert.equal(newerLibrary.find(session => session.id === updatedCopy.id).attemptLineageId, draft.attemptLineageId,
+    "A conflicting imported lineage cannot reassign a known saved attempt.");
+  assert.equal(await evaluate("document.querySelector('.session-load-row select').value"), "", "A normalized newer import must still detach the open stale editor.");
+  assert.equal(await evaluate("document.querySelector('#save-analysis textarea').value"), updatedCopy.notes,
+    "Importing a newer library must preserve the current unsaved editor.");
+  report.checks.push("legacy and conflicting same-ID imports preserve established lineage and keep the open editor detached");
   assert.deepEqual(runtimeErrors, [], "Unexpected browser runtime exceptions.");
-  report.checks.push("all three saved attempts survive reload without runtime exceptions");
+  report.checks.push("saved attempts survive reload without runtime exceptions");
   report.status = "passed";
   console.log(JSON.stringify(report, null, 2));
 } finally {
   if (chrome.pid) await closeTestBrowser(chrome, sendCommand);
   socket?.close();
+  peerSocket?.close();
   // Only remove the isolated temporary directory created by this invocation.
   const resolved = path.resolve(temporaryRoot);
   if (path.dirname(resolved) !== path.resolve(tmpdir()) || !path.basename(resolved).startsWith("climbiq-mobile-library-")) {

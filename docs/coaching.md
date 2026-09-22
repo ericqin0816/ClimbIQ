@@ -19,11 +19,21 @@ partition the run; first movement and wall-height splits must not be added to
 them. These are measured interval changes, not explanations of their cause.
 
 The baseline picker includes dates and accepted total times. The current attempt,
-an exact copy with the same recording details and timing, and attempts without
-usable Start/Finish timing are unavailable as baselines. The user still confirms
-the same climber, route, and comparable recording conditions; the app cannot
-establish that from file metadata. Equal times on different recordings remain
-eligible. No baseline is selected automatically.
+known annotation copies of that attempt, and attempts without usable Start/Finish
+timing are unavailable as baselines. New saved attempts carry a local
+`attemptLineageId`; duplicates retain it through saves and exports. Correcting a
+marker or renaming a video does not turn an annotation copy into a new climbing
+attempt. A genuinely new attempt receives a new lineage.
+
+For older records, matching file names, duration, and dimensions with overlapping
+accepted Start/Finish intervals indicate a possible duplicate. These metadata
+cannot identify a file, so the app requires a separate confirmation that the
+records describe distinct climbing attempts. It does not hard-block independent
+files with coincident metadata. Disjoint intervals in a long recording remain
+eligible when they are not known copies of one attempt. The user still confirms
+the same climber, route, and comparable recording conditions. No baseline is
+selected automatically in coaching. The saved-attempt comparison table retains
+diagnostic interval values for known copies but withholds performance-gain labels.
 
 The result is labeled **Local evidence review · rule based**. **What the
 measurements show** is separate from **Checks still needed**. Unreviewed contact,
@@ -46,10 +56,22 @@ approved catalog. The headline, comparison table, and outstanding review tasks
 are always derived locally and cannot be omitted by the model. The browser renders canonical text, never model-written timing,
 diagnoses, causes, or training prescriptions. All evidence limitations remain
 visible regardless of the model selection. This is AI prioritization, not free-form
-coaching or direct video understanding. Catalog policy version 2 participates in
-the server deduplication fingerprint; the numeric packet stays at version 1 so
-stored records keep their existing strict privacy schema. Packaged iOS builds
-hide hosted controls and do not request the hosted status endpoint.
+coaching or direct video understanding. Catalog policy version 3 participates in
+the server deduplication fingerprint. New numeric packets use version 2 and keep
+separate total, bottom-phase, and top-phase comparison floors. Each floor comes
+from that interval's endpoints. Coarse Hold 10 evidence can withhold a small
+phase change without hiding a total-time change supported by Start and Finish.
+
+Version 1 packets and archived records remain supported. Their original wire
+shape and version are preserved in storage and responses. For calculations, the
+old single floor is retained for every available interval; missing precision is
+never guessed. Requests from version 1 clients expose only the original approved
+observation/focus IDs to the model. Archived selections using newer IDs are
+adapted to legacy-approved IDs on readback without changing the stored record or
+calling a provider. Invalid packet versions or floor fields fail before any
+generation reservation. Lineage IDs and source identity stay local and are not
+part of either hosted packet. Packaged iOS builds hide hosted controls and do not
+request the hosted status endpoint.
 
 The server uses the AI SDK's OpenAI-compatible adapter against
 `https://integrate.api.nvidia.com/v1/chat/completions`. Model access varies by

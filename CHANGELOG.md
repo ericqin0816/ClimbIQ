@@ -8,6 +8,15 @@ observations are recorded in [benchmarks](benchmarks).
 - Added searchable saved attempts, timing filters, offline saved-run editing and
   review, and undo for the most recent deletion. Visual and keyboard workflow
   order now agree, with the saved library after the current analysis.
+- Protected browser saves against stale tabs: a conflicting write preserves the
+  newer library, while the open analysis can be exported or saved as a separate
+  copy after reloading. Migration and first saves use the same transaction guard.
+- Copied analyses retain the original attempt identity through save, duplication,
+  import, and export. Editing their markers cannot become a performance gain;
+  ambiguous legacy recordings require confirmation that they are distinct runs.
+- Coaching comparisons now use separate timing thresholds for the total and each
+  reviewed phase, so a coarse Hold 10 marker does not hide a supported total-time
+  difference. Existing version-one hosted reviews remain readable.
 - Coaching now leads with supported overall/section changes, explains offsetting
   phases, and keeps unresolved evidence checks visible. Source fingerprints
   reject stale review links and responses; native review remains local.

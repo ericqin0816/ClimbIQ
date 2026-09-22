@@ -1,6 +1,7 @@
 import { ChangeEvent, CSSProperties, DragEvent, lazy, PointerEvent, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { Capacitor } from "@capacitor/core";
 import { useSavedAttempts } from "./lib/useSavedAttempts";
+import { resolveAttemptLineageId, sanitizeAttemptLineageId } from "./lib/attemptIdentity";
 import { exportTextFile, exportResultMessage } from "./lib/exportFile";
 import { MobileWorkflow, NextStepCard } from "./components/MobileWorkflow";
 import RecordingGuide from "./components/RecordingGuide";
@@ -62,6 +63,7 @@ import {
   createSessionLibraryBackup,
   isSessionLibraryBackup,
   mergeSessionLibraries,
+  preserveKnownAttemptLineage,
 } from "./lib/sessionLibrary";
 import { resolveNewVideoSessionName, validateVideoFile } from "./lib/videoFileSelection";
 import { inferAutomaticWallCalibration, validateWallCalibration } from "./lib/wallCalibration";
@@ -253,10 +255,14 @@ function App() {
   const [attemptType, setAttemptType] = useState("Training");
   const [sessionNotes, setSessionNotes] = useState("");
   const { sessions: savedSessions, ready: libraryReady, busy: librarySaving, error: libraryError,
-    notice: libraryNotice, updateSessions, reload: reloadLibrary } = useSavedAttempts(decodeSavedSession);
+    conflicted: libraryConflict, notice: libraryNotice, updateSessions, reload: reloadLibrary } = useSavedAttempts(decodeSavedSession);
   const [exportBusy, setExportBusy] = useState(false);
   const exportingRef = useRef(false);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
+  const [draftSessionId, setDraftSessionId] = useState(createSessionId);
+  // The attempt stays the same when a saved annotation is copied or detached
+  // after a storage conflict. Its next saved record can have a different id.
+  const [attemptLineageId, setAttemptLineageId] = useState<string | null>(null);
   const [sessionStatus, setSessionStatus] = useState("");
   const [libraryStatus, setLibraryStatus] = useState("");
   const [recentlyDeletedSession, setRecentlyDeletedSession] = useState<SavedAnalysisSession | null>(null);
@@ -591,6 +597,9 @@ function App() {
     setTimestampReview(null);
     setTimestamps(INITIAL_TIMESTAMPS);
     setActiveSessionId(null);
+    const nextDraftId = createSessionId();
+    setDraftSessionId(nextDraftId);
+    setAttemptLineageId(nextDraftId);
     setSessionName(resolveNewVideoSessionName(sessionName, metadata?.fileName, fileName));
   }
 
@@ -2754,6 +2763,7 @@ function App() {
       exportTimestamp: new Date().toISOString(),
       session: {
         sessionId: session.id,
+        attemptLineageId: session.attemptLineageId,
         sessionName: session.name,
         climberName: session.climberName,
         date: session.date,
@@ -3005,13 +3015,14 @@ function App() {
     }
   }
 
-  function buildSessionSnapshot(id = activeSessionId ?? createSessionId()): SavedAnalysisSession {
+  function buildSessionSnapshot(id = activeSessionId ?? draftSessionId): SavedAnalysisSession {
     const existing = savedSessions.find((session) => session.id === id);
     const name = sessionName.trim() || metadata?.fileName?.replace(/\.[^/.]+$/, "") || "Untitled climb analysis";
     const now = new Date().toISOString();
 
     return {
       id,
+      attemptLineageId: attemptLineageId ?? (existing ? resolveAttemptLineageId(existing) : id),
       version: 1,
       name,
       climberName: climberName.trim(),
@@ -3067,6 +3078,7 @@ function App() {
     }
     if (context === analysisContextRef.current) {
       setActiveSessionId(session.id);
+      setAttemptLineageId(resolveAttemptLineageId(session));
       setSessionName(current => current === requestedName ? session.name : current);
     }
     setSessionStatus(`Saved "${session.name}" locally.`);
@@ -3100,6 +3112,7 @@ function App() {
       pendingVideoFileNameRef.current = null;
     }
     setActiveSessionId(session.id);
+    setAttemptLineageId(resolveAttemptLineageId(session));
     setSessionName(session.name);
     setClimberName(session.climberName ?? "");
     setAttemptDate(session.date || todayDateString());
@@ -3155,6 +3168,20 @@ function App() {
     }
   }
 
+  function detachCurrentSavedSession() {
+    setActiveSessionId(null);
+    setDraftSessionId(createSessionId());
+  }
+
+  function reloadSavedAttempts() {
+    if (librarySaving) return;
+    if (libraryConflict && activeSessionId) {
+      detachCurrentSavedSession();
+      setSessionStatus("Your open analysis is kept as an unsaved copy. Saving it after reload will keep the newer saved attempt too.");
+    }
+    reloadLibrary();
+  }
+
   async function deleteActiveSession() {
     if (videoAnalysisRunning) {
       setSessionStatus("Wait for the active analysis to finish before deleting a session.");
@@ -3171,7 +3198,7 @@ function App() {
       setSessionStatus(storageError);
       return;
     }
-    if (context === analysisContextRef.current) setActiveSessionId(null);
+    if (context === analysisContextRef.current) detachCurrentSavedSession();
     setRecentlyDeletedSession(deletedSession ?? null);
     setSessionStatus("Saved session deleted.");
     setLibraryStatus(`Deleted "${deletedSession?.name ?? "saved attempt"}". You can undo this deletion until another attempt is deleted or the app closes.`);
@@ -3220,9 +3247,7 @@ function App() {
       return;
     }
     const context = analysisContextRef.current;
-    const source = activeSessionId
-      ? savedSessions.find((session) => session.id === activeSessionId)
-      : buildSessionSnapshot();
+    const source = buildSessionSnapshot();
     if (!source) {
       setSessionStatus("No session available to duplicate.");
       return;
@@ -3232,6 +3257,7 @@ function App() {
     const duplicate = {
       ...source,
       id: createSessionId(),
+      attemptLineageId: resolveAttemptLineageId(source),
       name: `${source.name} copy`,
       createdAt: now,
       updatedAt: now,
@@ -3300,17 +3326,12 @@ function App() {
           return merged.sessions;
         });
         if (storageError) throw new Error(storageError);
-        const activeImportedCopy = activeSessionId
-          ? importedSessions.find((session) => session.id === activeSessionId)
-          : undefined;
-        const activeCopyWasUpdated = Boolean(
-          activeImportedCopy && merged.sessions.find((session) => session.id === activeSessionId) === activeImportedCopy,
-        );
+        const activeCopyWasUpdated = Boolean(activeSessionId && merged.updatedSessionIds.includes(activeSessionId));
         if (activeCopyWasUpdated && context === analysisContextRef.current) {
           // Keep an analysis already open on screen intact. Detaching it means a
           // later Save creates a separate copy instead of silently overwriting
           // the newer session that just arrived from another computer.
-          setActiveSessionId(null);
+          detachCurrentSavedSession();
         }
         const summary = [
           `${merged.addedCount} added`,
@@ -3327,14 +3348,15 @@ function App() {
         throw new Error("This file is not a ClimbIQ analysis session.");
       }
 
-      const session = sanitizeSavedSession({
+      let session = sanitizeSavedSession({
         ...parsedSession,
         id: parsedSession.id || createSessionId(),
         updatedAt: new Date().toISOString(),
       });
-      const storageError = await persistSavedSessions(current => [session, ...current.filter((item) => item.id !== session.id)].sort((a, b) =>
-        b.updatedAt.localeCompare(a.updatedAt),
-      ));
+      const storageError = await persistSavedSessions(current => {
+        session = preserveKnownAttemptLineage(current.find(item => item.id === session.id), session);
+        return [session, ...current.filter(item => item.id !== session.id)].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+      });
       if (storageError) throw new Error(storageError);
       if (context === analysisContextRef.current) applySession(session);
       setSessionStatus(`Session imported. Reload the matching local video file if you want to review frames.`);
@@ -3352,6 +3374,7 @@ function App() {
   }
 
   const { hasSelectedVideo, hasLoadedVideo } = getVideoUiState(videoUrl, Boolean(metadata?.metadataLoaded));
+  const hasOpenAttempt = hasSelectedVideo || activeSessionId !== null || attemptLineageId !== null;
   const acceptedMovementRawTime = getTimestamp(timestamps, "firstMovement").rawTime;
   const acceptedFinish = getTimestamp(timestamps, "finishPad");
   const activeFinishRecovery = automaticFinishReview?.source === videoUrl &&
@@ -3407,7 +3430,7 @@ function App() {
         </nav>
       </header>
 
-      {!hasSelectedVideo && !activeSessionId && (
+      {!hasOpenAttempt && (
         <section className="hero" aria-labelledby="hero-title">
           <div className="hero-content">
             <p className="eyebrow">Speed climbing video analysis</p>
@@ -3447,7 +3470,7 @@ function App() {
 
       <section className="layout-grid">
         <Card id="upload" title={hasSelectedVideo ? "Video" : "Upload a video"} className="full launch-card">
-          {!hasSelectedVideo && activeSessionId && <p className="status-message" role="status">
+          {!hasSelectedVideo && hasOpenAttempt && <p className="status-message" role="status">
             Opened “{sessionName}”. Choose {metadata?.fileName || "the original recording"} to review its frames. Your saved results are shown below.
           </p>}
           <label
@@ -3528,7 +3551,7 @@ function App() {
           </div>
         </Card>
 
-        {(hasSelectedVideo || activeSessionId !== null) && (
+        {hasOpenAttempt && (
         <section id="results" className="run-summary full" aria-live="polite">
           <div className="run-summary-heading">
             <div>
@@ -3558,7 +3581,7 @@ function App() {
         </section>
         )}
 
-        {!hasSelectedVideo && !activeSessionId && new URLSearchParams(location.search).has("coachingReview") && (
+        {!hasOpenAttempt && new URLSearchParams(location.search).has("coachingReview") && (
           <Card id="coaching-review" title="Saved coaching review" className="full secondary-card">
             <Suspense fallback={<p className="muted">Preparing saved review…</p>}>
               <CoachingReviewPanel getCurrentSession={() => buildSessionSnapshot("current-coaching")} sessions={[]} onJump={jumpTo} disabled />
@@ -3566,7 +3589,7 @@ function App() {
           </Card>
         )}
 
-        {(hasSelectedVideo || activeSessionId !== null) && (
+        {hasOpenAttempt && (
         <Card id="save-analysis" title="Save this analysis" className="full secondary-card session-card">
           <div className="session-save-summary">
             <div><strong>{sessionName || "Current analysis"}</strong>
@@ -3636,7 +3659,7 @@ function App() {
 
         )}
 
-        {(hasSelectedVideo || activeSessionId !== null) && (
+        {hasOpenAttempt && (
         <Card id="coaching-review" title="Coaching review" className="full secondary-card">
           <Suspense fallback={<p className="muted">Preparing evidence review…</p>}>
             <CoachingReviewPanel
@@ -4552,7 +4575,10 @@ function App() {
 
         <Card id="saved-attempts" title="Saved attempts & comparison" className="full secondary-card comparison-card">
           {!libraryReady && !libraryError && <p role="status">Opening your saved attempts…</p>}
-          {libraryError && <div role="alert"><p>{libraryError}</p><button onClick={reloadLibrary} disabled={librarySaving}>Retry loading saved attempts</button></div>}
+          {libraryError && <div role="alert"><p>{libraryError}</p>
+            {libraryConflict && hasOpenAttempt && <p>Your open analysis will stay available as an unsaved copy. Reload the library, then save it as a separate copy or export it.</p>}
+            <button onClick={reloadSavedAttempts} disabled={librarySaving}>{libraryConflict ? "Reload latest saved attempts" : "Retry loading saved attempts"}</button>
+          </div>}
           {libraryNotice && <p className="muted">{libraryNotice}</p>}
           {librarySaving && <p role="status">Saving your changes…</p>}
           {recentlyDeletedSession && <button type="button" onClick={undoSessionDeletion} disabled={videoAnalysisRunning || !libraryReady}>Undo last deletion</button>}
@@ -4580,7 +4606,7 @@ function App() {
         </Card>
 
       </section>
-      <MobileWorkflow hasVideo={hasLoadedVideo} hasResults={(hasSelectedVideo || activeSessionId !== null) && calculatedClimbTime !== null} analysisRunning={videoAnalysisRunning} savedCount={savedSessions.length} />
+      <MobileWorkflow hasVideo={hasLoadedVideo} hasResults={hasOpenAttempt && calculatedClimbTime !== null} analysisRunning={videoAnalysisRunning} savedCount={savedSessions.length} />
       <AnalysisActivity active={autoAnalysisRunning} status={autoAnalysisStatus} onCancel={() => autoAnalysisAbortRef.current?.abort()} />
     </main>
   );
@@ -5493,6 +5519,7 @@ function datasetToSavedSession(dataset: any): SavedAnalysisSession {
 
   return {
     id: session.sessionId || createSessionId(),
+    attemptLineageId: sanitizeAttemptLineageId(session.attemptLineageId),
     version: 1,
     name: session.sessionName || "Imported ClimbIQ session",
     climberName: session.climberName || "",
@@ -5596,6 +5623,7 @@ function sanitizeSavedSession(session: SavedAnalysisSession): SavedAnalysisSessi
   const videoMetadata = sanitizeVideoMetadata(session.videoMetadata);
   return {
     ...session,
+    attemptLineageId: sanitizeAttemptLineageId(session.attemptLineageId),
     videoMetadata,
     zones: sanitizeZoneMap(session.zones),
     startLightCalibration: sanitizeStartLightCalibration(

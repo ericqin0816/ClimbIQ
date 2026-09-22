@@ -1,8 +1,8 @@
 /** Shared numeric evidence contract: no video, names or free text. */
 export const COACHING_GOALS = ["overview", "start", "halves", "consistency"] as const;
-export const COACHING_POLICY_VERSION = 2;
+export const COACHING_POLICY_VERSION = 3;
 export type CoachingGoal = typeof COACHING_GOALS[number];
-export interface CoachingRunFacts {
+interface CoachingRunMeasurements {
   timingState: "missing-start" | "missing-finish" | "review" | "accepted";
   totalSeconds: number | null;
   movementSeconds: number | null;
@@ -10,9 +10,14 @@ export interface CoachingRunFacts {
   bottomSeconds: number | null;
   topSeconds: number | null;
   speedCoverage: number | null;
-  comparisonFloorSeconds: number;
 }
-export interface CoachingPacket { version: 1; goal: CoachingGoal; current: CoachingRunFacts; baseline: CoachingRunFacts | null }
+export interface LegacyCoachingRunFacts extends CoachingRunMeasurements { comparisonFloorSeconds: number }
+export interface CoachingRunFacts extends CoachingRunMeasurements {
+  comparisonFloorsSeconds: { total: number; bottom: number | null; top: number | null };
+}
+export interface LegacyCoachingPacket { version: 1; goal: CoachingGoal; current: LegacyCoachingRunFacts; baseline: LegacyCoachingRunFacts | null }
+export interface CoachingPacketV2 { version: 2; goal: CoachingGoal; current: CoachingRunFacts; baseline: CoachingRunFacts | null }
+export type CoachingPacket = LegacyCoachingPacket | CoachingPacketV2;
 export interface CoachingObservation { id: string; title: string; text: string }
 export interface CoachingFocus { id: string; title: string; text: string; evidenceIds: string[] }
 export interface CoachingPlan { observationIds: string[]; focusId: string }
@@ -47,21 +52,42 @@ const optionalNumber = (value: unknown, min: number, max: number) => value === n
 const seconds = (value: number) => value.toFixed(3);
 
 export function parseCoachingPacket(value: unknown): CoachingPacket {
-  const run = (v: unknown): v is CoachingRunFacts => {
-    if (!keys(v, ["timingState", "totalSeconds", "movementSeconds", "reviewedHold10", "bottomSeconds", "topSeconds", "speedCoverage", "comparisonFloorSeconds"])) return false;
+  if (!keys(value, ["version", "goal", "current", "baseline"]) || (value.version !== 1 && value.version !== 2) ||
+    !COACHING_GOALS.includes(value.goal as CoachingGoal)) throw new Error("Invalid coaching evidence.");
+  const version = value.version;
+  const run = (v: unknown): boolean => {
+    if (!keys(v, ["timingState", "totalSeconds", "movementSeconds", "reviewedHold10", "bottomSeconds", "topSeconds", "speedCoverage", version === 1 ? "comparisonFloorSeconds" : "comparisonFloorsSeconds"])) return false;
     if (!["missing-start", "missing-finish", "review", "accepted"].includes(String(v.timingState)) ||
       !optionalNumber(v.totalSeconds, .001, 600) || !optionalNumber(v.movementSeconds, 0, 30) ||
       typeof v.reviewedHold10 !== "boolean" || !optionalNumber(v.bottomSeconds, .001, 600) ||
-      !optionalNumber(v.topSeconds, .001, 600) || !optionalNumber(v.speedCoverage, 0, 1) || !bounded(v.comparisonFloorSeconds, .1, 600)) return false;
+      !optionalNumber(v.topSeconds, .001, 600) || !optionalNumber(v.speedCoverage, 0, 1)) return false;
+    if (version === 1 && !bounded(v.comparisonFloorSeconds, .1, 600)) return false;
+    if (version === 2) {
+      const floors = v.comparisonFloorsSeconds;
+      if (!keys(floors, ["total", "bottom", "top"]) || !bounded(floors.total, .1, 600)) return false;
+      if (v.reviewedHold10 ? !bounded(floors.bottom, .1, 600) || !bounded(floors.top, .1, 600)
+        : floors.bottom !== null || floors.top !== null) return false;
+    }
     if (v.timingState !== "accepted") return v.totalSeconds === null && v.movementSeconds === null &&
       !v.reviewedHold10 && v.bottomSeconds === null && v.topSeconds === null && v.speedCoverage === null;
     if (v.totalSeconds === null || (v.movementSeconds !== null && (v.movementSeconds as number) > (v.totalSeconds as number))) return false;
     if (!v.reviewedHold10) return v.bottomSeconds === null && v.topSeconds === null;
     return v.bottomSeconds !== null && v.topSeconds !== null && Math.abs((v.bottomSeconds as number) + (v.topSeconds as number) - (v.totalSeconds as number)) < .005;
   };
-  if (!keys(value, ["version", "goal", "current", "baseline"]) || value.version !== 1 ||
-    !COACHING_GOALS.includes(value.goal as CoachingGoal) || !run(value.current) || (value.baseline !== null && !run(value.baseline))) throw new Error("Invalid coaching evidence.");
+  if (!run(value.current) || (value.baseline !== null && !run(value.baseline))) throw new Error("Invalid coaching evidence.");
+  // Preserve the original wire shape/version: old clients compare replies exactly.
   return value as unknown as CoachingPacket;
+}
+
+/** Internal calculation only. Legacy uncertainty cannot be recovered or reduced. */
+export function normalizeCoachingPacket(packet: CoachingPacket): CoachingPacketV2 {
+  const parsed = parseCoachingPacket(packet);
+  if (parsed.version === 2) return parsed;
+  const run = ({ comparisonFloorSeconds, ...facts }: LegacyCoachingRunFacts): CoachingRunFacts => ({
+    ...facts, comparisonFloorsSeconds: { total: comparisonFloorSeconds,
+      bottom: facts.reviewedHold10 ? comparisonFloorSeconds : null, top: facts.reviewedHold10 ? comparisonFloorSeconds : null },
+  });
+  return { version: 2, goal: parsed.goal, current: run(parsed.current), baseline: parsed.baseline ? run(parsed.baseline) : null };
 }
 
 function comparisonRow(id: CoachingComparisonRow["id"], label: string, current: number, baseline: number, floor: number): CoachingComparisonRow {
@@ -72,8 +98,7 @@ function comparisonRow(id: CoachingComparisonRow["id"], label: string, current: 
 
 /** Canonical sentences and rows are calculated here, never supplied by a model. */
 export function buildCoachingCatalog(packet: CoachingPacket): CoachingCatalog {
-  parseCoachingPacket(packet);
-  const { current: c, baseline: b } = packet;
+  const { current: c, baseline: b } = normalizeCoachingPacket(packet);
   const observations: CoachingObservation[] = [];
   const limitations: CoachingObservation[] = [{ id: "measurement-limits", title: "What this review can establish",
     text: "Video-derived timing and pose estimates are not independent ground truth. This review cannot diagnose technique, injury risk, or the cause of a timing change." }];
@@ -114,7 +139,7 @@ export function buildCoachingCatalog(packet: CoachingPacket): CoachingCatalog {
     }
     if (c.speedCoverage === null || c.speedCoverage < .8) task("improve-recording", "Check tracking before judging pace", "Check whether the full lane, start, and finish stayed visible with a fixed camera. Missing tracking calls for better evidence, not a technique diagnosis.", [c.speedCoverage === null ? "tracking-unavailable" : "tracking-gaps"]);
     if (b?.timingState === "accepted") {
-      const floor = Math.max(c.comparisonFloorSeconds, b.comparisonFloorSeconds, .1);
+      const floor = Math.max(c.comparisonFloorsSeconds.total, b.comparisonFloorsSeconds.total, .1);
       const total = comparisonRow("total", "Start → Finish", c.totalSeconds!, b.totalSeconds!, floor);
       comparisonRows.push(total);
       headline = {
@@ -125,13 +150,13 @@ export function buildCoachingCatalog(packet: CoachingPacket): CoachingCatalog {
       };
       const compare = (row: CoachingComparisonRow, id: string, title: string) => {
         if (row.outcome === "similar") return false;
-        fact(id, title, `${row.label} is ${seconds(Math.abs(row.deltaSeconds))}s ${row.outcome} than the selected baseline (${seconds(row.currentSeconds)}s vs ${seconds(row.baselineSeconds)}s). This exceeds the ${seconds(floor)}s comparison policy, which is not a measured error bound.`);
+        fact(id, title, `${row.label} is ${seconds(Math.abs(row.deltaSeconds))}s ${row.outcome} than the selected baseline (${seconds(row.currentSeconds)}s vs ${seconds(row.baselineSeconds)}s). This exceeds the ${seconds(row.thresholdSeconds)}s comparison policy for this interval, which is not a measured error bound.`);
         return true;
       };
       if (!compare(total, "total-change", "Total-time comparison")) fact("no-change", "No supported overall change", `The total difference is within the ${seconds(floor)}s comparison policy. No overall gain or loss is established.`);
       if (c.reviewedHold10 && b.reviewedHold10) {
-        const bottom = comparisonRow("bottom", "Start → Hold 10", c.bottomSeconds!, b.bottomSeconds!, floor);
-        const top = comparisonRow("top", "Hold 10 → Finish", c.topSeconds!, b.topSeconds!, floor);
+        const bottom = comparisonRow("bottom", "Start → Hold 10", c.bottomSeconds!, b.bottomSeconds!, Math.max(c.comparisonFloorsSeconds.bottom!, b.comparisonFloorsSeconds.bottom!, .1));
+        const top = comparisonRow("top", "Hold 10 → Finish", c.topSeconds!, b.topSeconds!, Math.max(c.comparisonFloorsSeconds.top!, b.comparisonFloorsSeconds.top!, .1));
         comparisonRows.push(bottom, top);
         if (compare(bottom, "bottom-change", "Before Hold 10")) focus("review-bottom", "Compare the section before Hold 10", "Replay Start → Hold 10 in both attempts. Inspect the section with a supported timing difference before deciding what to change in training.", ["bottom-change"]);
         if (compare(top, "top-change", "After Hold 10")) focus("review-top", "Compare the section after Hold 10", "Replay Hold 10 → Finish in both attempts. The difference identifies where to look; the measurements do not show its cause.", ["top-change"]);
@@ -142,7 +167,9 @@ export function buildCoachingCatalog(packet: CoachingPacket): CoachingCatalog {
         limit("comparison-contact-review", "Half comparisons withheld", "Both attempts need frame-reviewed Hold 10 contact before their phases can be compared. The total comparison remains available.");
         if (!b.reviewedHold10) task("review-baseline-hold10", "Review the baseline contact", "Open the baseline attempt and confirm its Hold 10 contact. A current-video link cannot review a different recording.", []);
       }
-      limit("comparison-policy", "Small changes stay unclassified", `This review uses a conservative ${seconds(floor)}s comparison rule, including the largest supplied observation interval. It is a display rule, not a measured error bar or proof of statistical significance.`);
+      limit("comparison-policy", "Small changes stay unclassified", `The total uses a ${seconds(floor)}s comparison rule. ${packet.version === 1
+        ? "This legacy packet stored only one shared rule, which is retained for every interval; its original endpoint precision cannot be recovered."
+        : "Each phase uses its own two boundary observations; a coarse Hold 10 observation does not reduce the precision of Start → Finish."} These are conservative display rules, not measured error bars or proof of statistical significance.`);
     } else limit("baseline-missing", b ? "Baseline timing needs review" : "One run is not a trend", b
       ? "The selected baseline does not have usable accepted Start and Finish timing. Single-run observations remain available; change claims are withheld."
       : "Choose a saved attempt from the same climber, route, and comparable recording setup to assess changes between runs.");
@@ -173,4 +200,32 @@ export function validateCoachingPlan(value: unknown, catalog: CoachingCatalog): 
     !value.observationIds.every(id => typeof id === "string" && catalog.observations.some(item => item.id === id)) ||
     !catalog.focuses.some(item => item.id === value.focusId)) throw new Error("The AI response contained unsupported advice.");
   return { observationIds: value.observationIds as string[], focusId: value.focusId as string };
+}
+
+const LEGACY_OBSERVATIONS = new Set(["total", "movement", "halves", "tracking", "total-change", "no-change", "bottom-change", "top-change"]);
+const LEGACY_FOCUSES = new Set(["review-timing", "review-start", "review-hold10", "improve-recording", "review-bottom", "review-top", "record-comparable"]);
+
+/** A v1 caller must receive IDs its original catalog knows, before paying for inference. */
+export function buildCoachingSelectionCatalog(packet: CoachingPacket): CoachingCatalog {
+  const catalog = buildCoachingCatalog(packet);
+  if (packet.version === 2) return catalog;
+  const observations = catalog.observations.filter(item => LEGACY_OBSERVATIONS.has(item.id));
+  const focuses = catalog.focuses.filter(item => LEGACY_FOCUSES.has(item.id));
+  const selected = catalog.defaultPlan.observationIds.filter(id => observations.some(item => item.id === id));
+  return { ...catalog, observations, focuses, defaultPlan: {
+    observationIds: selected.length ? selected : observations.slice(0, 3).map(item => item.id),
+    focusId: focuses.find(item => item.id === catalog.defaultPlan.focusId)?.id ?? focuses[0].id,
+  } };
+}
+
+/** Adapt newer archived selections for v1 readers without changing the stored record. */
+export function coachingPlanForClient(packet: CoachingPacket, value: unknown): CoachingPlan {
+  const verified = validateCoachingPlan(value, buildCoachingCatalog(packet));
+  if (packet.version === 2) return verified;
+  const compatible = buildCoachingSelectionCatalog(packet);
+  const observationIds = verified.observationIds.filter(id => compatible.observations.some(item => item.id === id));
+  return validateCoachingPlan({
+    observationIds: observationIds.length ? observationIds : compatible.defaultPlan.observationIds,
+    focusId: compatible.focuses.some(item => item.id === verified.focusId) ? verified.focusId : compatible.defaultPlan.focusId,
+  }, compatible);
 }

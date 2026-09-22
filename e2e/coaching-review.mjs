@@ -32,6 +32,7 @@ try {
     const {default:React} = await import('/node_modules/.vite/deps/react.js');
     const {default:{createRoot}} = await import('/node_modules/.vite/deps/react-dom_client.js');
     const {default:Panel} = await import('/src/components/CoachingReviewPanel.tsx');
+    const {default:ComparisonPanel} = await import('/src/components/AttemptComparisonPanel.tsx');
     const {buildCoachingCatalog} = await import('/src/lib/coachingPolicy.ts');
     window.__calls=[]; window.__jumps=[]; window.__slow=false; window.__statusCalls=0;
     const nativeFetch=window.fetch;
@@ -54,6 +55,7 @@ try {
     const root=createRoot(host); window.__coachingSession=s;
     window.__coachingBaselines=[s,{...s,id:'baseline',name:'Comparable fixture'}];
     window.__renderCoachingHarness=(key='initial',canSeek=true,Component=Panel)=>root.render(React.createElement(Component,{key,getCurrentSession:()=>window.__coachingSession,sessions:window.__coachingBaselines,onJump:t=>window.__jumps.push(t),disabled:false,canSeek}));
+    window.__renderComparisonHarness=sessions=>root.render(React.createElement(ComparisonPanel,{sessions}));
     window.__renderCoachingHarness();
   })()`);
   await wait("!!document.querySelector('.coaching-panel')");
@@ -129,6 +131,48 @@ try {
   await delay(350);
   check(await evaluate("!document.querySelector('.coaching-result')"), "A numerically identical response was attached to changed source evidence.");
 
+  // Explicit lineage prevents edited copies from becoming performance gains.
+  await evaluate(`(()=>{
+    const current=window.__coachingSession;
+    const copy={...current,id:'annotation-copy',attemptLineageId:current.id,name:'Edited annotation copy',timestamps:current.timestamps.map(m=>m.id==='finishPad'?{...m,rawTime:m.rawTime-.4}:m)};
+    window.__coachingBaselines=[current,copy];window.__renderCoachingHarness('lineage',false);
+  })()`);
+  await wait("document.querySelector('option[value=\"annotation-copy\"]')?.disabled");
+  check((await text()).includes("Another analysis of the same attempt") || await evaluate("document.querySelector('option[value=\"annotation-copy\"]').textContent.includes('Another analysis')"), "Edited copy is available as a performance baseline.");
+  await evaluate("window.__renderComparisonHarness(window.__coachingBaselines)");
+  await wait("!!document.querySelector('.comparison-details')");
+  await evaluate("document.querySelector('.comparison-details').open=true");
+  check(await evaluate("document.querySelector('.comparison-insight').textContent.includes('Annotation comparison only') && document.querySelector('.comparison-insight').textContent.includes('same attempt')"), "Main comparison interprets a known copy as performance change.");
+  check(await evaluate("!document.querySelector('.comparison-row.gained,.comparison-row.lost') && document.querySelector('.comparison-delta')?.textContent.includes('Annotation difference')"), "Known copies lost diagnostic timing or retained gain/loss styling.");
+
+  // Metadata overlap remains an honest ambiguity and needs a second confirmation.
+  await evaluate(`(()=>{
+    const metadata={fileName:'coincident.mp4',duration:120,videoWidth:640,videoHeight:480,metadataLoaded:true};
+    window.__coachingSession={...window.__coachingSession,videoMetadata:metadata};
+    const baseline={...window.__coachingSession,id:'ambiguous-baseline',attemptLineageId:undefined,name:'Independent recording with matching metadata',timestamps:window.__coachingSession.timestamps.map(m=>m.id==='finishPad'?{...m,rawTime:m.rawTime+.4}:m)};
+    window.__coachingBaselines=[window.__coachingSession,baseline];window.__renderCoachingHarness('metadata-collision',false);
+  })()`);
+  await wait("!!document.querySelector('option[value=\"ambiguous-baseline\"]')");
+  check(await evaluate("!document.querySelector('option[value=\"ambiguous-baseline\"]').disabled"), "Metadata alone incorrectly hard-blocked a distinct file.");
+  await evaluate(`(()=>{const select=document.querySelectorAll('select')[1];Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype,'value').set.call(select,'ambiguous-baseline');select.dispatchEvent(new Event('change',{bubbles:true}))})()`);
+  await wait("!!document.querySelector('.coaching-identity-check input')");
+  await evaluate("document.querySelector('.coaching-panel > .coaching-check input').click()");
+  check(await evaluate("[...document.querySelectorAll('button')].find(b=>b.textContent==='Review my run').disabled"), "General comparability bypassed distinct-attempt confirmation.");
+  await evaluate("document.querySelector('.coaching-identity-check input').click()");
+  await click("Review my run");
+  check((await text()).includes('0.400s shorter overall'), "Confirmed independent recordings could not be compared.");
+  check(await evaluate("document.querySelector('.coaching-result').textContent.includes('Rule: 0.100s')"), "Per-interval comparison rules are not shown.");
+
+  await evaluate("window.__renderComparisonHarness(window.__coachingBaselines)");
+  await wait("!!document.querySelector('.comparison-identity-check input')");
+  await evaluate("document.querySelector('.comparison-details').open=true");
+  check(await evaluate("!document.querySelector('.comparison-row.gained,.comparison-row.lost')"), "Main comparison bypasses the overlap confirmation.");
+  await evaluate("document.querySelector('.comparison-identity-check input').click()");
+  await wait("!!document.querySelector('.comparison-row.gained,.comparison-row.lost')");
+  await evaluate("window.__coachingBaselines=window.__coachingBaselines.map(s=>({...s,updatedAt:'2027-01-01'}));window.__renderComparisonHarness(window.__coachingBaselines)");
+  await wait("!document.querySelector('.comparison-identity-check input').checked");
+  check(await evaluate("!document.querySelector('.comparison-row.gained,.comparison-row.lost')"), "A saved version change retained stale identity confirmation.");
+
   // Evaluate the packaged-app policy in a fresh module. All network is mocked;
   // this checks routing, not an actual iOS/WKWebView device.
   await evaluate(`(async()=>{
@@ -148,5 +192,5 @@ try {
     const shot=await send('Page.captureScreenshot',{format:'png',captureBeyondViewport:true});
     await writeFile(`test-results/coaching-${name}.png`,Buffer.from(shot.data,'base64'));
   }
-  console.log(JSON.stringify({passed:true,localFacts:true,contactGate:true,sourceLinks:true,optIn:true,privateMetadataExcluded:true,mandatoryLimits:true,archivedLinksWithheld:true,staleResponseRejected:true,comparisonPriorities:true,offsettingPhases:true,offlineSavedReview:true,sourceIdentityGuard:true,nativeNoHostedRequests:true,responsive:true,provider:'mocked; no live NIM call'},null,2));
+  console.log(JSON.stringify({passed:true,localFacts:true,contactGate:true,sourceLinks:true,optIn:true,privateMetadataExcluded:true,mandatoryLimits:true,archivedLinksWithheld:true,staleResponseRejected:true,comparisonPriorities:true,offsettingPhases:true,offlineSavedReview:true,sourceIdentityGuard:true,duplicateLineageGuard:true,distinctAttemptConfirmation:true,annotationComparison:true,nativeNoHostedRequests:true,responsive:true,provider:'mocked; no live NIM call'},null,2));
 } finally { await closeTestBrowser(child,send); }

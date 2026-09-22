@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { SavedAnalysisSession } from "../types";
-import { loadSessionLibrary, saveSessionLibrary } from "./sessionStorage";
+import { loadSessionLibrary, saveSessionLibrary, SessionStorageConflictError } from "./sessionStorage";
 
 /** A write is committed to the UI only after durable storage accepts it. */
 export function useSavedAttempts(decodeSession: (value: unknown) => SavedAnalysisSession | null) {
@@ -8,6 +8,7 @@ export function useSavedAttempts(decodeSession: (value: unknown) => SavedAnalysi
   const [ready, setReady] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [conflicted, setConflicted] = useState(false);
   const [notice, setNotice] = useState("");
   const [backend, setBackend] = useState<string>("");
   const [loadVersion, setLoadVersion] = useState(0);
@@ -27,9 +28,13 @@ export function useSavedAttempts(decodeSession: (value: unknown) => SavedAnalysi
       setBackend(result.backend);
       setNotice(result.warning ?? (result.migrated ? "Your existing saved attempts were moved to the new library. The original backup was kept." : ""));
       initialized.current = true;
+      setConflicted(false);
       setReady(true);
     }).catch(reason => {
-      if (!cancelled) setError(reason instanceof Error ? reason.message : "Saved attempts could not be opened. Your stored library has not been replaced.");
+      if (!cancelled) {
+        if (reason instanceof SessionStorageConflictError) setConflicted(true);
+        setError(reason instanceof Error ? reason.message : "Saved attempts could not be opened. Your stored library has not been replaced.");
+      }
     });
     return () => { cancelled = true; };
   }, [decodeSession, loadVersion]);
@@ -49,14 +54,24 @@ export function useSavedAttempts(decodeSession: (value: unknown) => SavedAnalysi
       return next;
     } catch (reason) {
       const message = reason instanceof Error ? reason.message : "Could not save. Export this analysis to keep a backup.";
+      if (reason instanceof SessionStorageConflictError) {
+        initialized.current = false;
+        setReady(false);
+        setConflicted(true);
+      }
       setError(message);
-      throw new Error(message);
+      throw reason instanceof Error ? reason : new Error(message);
     } finally {
       writing.current = false;
       setBusy(false);
     }
   }, []);
 
-  const reload = useCallback(() => { if (!writing.current) setLoadVersion(value => value + 1); }, []);
-  return { sessions, ready, busy, error, notice, backend, updateSessions, reload };
+  const reload = useCallback(() => {
+    if (writing.current) return;
+    initialized.current = false;
+    setReady(false);
+    setLoadVersion(value => value + 1);
+  }, []);
+  return { sessions, ready, busy, error, conflicted, notice, backend, updateSessions, reload };
 }

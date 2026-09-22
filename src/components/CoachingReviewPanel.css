@@ -5,6 +5,8 @@
 .coaching-local-badge { flex-shrink: 0; border: 1px solid #c9d5cc; border-radius: 20px; padding: 6px 10px; color: #376546; background: #f4f8f3; font-size: .71rem; font-weight: 620; }
 .coaching-baseline-note, .coaching-privacy-note { color: var(--muted-text, #696c71); font-size: .78rem; line-height: 1.6; }
 .coaching-privacy-note { margin: 10px 0 0; }
+.coaching-identity-check { margin: 14px 0; border: 1px solid #d8c8a7; border-radius: 7px; padding: 12px; background: #faf7f0; }
+.coaching-identity-check > p { margin: 0; font-size: .8rem; line-height: 1.6; }
 .coaching-controls { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 16px; margin-bottom: 12px; }
 .coaching-panel label { display: grid; gap: 6px; font-size: .9rem; }
 .coaching-panel .coaching-check { display: flex; align-items: flex-start; gap: 9px; margin: 14px 0; line-height: 1.5; }

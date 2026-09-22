@@ -2,9 +2,9 @@ import { describe, expect, it, vi } from "vitest";
 import { createCoachingHandler, coachingConfig } from "./coachingHandler";
 import { generateNimReview } from "./coachingNim";
 import type { ReviewRecord, ReviewStore } from "./coachingStore";
-import { buildCoachingCatalog, type CoachingPacket } from "../src/lib/coachingPolicy";
+import { buildCoachingCatalog, buildCoachingSelectionCatalog, normalizeCoachingPacket, type CoachingPacket, type LegacyCoachingPacket } from "../src/lib/coachingPolicy";
 
-const evidence = (): CoachingPacket => ({ version: 1, goal: "overview", baseline: null, current: { timingState: "accepted", totalSeconds: 12.255, movementSeconds: .2, reviewedHold10: false, bottomSeconds: null, topSeconds: null, speedCoverage: .6, comparisonFloorSeconds: .1 } });
+const evidence = (): LegacyCoachingPacket => ({ version: 1, goal: "overview", baseline: null, current: { timingState: "accepted", totalSeconds: 12.255, movementSeconds: .2, reviewedHold10: false, bottomSeconds: null, topSeconds: null, speedCoverage: .6, comparisonFloorSeconds: .1 } });
 const env = { COACHING_ENABLED: "1", NVIDIA_NIM_API_KEY: "test-provider-key", NVIDIA_NIM_MODEL: "nvidia/test-model", COACHING_ACCESS_TOKEN: "private-test-workspace-code-123456789", UPSTASH_REDIS_REST_URL: "https://test.upstash.io", UPSTASH_REDIS_REST_TOKEN: "test-store-token", COACHING_ALLOWED_ORIGIN: "https://climbiq.test" };
 const requestId = "12345678-1234-1234-1234-123456789012";
 const request = (body: unknown = { requestId, consent: true, packet: evidence() }, headers: Record<string, string> = {}) => new Request("https://climbiq.test/api/coaching", { method: "POST", headers: { "Content-Type": "application/json", Origin: env.COACHING_ALLOWED_ORIGIN, Authorization: `Bearer ${env.COACHING_ACCESS_TOKEN}`, ...headers }, body: JSON.stringify(body) });
@@ -74,8 +74,69 @@ describe("private NIM review boundary", () => {
     expect((await s.handler(new Request(url))).status).toBe(401);
     expect(await (await s.handler(new Request(url, { headers: { Authorization: `Bearer ${env.COACHING_ACCESS_TOKEN}` } }))).json()).toEqual(result);
   });
+  it("returns the exact v1 wire packet and legacy-safe plan after one reserved generation", async () => {
+    const s = setup(), packet = evidence();
+    packet.current = { ...packet.current, reviewedHold10: true, bottomSeconds: 5, topSeconds: 7.255 };
+    packet.baseline = { ...packet.current, bottomSeconds: 6, topSeconds: 6.255 };
+    const body = { requestId, consent: true, packet };
+    const response = await s.handler(request(body)); const data = await response.json();
+    expect(response.status).toBe(200);
+    expect(JSON.stringify(data.packet)).toBe(JSON.stringify(packet));
+    expect(data.packet.version).toBe(1);
+    expect(data.packet.current.comparisonFloorsSeconds).toBeUndefined();
+    expect(data.plan.observationIds).not.toContain("phase-balance");
+    expect(s.generate).toHaveBeenCalledOnce();
+    expect(await (await s.handler(request(body))).json()).toEqual(data);
+    expect(s.generate).toHaveBeenCalledOnce();
+  });
+  it("reads archived v1 selections conservatively and never generates on readback", async () => {
+    const s = setup(), packet = evidence();
+    packet.current = { ...packet.current, movementSeconds: null, comparisonFloorSeconds: .8 };
+    packet.baseline = { ...packet.current, totalSeconds: 12.555 };
+    const id = "abcdefghijklmnopqrstu";
+    s.records.set(id, { id, requestId, fingerprint: "old-policy", model: "nvidia/test-model", status: "complete", createdAt: "2026-09-01", packet,
+      plan: { observationIds: ["total"], focusId: "review-movement" }, estimatedCostUsd: null });
+    const response = await s.handler(new Request(`https://climbiq.test/api/coaching?id=${id}`, { headers: { Authorization: `Bearer ${env.COACHING_ACCESS_TOKEN}` } }));
+    const data = await response.json();
+    expect(response.status).toBe(200); expect(data.packet).toEqual(packet);
+    expect(data.plan.focusId).not.toBe("review-movement");
+    expect(buildCoachingCatalog(data.packet).headline.state).toBe("similar");
+    expect(s.records.get(id)?.plan).toEqual({ observationIds: ["total"], focusId: "review-movement" });
+    expect(s.generate).not.toHaveBeenCalled(); expect(s.store.reserve).not.toHaveBeenCalled();
+  });
+  it("roundtrips v2 metric floors without applying a Hold 10 floor to the total", async () => {
+    const s = setup(), packet = normalizeCoachingPacket(evidence());
+    packet.current = { ...packet.current, reviewedHold10: true, bottomSeconds: 5, topSeconds: 7.255,
+      comparisonFloorsSeconds: { total: .1, bottom: .8, top: .8 } };
+    packet.baseline = { ...packet.current, totalSeconds: 12.555, bottomSeconds: 5.3 };
+    const response = await s.handler(request({ requestId, consent: true, packet })); const data = await response.json();
+    expect(response.status).toBe(200); expect(data.packet).toEqual(packet);
+    expect(buildCoachingCatalog(data.packet).comparisonRows[0]).toMatchObject({ outcome: "shorter", thresholdSeconds: .1 });
+    expect(s.events).toEqual(["reserve", "generate", "save"]);
+  });
+  it("rejects unsupported versions and malformed v2 floors before reserving any budget", async () => {
+    const s = setup(), packet = normalizeCoachingPacket(evidence());
+    const invalid = [ { ...packet, version: 3 }, { ...packet, current: { ...packet.current, comparisonFloorsSeconds: { total: .01, bottom: null, top: null } } } ];
+    for (const value of invalid) expect((await s.handler(request({ requestId, consent: true, packet: value }))).status).toBe(400);
+    expect(s.store.reserve).not.toHaveBeenCalled(); expect(s.generate).not.toHaveBeenCalled();
+  });
 });
 describe("actual NIM compatible adapter with mocked HTTP", () => {
+  it("restricts v1 inference to legacy-compatible IDs before sending the prompt", async () => {
+    const packet = evidence(); packet.current.movementSeconds = null;
+    packet.current = { ...packet.current, reviewedHold10: true, bottomSeconds: 5, topSeconds: 7.255 };
+    packet.baseline = { ...packet.current, reviewedHold10: false, bottomSeconds: null, topSeconds: null };
+    let prompt = "";
+    const mockFetch: typeof fetch = async (_input, init) => {
+      prompt = JSON.stringify(JSON.parse(init!.body as string).messages);
+      return Response.json({ id: "compatibility", object: "chat.completion", created: 1, model: "nvidia/test-model", choices: [{ index: 0,
+        message: { role: "assistant", content: JSON.stringify(buildCoachingSelectionCatalog(packet).defaultPlan) }, finish_reason: "stop" }],
+        usage: { prompt_tokens: 10, completion_tokens: 10, total_tokens: 20 } });
+    };
+    const result = await generateNimReview(packet, "test-key", "nvidia/test-model", mockFetch);
+    expect(prompt).not.toMatch(/review-movement|review-baseline-hold10|phase-balance/);
+    expect(result.plan).toEqual(buildCoachingSelectionCatalog(packet).defaultPlan);
+  });
   it.each([false, true])("validates model output (unsupported=%s) and captures usage", async unsupported => {
     let payload: Record<string, unknown> = {};
     const mockFetch: typeof fetch = async (input, init) => {

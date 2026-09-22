@@ -21,7 +21,9 @@ export interface SessionLibrarySaveResult {
 export interface SessionStore {
   backend: SessionStorageBackend;
   read(): Promise<string | null>;
-  write(serialized: string): Promise<void>;
+  /** Web storage compares against this exact last-read snapshot atomically.
+   * Omitted/null means the library must still be absent. Native ignores it. */
+  write(serialized: string, expectedSnapshot?: string | null): Promise<void>;
 }
 
 interface SessionStorageDependencies {
@@ -36,15 +38,26 @@ export class SessionStorageError extends Error {
   }
 }
 
+export class SessionStorageConflictError extends SessionStorageError {
+  readonly code = "conflict" as const;
+
+  constructor() {
+    super("Saved attempts changed in another tab or window. The newer library was preserved. Reload it before saving again.");
+    this.name = "SessionStorageConflictError";
+  }
+}
+
 /**
  * Serialize reads and writes within this app instance. Callers must await a
  * successful initial load and gate mutations while their save is pending.
- * Separate browser tabs remain independent editors (last committed save wins).
+ * IndexedDB additionally compares snapshots inside its write transaction so
+ * another tab cannot silently replace a library it has not loaded.
  */
 export function createSessionStorage(dependencies: SessionStorageDependencies) {
   let queue: Promise<unknown> = Promise.resolve();
   let loaded = false;
   let store: SessionStore | undefined;
+  let expectedSnapshot: string | null = null;
 
   function enqueue<T>(operation: () => Promise<T>): Promise<T> {
     const result = queue.then(operation);
@@ -66,18 +79,26 @@ export function createSessionStorage(dependencies: SessionStorageDependencies) {
           const current = await currentStore.read();
           if (current !== null) {
             const sessions = decodeLibrary(current, decodeSession);
+            // Compare stored bytes, not the sanitized/sorted in-memory copy.
+            expectedSnapshot = current;
             loaded = true;
             return { sessions, backend: currentStore.backend, migrated: false };
           }
 
           // Access may throw (for example, blocked site storage). Do not treat
           // that as an empty legacy library and permit its replacement.
+          expectedSnapshot = null;
           const legacy = dependencies.readLegacy();
           const sessions = legacy === null ? [] : decodeLibrary(legacy, decodeSession);
           if (legacy !== null) {
             try {
-              await currentStore.write(JSON.stringify(sessions));
+              const migratedSnapshot = JSON.stringify(sessions);
+              await currentStore.write(migratedSnapshot, null);
+              expectedSnapshot = migratedSnapshot;
             } catch (error) {
+              // A concurrent first save/migration is not a storage-capacity
+              // warning: reload its current contents before allowing writes.
+              if (error instanceof SessionStorageConflictError) throw error;
               loaded = true;
               return {
                 sessions,
@@ -121,9 +142,14 @@ export function createSessionStorage(dependencies: SessionStorageDependencies) {
         }
         try {
           const currentStore = await getStore();
-          await currentStore.write(serialized);
+          await currentStore.write(serialized, expectedSnapshot);
+          expectedSnapshot = serialized;
           return { backend: currentStore.backend };
         } catch (error) {
+          if (error instanceof SessionStorageConflictError) {
+            loaded = false;
+            throw error;
+          }
           throw new SessionStorageError(
             "This change could not be saved on this device. Your previous saved attempts are still intact. " +
             "Free some storage and try again, or export your analysis before closing the app.",
@@ -181,18 +207,30 @@ export function createIndexedDbSessionStore(indexedDb: IDBFactory): SessionStore
     });
   }
 
-  async function transact(mode: IDBTransactionMode, serialized?: string): Promise<string | null> {
+  async function transact(mode: IDBTransactionMode, serialized?: string, expectedSnapshot: string | null = null): Promise<string | null> {
     const database = await openDatabase();
     try {
       return await new Promise<string | null>((resolve, reject) => {
         const transaction = database.transaction(OBJECT_STORE, mode);
         const objectStore = transaction.objectStore(OBJECT_STORE);
-        const request = mode === "readonly"
-          ? objectStore.get(LIBRARY_KEY)
-          : objectStore.put(serialized, LIBRARY_KEY);
+        // Both the comparison and replacement hold the same readwrite lock.
+        // Reading before opening this transaction would leave a lost-update race.
+        const request = objectStore.get(LIBRARY_KEY);
         let result: string | null = null;
+        let transactionFailure: Error | undefined;
         request.onsuccess = () => {
-          if (mode !== "readonly" || request.result === undefined) return;
+          if (mode === "readwrite") {
+            const observed = request.result === undefined ? null : request.result;
+            if (observed !== expectedSnapshot ||
+                (request.result !== undefined && typeof request.result !== "string")) {
+              transactionFailure = new SessionStorageConflictError();
+              transaction.abort();
+              return;
+            }
+            objectStore.put(serialized, LIBRARY_KEY);
+            return;
+          }
+          if (request.result === undefined) return;
           if (typeof request.result !== "string") {
             transaction.abort();
             return;
@@ -201,8 +239,8 @@ export function createIndexedDbSessionStore(indexedDb: IDBFactory): SessionStore
         };
         // Request success is not durability: wait for the transaction commit.
         transaction.oncomplete = () => resolve(result);
-        transaction.onabort = () => reject(transaction.error ?? new Error("Saved-attempt transaction was aborted."));
-        transaction.onerror = () => reject(transaction.error ?? new Error("Saved-attempt transaction failed."));
+        transaction.onabort = () => reject(transactionFailure ?? transaction.error ?? new Error("Saved-attempt transaction was aborted."));
+        transaction.onerror = () => reject(transactionFailure ?? transaction.error ?? new Error("Saved-attempt transaction failed."));
       });
     } finally {
       database.close();
@@ -212,7 +250,7 @@ export function createIndexedDbSessionStore(indexedDb: IDBFactory): SessionStore
   return {
     backend: "indexeddb",
     read: () => transact("readonly"),
-    write: async (serialized) => { await transact("readwrite", serialized); },
+    write: async (serialized, expectedSnapshot = null) => { await transact("readwrite", serialized, expectedSnapshot); },
   };
 }
 
@@ -247,6 +285,9 @@ export async function createNativeSessionStore(filesystem: NativeFilesystem): Pr
       return result.data;
     },
     async write(serialized) {
+      // Capacitor currently uses one app scene and the outer module queue.
+      // Cross-context compare-and-swap applies only to the browser backend;
+      // introducing multiple native scenes would require a native file lock.
       const previous = await snapshotNames();
       const sequence = previous.length ? Number(SNAPSHOT_PATTERN.exec(previous[0])![1]) + 1 : 1;
       if (!Number.isSafeInteger(sequence)) throw new Error("Saved-attempt revision limit reached.");

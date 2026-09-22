@@ -1,9 +1,9 @@
 import { generateText } from "ai";
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
-import { buildCoachingCatalog, validateCoachingPlan, type CoachingPacket } from "../src/lib/coachingPolicy.js";
+import { buildCoachingSelectionCatalog, validateCoachingPlan, type CoachingPacket } from "../src/lib/coachingPolicy.js";
 
 export async function generateNimReview(packet: CoachingPacket, apiKey: string, modelId: string, customFetch?: typeof fetch) {
-  const catalog = buildCoachingCatalog(packet);
+  const catalog = buildCoachingSelectionCatalog(packet);
   const provider = createOpenAICompatible({ name: "nvidia", baseURL: "https://integrate.api.nvidia.com/v1", apiKey, fetch: customFetch });
   const result = await generateText({
     model: provider.chatModel(modelId),

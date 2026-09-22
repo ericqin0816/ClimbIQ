@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { buildCoachingCatalog, parseCoachingPacket, validateCoachingPlan, type CoachingPacket } from "./coachingPolicy";
+import { buildCoachingCatalog, buildCoachingSelectionCatalog, coachingPlanForClient, normalizeCoachingPacket, parseCoachingPacket, validateCoachingPlan, type LegacyCoachingPacket } from "./coachingPolicy";
 
-export const packet = (): CoachingPacket => ({ version: 1, goal: "overview", baseline: null, current: {
+export const packet = (): LegacyCoachingPacket => ({ version: 1, goal: "overview", baseline: null, current: {
   timingState: "accepted", totalSeconds: 12.255, movementSeconds: .2, reviewedHold10: false,
   bottomSeconds: null, topSeconds: null, speedCoverage: .6, comparisonFloorSeconds: .1,
 } });
@@ -129,5 +129,65 @@ describe("coaching evidence policy", () => {
       const catalog = buildCoachingCatalog({ ...p, goal });
       expect(validateCoachingPlan(catalog.defaultPlan, catalog)).toEqual(catalog.defaultPlan);
     }
+  });
+  it("preserves v1 packet shape and version while normalizing only internal calculations", () => {
+    const old = packet(); old.current.comparisonFloorSeconds = .75;
+    old.current = { ...old.current, reviewedHold10: true, bottomSeconds: 5, topSeconds: 7.255 };
+    old.baseline = { ...old.current, totalSeconds: 12.555, topSeconds: 7.555 };
+    const serialized = JSON.stringify(old);
+    expect(parseCoachingPacket(old)).toBe(old);
+    expect(JSON.stringify(parseCoachingPacket(old))).toBe(serialized);
+    expect(normalizeCoachingPacket(old)).toMatchObject({ version: 2, current: { comparisonFloorsSeconds: { total: .75, bottom: .75, top: .75 } } });
+    expect(buildCoachingCatalog(old).comparisonRows.every(row => row.thresholdSeconds === .75)).toBe(true);
+    expect(buildCoachingCatalog(old).headline.state).toBe("similar");
+    expect(JSON.stringify(old)).toBe(serialized);
+  });
+  it("uses independent v2 floors for total and each reviewed phase", () => {
+    const next = normalizeCoachingPacket(packet());
+    next.current = { ...next.current, reviewedHold10: true, bottomSeconds: 5, topSeconds: 7.255,
+      comparisonFloorsSeconds: { total: .1, bottom: .8, top: .8 } };
+    next.baseline = { ...next.current, totalSeconds: 12.555, bottomSeconds: 5.3 };
+    const catalog = buildCoachingCatalog(next);
+    expect(catalog.comparisonRows).toMatchObject([
+      { id: "total", deltaSeconds: -.3, outcome: "shorter", thresholdSeconds: .1 },
+      { id: "bottom", deltaSeconds: -.3, outcome: "similar", thresholdSeconds: .8 },
+      { id: "top", deltaSeconds: 0, outcome: "similar", thresholdSeconds: .8 },
+    ]);
+    expect(catalog.defaultPlan.observationIds[0]).toBe("total-change");
+  });
+  it("strictly rejects mixed-version, private, and inconsistent floor fields", () => {
+    const next = normalizeCoachingPacket(packet());
+    for (const field of ["attemptLineageId", "rawTime", "notes", "comparisonFloorSeconds"]) {
+      expect(() => parseCoachingPacket({ ...next, current: { ...next.current, [field]: "private" } })).toThrow();
+    }
+    for (const total of [NaN, Infinity, .01, null, "0.1", 601]) {
+      expect(() => parseCoachingPacket({ ...next, current: { ...next.current, comparisonFloorsSeconds: { total, bottom: null, top: null } } })).toThrow();
+    }
+    expect(() => parseCoachingPacket({ ...next, current: { ...next.current, comparisonFloorsSeconds: { total: .1, bottom: .1, top: .1 } } })).toThrow();
+    expect(() => parseCoachingPacket({ ...next, current: { ...next.current, comparisonFloorsSeconds: { total: .1, bottom: null, top: null, rawTime: 1 } } })).toThrow();
+    expect(() => parseCoachingPacket({ ...next, version: 1 })).toThrow();
+    expect(() => parseCoachingPacket({ ...packet(), version: 2 })).toThrow();
+  });
+  it("offers v1 models only IDs understood by the original client", () => {
+    const old = packet();
+    old.current = { ...old.current, reviewedHold10: true, bottomSeconds: 5, topSeconds: 7.255 };
+    old.baseline = { ...old.current, bottomSeconds: 6, topSeconds: 6.255 };
+    const catalog = buildCoachingCatalog(old);
+    expect(catalog.defaultPlan.observationIds).toContain("phase-balance");
+    const legacyCatalog = buildCoachingSelectionCatalog(old);
+    expect(legacyCatalog.observations.map(item => item.id)).not.toContain("phase-balance");
+    expect(legacyCatalog.focuses.map(item => item.id)).not.toEqual(expect.arrayContaining(["review-movement", "review-baseline-hold10"]));
+    const adapted = coachingPlanForClient(old, catalog.defaultPlan);
+    expect(adapted.observationIds).not.toContain("phase-balance");
+    expect(validateCoachingPlan(adapted, legacyCatalog)).toEqual(adapted);
+    const next = normalizeCoachingPacket(old);
+    expect(coachingPlanForClient(next, catalog.defaultPlan).observationIds).toContain("phase-balance");
+  });
+  it("adapts newer archived v1 review tasks without inventing a performance fact", () => {
+    const old = packet(); old.current.movementSeconds = null;
+    const adapted = coachingPlanForClient(old, { observationIds: ["total"], focusId: "review-movement" });
+    expect(adapted.observationIds).toEqual(["total"]);
+    expect(adapted.focusId).not.toBe("review-movement");
+    expect(() => coachingPlanForClient(old, { observationIds: ["injury-risk"], focusId: "review-movement" })).toThrow();
   });
 });
