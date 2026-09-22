@@ -1,25 +1,13 @@
-import { spawn } from "node:child_process";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import path from "node:path";
+import { mkdir, writeFile } from "node:fs/promises";
 import { createProtocolClient } from "./cdp-client.mjs";
-import { closeTestBrowser } from "./browser-lifecycle.mjs";
+import { startTestBrowser } from "./test-browser.mjs";
 
 // A fresh browser profile owns all test data. Two real tabs exercise the public
 // storage service against native IndexedDB transactions; no private footage or
 // user-browser library is accessed.
 const appUrl = process.env.CLIMBIQ_E2E_URL ?? "http://127.0.0.1:5173/";
-const chromePath = process.env.CLIMBIQ_CHROME ?? (process.platform === "darwin"
-  ? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
-  : process.platform === "win32" ? "C:/Program Files/Google/Chrome/Application/chrome.exe" : "/usr/bin/google-chrome");
-const temporaryRoot = await mkdtemp(path.join(tmpdir(), "climbiq-library-race-"));
-const profile = path.join(temporaryRoot, "profile");
-let port;
-let spawnError;
-const chrome = spawn(chromePath, ["--headless=new", "--no-first-run", "--no-default-browser-check",
-  "--remote-debugging-port=0", `--user-data-dir=${profile}`, "about:blank"],
-{ stdio: "ignore", windowsHide: true });
-chrome.once("error", error => { spawnError = error; });
+const browser = await startTestBrowser({ label: "library-race" });
+const port = browser.port;
 const delay = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds));
 const clients = [];
 const report = { appUrl, syntheticLibrary: true, scenarios: [] };
@@ -41,6 +29,20 @@ async function openClient() {
   };
   const client = { socket, send, evaluate };
   clients.push(client);
+  // /json/new returns before navigation completes. Importing root-relative
+  // modules from its initial about:blank races on fast CI debugger connections.
+  await send("Runtime.enable");
+  let ready = false;
+  for (let attempt = 0; attempt < 200; attempt++) {
+    try {
+      ready = await evaluate(`location.origin === ${JSON.stringify(new URL(appUrl).origin)} && !!document.querySelector('main[data-session-storage-state="ready"]')`);
+    } catch (error) {
+      if (!/context.*(destroyed|found)|navigat/i.test(String(error))) throw error;
+    }
+    if (ready) break;
+    await delay(50);
+  }
+  if (!ready) throw new Error("The isolated library test page did not finish navigation and storage initialization.");
   await evaluate(`(${installHarness.toString()})()`);
   return client;
 }
@@ -60,21 +62,6 @@ function session(id) {
 }
 
 try {
-  let ready = false;
-  for (let attempt = 0; attempt < 100; attempt++) {
-    if (spawnError) throw spawnError;
-    try {
-      const discovered = Number((await readFile(path.join(profile, "DevToolsActivePort"), "utf8")).split(/\r?\n/)[0]);
-      if (Number.isInteger(discovered) && discovered >= 1024 && discovered <= 65535 &&
-          (await fetch(`http://127.0.0.1:${discovered}/json/version`)).ok) {
-        port = discovered;
-        ready = true;
-        break;
-      }
-    } catch { /* Only this test profile's debugger file can authorize a connection. */ }
-    await delay(100);
-  }
-  if (!ready) throw new Error("Isolated library test browser did not start.");
   const tabs = await Promise.all([openClient(), openClient()]);
 
   for (const existing of [false, true]) {
@@ -120,19 +107,8 @@ try {
   report.error = String(error);
   process.exitCode = 1;
 } finally {
-  await closeTestBrowser(chrome, clients[0]?.send);
-  clients.forEach(client => client.socket.close());
-  chrome.kill();
-  const cleanupPath = path.resolve(temporaryRoot);
-  const relative = path.relative(path.resolve(tmpdir()), cleanupPath);
-  if (relative && !relative.startsWith("..") && !path.isAbsolute(relative) &&
-      path.basename(cleanupPath).startsWith("climbiq-library-race-")) {
-    await rm(cleanupPath, { recursive: true, force: true, maxRetries: 3 }).catch(error => {
-      report.cleanupWarning = `The isolated browser profile could not be removed: ${error.message}`;
-    });
-  } else {
-    report.cleanupWarning = "The browser profile path did not pass the temporary-directory cleanup check.";
-  }
+  try { await browser.close(clients[0]?.send); }
+  finally { clients.forEach(client => client.socket.close()); }
   await mkdir("test-results", { recursive: true });
   await writeFile("test-results/library-concurrency.json", `${JSON.stringify(report, null, 2)}\n`);
   console.log(JSON.stringify(report, null, 2));
