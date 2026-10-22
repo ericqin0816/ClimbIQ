@@ -113,6 +113,12 @@ Run:
 npm run study:evaluate -- --study .local-npm/studies/study.json --labels .local-npm/studies/labels.csv --output .local-npm/studies/report.json
 ```
 
+Choose a new output filename for each report. The command creates output files
+exclusively: it refuses to overwrite a manifest, reviewer worksheet, existing
+report, or an alias of an existing file. Omit `--output` to print the report to
+stdout. Blank or whitespace-only numeric worksheet cells remain unknown;
+literal `0` is a real zero-time observation, never a missing-value substitute.
+
 The command rejects split leakage, duplicate attempts/runs/labels, mismatched
 recording hashes or builds, unconfirmed recording permission, malformed CSV,
 impossible accepted times, and ambiguous adjudication records. Header-only

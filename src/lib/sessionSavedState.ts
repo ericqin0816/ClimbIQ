@@ -17,6 +17,17 @@ export function savedSessionContentKey(session: SavedAnalysisSession): string {
   } : null }));
 }
 
+/** Small editable fields can change while the immutable pose state is reused. */
+export function savedSessionEditableKey(session: SavedAnalysisSession): string {
+  const { biomechanics: _poseEvidence, ...editable } = session;
+  return savedSessionContentKey(editable);
+}
+
+/** Pure and uncached: callers may memoize only an immutable React state value. */
+export function savedBiomechanicsKey(biomechanics: SavedAnalysisSession["biomechanics"]): string {
+  return JSON.stringify(canonical(biomechanics ?? null));
+}
+
 export function isSessionSnapshotSaved(snapshot: SavedAnalysisSession, saved?: SavedAnalysisSession): boolean {
   return !!saved && saved.id === snapshot.id && savedSessionContentKey(snapshot) === savedSessionContentKey(saved);
 }

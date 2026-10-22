@@ -9,7 +9,7 @@ import { ChangeEvent, CSSProperties, DragEvent, lazy, PointerEvent, Suspense, Sy
 import { Capacitor } from "@capacitor/core";
 import { useLibraryController } from "./lib/useLibraryController";
 import { resolveAttemptLineageId } from "./lib/attemptIdentity";
-import { isSessionSnapshotSaved } from "./lib/sessionSavedState";
+import { savedBiomechanicsKey, savedSessionEditableKey } from "./lib/sessionSavedState";
 import { hasComparableTiming } from "./lib/attemptComparison";
 import { exportTextFile, exportResultMessage } from "./lib/exportFile";
 import { MobileWorkflow, NextStepCard } from "./components/MobileWorkflow";
@@ -22,6 +22,7 @@ import { VideoSessionController } from "./lib/videoSessionController";
 import { AnalysisRunController } from "./lib/analysisRunController";
 import "./components/SessionWorkflow.css";
 import TimestampReviewPanel from "./components/TimestampReviewPanel";
+import { focusReviewOpener } from "./lib/reviewFocus";
 import type { FinishReviewScan } from "./lib/finishReview";
 import type { FinishPadRecovery } from "./lib/finishPadRecoveryScan";
 import { readDecodedVideoFrameTime, sourceFrameStepTarget } from "./lib/decodedVideoFrame";
@@ -292,6 +293,7 @@ function App() {
   // The attempt stays the same when a saved annotation is copied or detached
   // after a storage conflict. Its next saved record can have a different id.
   const [attemptLineageId, setAttemptLineageId] = useState<string | null>(null);
+  const [practiceRevealContext, setPracticeRevealContext] = useState<number | null>(null);
   const [analysisBuild, setAnalysisBuild] = useState<AppBuildIdentity | undefined>();
   const [sessionStatus, setSessionStatus] = useState("");
   const [libraryStatus, setLibraryStatus] = useState("");
@@ -299,6 +301,9 @@ function App() {
   const [exportStatus, setExportStatus] = useState("");
   const [obsidianFolderName, setObsidianFolderName] = useState("");
   const [biomechanics, setBiomechanics] = useState<BiomechanicsSession>(createDefaultBiomechanicsSession());
+  // Pose state is replaced, never mutated after publication. Editing a name or
+  // notes must not re-sanitize/recompute this unchanged persistence snapshot.
+  const compactedBiomechanics = useMemo(() => compactBiomechanicsSession(biomechanics), [biomechanics]);
   const [biomechanicsRunning, setBiomechanicsRunning] = useState(false);
   const [autoAnalysisRunning, setAutoAnalysisRunning] = useState(false);
   const [analysisScope, setAnalysisScope] = useState<AnalysisScope>("full");
@@ -836,6 +841,7 @@ function App() {
       setAttemptDate(session.date);
       setSessionNotes(session.notes);
       setTimestamps(session.timestamps);
+      setPracticeRevealContext(analysisContextRef.current);
       setSessionStatus("Synthetic practice opened. Inspect the reference timing, review Hold 10, then save this attempt.");
     } catch (error) {
       if (videoSession.isCurrent(ticket)) setVideoLoadError(error instanceof Error ? error.message : "Could not open the practice recording.");
@@ -2991,7 +2997,7 @@ function App() {
       },
       timestamps,
       splitCalculations: buildSplitMap(splitRows),
-      biomechanics: compactBiomechanicsSession(biomechanics),
+      biomechanics: compactedBiomechanics,
     };
   }
 
@@ -3334,9 +3340,14 @@ function App() {
     sessionName, climberName, attemptDate, attemptLocation, attemptType, sessionNotes, metadata, zones, startLightCalibration,
     startSearchStart, startSearchEnd, startSensitivity, startLightVisibility, startDetectionProfile, reactionTimeOffset,
     startSignalOffset, movementSensitivity, firstMovementDefinition, committedLaunchMinDelay, firstMovementOffset,
-    officialTotalTime, timestamps, biomechanics, splitRows, savedSessions]);
-  const openAttemptSaved = useMemo(() => isSessionSnapshotSaved(openSnapshot, savedSessions.find(session => session.id === activeSessionId)),
-    [openSnapshot, savedSessions, activeSessionId]);
+    officialTotalTime, timestamps, compactedBiomechanics, splitRows, savedSessions]);
+  const activeSavedSession = savedSessions.find(session => session.id === activeSessionId);
+  const openEditableKey = useMemo(() => savedSessionEditableKey(openSnapshot), [openSnapshot]);
+  const storedEditableKey = useMemo(() => activeSavedSession ? savedSessionEditableKey(activeSavedSession) : undefined, [activeSavedSession]);
+  const openBiomechanicsKey = useMemo(() => savedBiomechanicsKey(compactedBiomechanics), [compactedBiomechanics]);
+  const storedBiomechanicsKey = useMemo(() => savedBiomechanicsKey(activeSavedSession?.biomechanics), [activeSavedSession?.biomechanics]);
+  const openAttemptSaved = !!activeSavedSession && activeSavedSession.id === openSnapshot.id &&
+    openEditableKey === storedEditableKey && openBiomechanicsKey === storedBiomechanicsKey;
   const canCompareSaved = useMemo(() => savedSessions.some(session =>
     resolveAttemptLineageId(session) !== resolveAttemptLineageId(openSnapshot) && hasComparableTiming(session)), [savedSessions, openSnapshot]);
   const practicePairSaved = useMemo(() => ["a", "b"].every(id => savedSessions.some(session =>
@@ -3491,6 +3502,7 @@ function App() {
           {(!hasOpenAttempt || practiceIdForLineage(attemptLineageId)) && <PracticeWalkthrough
             active={practiceIdForLineage(attemptLineageId)} disabled={videoAnalysisRunning || !libraryReady} canReview={hasLoadedVideo}
             saved={openAttemptSaved} holdReviewed={getTimestamp(timestamps, "hold10").acceptanceMode === "frame-review"} bothSaved={practicePairSaved}
+            revealRequested={practiceRevealContext !== null && practiceRevealContext === analysisContextRef.current} onRevealHandled={() => setPracticeRevealContext(null)}
             onOpen={id => { void openPractice(id); }}
             onInspect={event => {
               const reference = practiceRecordings.find(item => item.id === practiceIdForLineage(attemptLineageId));
@@ -3548,7 +3560,7 @@ function App() {
               {!autoAnalysisRunning && suggestedStartRawTime !== null && (
                 <button
                   className="primary"
-                  onClick={() => reviewTimestamp({
+                  onClickCapture={focusReviewOpener} onClick={() => reviewTimestamp({
                     label: "Quick Analyze start",
                     suggestedRawTime: Math.max(0, roundTime(suggestedStartRawTime + startSignalOffset)),
                     confidence: startResult?.confidence ?? "Medium",
@@ -3791,7 +3803,7 @@ function App() {
           {activeHold10SecondPass && <Suspense fallback={<p className="muted">Preparing Hold 10 evidence…</p>}>
             <Hold10SecondPassPanel result={activeHold10SecondPass} disabled={videoAnalysisRunning} onReview={reviewRefinedHold10} />
           </Suspense>}
-          {!visibleTimestampReview && <button disabled={videoAnalysisRunning || !hasLoadedVideo || startSignalRaw === null} onClick={openGuidedFinishReview}>Review finish / mark pad</button>}
+          <button style={visibleTimestampReview ? { display: "none" } : undefined} disabled={videoAnalysisRunning || !hasLoadedVideo || startSignalRaw === null} onClickCapture={focusReviewOpener} onClick={openGuidedFinishReview}>Review finish / mark pad</button>
           {videoRestoreStatus && <p className="status-message">{videoRestoreStatus}</p>}
         </Card>
 
@@ -4199,7 +4211,7 @@ function App() {
               <div className="button-row review-first-actions">
                 <button
                   className="primary"
-                  onClick={() => reviewTimestamp({
+                  onClickCapture={focusReviewOpener} onClick={() => reviewTimestamp({
                     kind: "finish", label: "Suggested finish",
                     suggestedRawTime: finishResult.rawTime!,
                     confidence: finishResult.confidence,
@@ -4224,7 +4236,7 @@ function App() {
               <p className="muted">These are not verified finish events. Digits, clothing, and reflections can change color. Use the full video to locate actual pad contact.</p>
               <div className="button-row">
                 {finishResult!.candidates!.slice(0, 5).map((candidate, index) => (
-                  <button key={`${candidate.rawTime}-${index}`} disabled={videoAnalysisRunning} onClick={() => reviewTimestamp({
+                  <button key={`${candidate.rawTime}-${index}`} disabled={videoAnalysisRunning} onClickCapture={focusReviewOpener} onClick={() => reviewTimestamp({
                     kind: "finish", label: "Unverified color change — locate actual finish contact",
                     suggestedRawTime: candidate.rawTime,
                     confidence: "Low", acceptLabel: "Set manual finish",
@@ -4266,7 +4278,7 @@ function App() {
               <div className="button-row review-first-actions">
                 <button
                   className="primary"
-                  onClick={() => reviewTimestamp({
+                  onClickCapture={focusReviewOpener} onClick={() => reviewTimestamp({
                     kind: "finish", label: "Official-time finish",
                     suggestedRawTime: finishSuggestion.rawTime,
                     confidence: "High",
@@ -4322,7 +4334,7 @@ function App() {
                           <>
                             <button
                               disabled={videoAnalysisRunning}
-                              onClick={() => reviewTimestamp({
+                              onClickCapture={focusReviewOpener} onClick={() => reviewTimestamp({
                                 label: item.label,
                                 suggestedRawTime: item.rawTime!,
                                 confidence: item.confidence,
@@ -4401,10 +4413,10 @@ function App() {
                     : hold10Target.reason}</small>
                 </div>
                 {acceptedHold10.rawTime === null && activeHold10SecondPass && (
-                  <button disabled={videoAnalysisRunning} onClick={() => reviewRefinedHold10(activeHold10SecondPass.evidence.candidateRawTime)}>Review close-up evidence</button>
+                  <button disabled={videoAnalysisRunning} onClickCapture={focusReviewOpener} onClick={() => reviewRefinedHold10(activeHold10SecondPass.evidence.candidateRawTime)}>Review close-up evidence</button>
                 )}
                 {acceptedHold10.rawTime === null && !activeHold10SecondPass && hold10Contact?.detected && hold10Contact.rawTime !== undefined && (
-                  <button onClick={() => reviewTimestamp({
+                  <button onClickCapture={focusReviewOpener} onClick={() => reviewTimestamp({
                     label: "Detected Hold 10 hand contact",
                     suggestedRawTime: hold10Contact.rawTime!,
                     confidence: hold10Contact.confidence,
@@ -4420,7 +4432,7 @@ function App() {
                   </button>
                 )}
                 {acceptedHold10.rawTime === null && !activeHold10SecondPass && !hold10Contact?.detected && hold10HeightEstimate?.detected && hold10HeightEstimate.rawTime !== undefined && (
-                  <button onClick={() => reviewTimestamp({
+                  <button onClickCapture={focusReviewOpener} onClick={() => reviewTimestamp({
                     label: "Possible Hold 10 height passage",
                     suggestedRawTime: hold10HeightEstimate.rawTime!,
                     confidence: "Low",
@@ -4963,7 +4975,7 @@ function DetectionCard({
       <DetectionDebugSummary result={result} />
       <p className="muted">Jump target: {jumpTarget.toFixed(3)}s raw</p>
       <div className="button-row review-first-actions">
-        <button className="primary" onClick={onReview ?? (() => onJump(0))}>Review at video</button>
+        <button className="primary" onClickCapture={onReview ? focusReviewOpener : undefined} onClick={onReview ?? (() => onJump(0))}>Review at video</button>
         <button onClick={onReject}>Reject</button>
       </div>
       <details className="candidate-advanced">
@@ -5130,7 +5142,7 @@ function CandidateRow({
       </div>
       <div className="candidate-actions">
         {!compact && <button onClick={() => onJumpCandidate?.(candidate, -0.1)}>Jump -0.10s</button>}
-        <button onClick={() => onReviewCandidate ? onReviewCandidate(candidate) : onJumpCandidate?.(candidate, 0)}>
+        <button onClickCapture={onReviewCandidate ? focusReviewOpener : undefined} onClick={() => onReviewCandidate ? onReviewCandidate(candidate) : onJumpCandidate?.(candidate, 0)}>
           {compact ? "Review at video" : "Jump exact"}
         </button>
         {!compact && <button onClick={() => onJumpCandidate?.(candidate, 0.1)}>Jump +0.10s</button>}

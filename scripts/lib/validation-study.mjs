@@ -55,8 +55,9 @@ export function parseLabelWorksheet(text) {
     assert(values.length === headers.length, `Label row ${index + 2} has the wrong column count.`);
     const result = Object.fromEntries(headers.map((header, i) => [header, values[i]]));
     for (const key of ["labelReview.rawTime", "lastBeforeRawTime", "firstAfterRawTime", "officialTotalSeconds"]) {
-      if (result[key] !== undefined && result[key] !== "") {
-        const value = Number(result[key]); assert(finite(value), `Invalid ${key} in label row ${index + 2}.`); result[key] = value;
+      const numericText = result[key]?.trim();
+      if (numericText) {
+        const value = Number(numericText); assert(finite(value), `Invalid ${key} in label row ${index + 2}.`); result[key] = value;
       } else result[key] = null;
     }
     if (result["labelReview.independentOfDetector"] !== undefined) {

@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
+import { focusReviewOpener } from "../lib/reviewFocus";
 import "./MobileWorkflow.css";
 
 export interface MobileWorkflowProps {
@@ -183,7 +184,7 @@ export function NextStepCard({ stage, status, onAnalyze, onReview, onChooseVideo
         <p className="next-step-description">{copy.description}</p>
         {status ? <p className="next-step-status" role="status">{status}</p> : null}
       </div>
-      {action ? <button type="button" className="next-step-action" onClick={action.onClick}>{action.label}<span aria-hidden="true">→</span></button> : null}
+      {action ? <button type="button" className="next-step-action" onClickCapture={stage === "review-start" || stage === "review-finish" ? focusReviewOpener : undefined} onClick={action.onClick}>{action.label}<span aria-hidden="true">→</span></button> : null}
       {stage === "analyzing" && onCancel ? <button type="button" className="next-step-cancel" onClick={onCancel}>Cancel analysis</button> : null}
       {stage === "results" ? <a className="next-step-action" href={saved ? canCompare ? "#attempt-comparison" : "#upload" : "#save-analysis"}>
         {saved ? canCompare ? "Compare saved attempts" : "Open another recording" : "Save this attempt"}<span aria-hidden="true">→</span></a> : null}

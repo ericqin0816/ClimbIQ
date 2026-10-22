@@ -104,6 +104,24 @@ test("phone frame review keeps its evidence and acceptance action above navigati
     await page.getByRole("button", { name: "Close review", exact: true }).click();
     await expect(page.getByRole("button", { name: "Review practice Hold 10", exact: true })).toBeFocused();
   }
+  const finishOpener = page.getByRole("button", { name: "Review finish / mark pad", exact: true });
+  await finishOpener.click();
+  await expect(page.locator(".timestamp-review")).toBeFocused();
+  await page.getByRole("button", { name: "Close review", exact: true }).click();
+  await expect(finishOpener).toBeFocused();
+});
+
+test("opening practice lands at its current review action on a phone", async ({ page }, testInfo) => {
+  test.skip(process.platform === "win32" && testInfo.project.name.startsWith("webkit"), "Phone media landing is verified by macOS WebKit CI.");
+  await page.setViewportSize({ width: 320, height: 568 });
+  await page.goto("/");
+  await page.getByRole("button", { name: "Try a practice recording", exact: true }).click();
+  const review = page.getByRole("button", { name: "Review practice Hold 10", exact: true });
+  await expect(review).toBeFocused();
+  const bounds = await review.boundingBox();
+  const navigation = await page.locator(".mobile-workflow").evaluate(element => element.getBoundingClientRect().top);
+  expect(bounds!.y).toBeGreaterThanOrEqual(0);
+  expect(bounds!.y + bounds!.height).toBeLessThanOrEqual(navigation);
 });
 
 async function importComparison(page: Page, personal = false) {
@@ -131,6 +149,35 @@ test("known practice pair prepares together and replays the largest reviewed pha
   await expect(replay).toBeEnabled();
   await replay.click();
   await expect.poll(() => page.locator(".comparison-players video").evaluateAll(videos => videos.every(video => (video as HTMLVideoElement).currentTime > 1.1))).toBe(true);
+  await expect(page.locator(".comparison-playback-status")).toContainText("Bottom: start → Hold 10");
+  await expect(page.getByRole("button", { name: "Replay bottom phase", exact: true })).toHaveAttribute("aria-pressed", "true");
+  const frames = await page.locator(".comparison-players video").evaluateAll(videos => videos.map(video => {
+    const box = video.getBoundingClientRect(); return { top: box.top, bottom: box.bottom };
+  }));
+  expect(Math.abs(frames[0].top - frames[1].top)).toBeLessThanOrEqual(1);
+  const unobscuredBottom = await page.evaluate(() => {
+    const nav = document.querySelector(".mobile-workflow");
+    return nav && nav.getClientRects().length ? nav.getBoundingClientRect().top : innerHeight;
+  });
+  for (const frame of frames) {
+    expect(frame.top).toBeGreaterThanOrEqual(0);
+    expect(frame.bottom).toBeLessThanOrEqual(unobscuredBottom);
+  }
+  await page.screenshot({ path: testInfo.outputPath("reviewed-phase-replay.png") });
+  if (testInfo.project.name.includes("phone")) {
+    await page.setViewportSize({ width: 320, height: 568 });
+    await replay.click();
+    const shortFrames = await page.locator(".comparison-players video").evaluateAll(videos => videos.map(video => {
+      const box = video.getBoundingClientRect(); return { top: box.top, bottom: box.bottom };
+    }));
+    const navigation = await page.locator(".mobile-workflow").evaluate(element => element.getBoundingClientRect().top);
+    expect(Math.abs(shortFrames[0].top - shortFrames[1].top)).toBeLessThanOrEqual(1);
+    for (const frame of shortFrames) {
+      expect(frame.top).toBeGreaterThanOrEqual(0);
+      expect(frame.bottom).toBeLessThanOrEqual(navigation);
+    }
+    await page.screenshot({ path: testInfo.outputPath("short-phone-reviewed-phase.png") });
+  }
 });
 
 test("a mismatched bundled recording never receives automatic identity confirmation", async ({ page }, testInfo) => {

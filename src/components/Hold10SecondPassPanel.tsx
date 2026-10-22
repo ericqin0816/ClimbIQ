@@ -1,4 +1,5 @@
 import type { Hold10SecondPassResult } from "../lib/hold10SecondPass";
+import { focusReviewOpener } from "../lib/reviewFocus";
 import "./Hold10SecondPassPanel.css";
 
 export default function Hold10SecondPassPanel({ result, disabled, onReview }: {
@@ -28,7 +29,7 @@ export default function Hold10SecondPassPanel({ result, disabled, onReview }: {
     </p>
     <p className="hold10-filmstrip-explanation">Scroll through the approach and both available estimates. Extra lead-in frames provide visual context beyond the closer tracking pass. Select a frame to inspect the full video; this does not accept contact.</p>
     <div className="hold10-evidence-frames" role="group" aria-label="Scrollable Hold 10 context filmstrip">
-      {previews.map(frame => <button type="button" key={frame.rawTime} onClick={() => onReview(frame.rawTime)} disabled={disabled}
+      {previews.map(frame => <button type="button" key={frame.rawTime} onClickCapture={focusReviewOpener} onClick={() => onReview(frame.rawTime)} disabled={disabled}
         data-raw-time={frame.rawTime} data-timestamp-method={frame.timestampMethod ?? "seek-cursor"}
         aria-label={`Review Hold 10 ${frame.label.toLowerCase()} at ${frame.rawTime.toFixed(3)} seconds`}>
         <img src={frame.imageUrl} alt={`${frame.label} near Hold 10 at ${frame.rawTime.toFixed(3)} seconds`} />

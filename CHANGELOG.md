@@ -3,6 +3,21 @@
 User-facing changes and their limits. Detailed experiments and regression
 observations are recorded in [benchmarks](benchmarks).
 
+## Review refinements — 2026-10-22
+
+- Fixed keyboard wall-corner editing, malformed imported session fields, and
+  local attempt dates. Phone frame-review evidence and acceptance controls remain
+  above fixed navigation, and closing review restores its opener.
+- Made practice visible on the first screen, linked meaningful reviewed phase
+  changes directly to replay, and added one verified preparation action for the
+  bundled synthetic pair. Personal recordings retain explicit confirmation.
+- Made save guidance reflect unsaved content, extracted dataset/report
+  serialization, and retained the accepted Start build separately from the
+  exporter through save, import, correction, and reload.
+- Applied production headers to browser verification, added provenance workflows,
+  and tightened independent-study evidence and adjudication checks. Details and
+  evidence limits are in the [three-round review](docs/review-cycles-2026-10-22.md).
+
 ## 0.30.0 — 2026-10-22
 
 - Integrated the saved-library concurrency, staged replacement-video decoding,

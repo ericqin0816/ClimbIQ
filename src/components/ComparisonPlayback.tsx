@@ -37,6 +37,8 @@ export default function ComparisonPlayback({ baseline, candidate, preferredPhase
   const practicePair = baselinePractice !== null && candidatePractice !== null && baselinePractice !== candidatePractice;
   const practicePairReady = canReplay && SIDES.every(side => verifiedPractice[side]);
   const canReplayPreferred = canReplay && preferredPhase && comparisonPlaybackRange(baseline, preferredPhase) && comparisonPlaybackRange(candidate, preferredPhase);
+  const phaseLabel = phase === "bottom" ? "Bottom: start → Hold 10" : phase === "top" ? "Top: Hold 10 → finish" : "Whole attempt";
+  const playbackStatus = seeking ? "Preparing frame" : playing ? "Playing" : maximum > 0 && elapsed >= maximum ? "Finished" : elapsed > 0 ? "Paused" : "Ready";
 
   function pause() {
     playbackActive.current = false;
@@ -130,6 +132,7 @@ export default function ComparisonPlayback({ baseline, candidate, preferredPhase
     const token = operation.current;
     const pair = { baseline: comparisonPlaybackRange(baseline, nextPhase), candidate: comparisonPlaybackRange(candidate, nextPhase) };
     if (SIDES.some(side => loading[side]) || !SIDES.every(side => confirmed[side] && ready[side] && pair[side])) return;
+    if (play) document.getElementById("comparison-replay")?.scrollIntoView({ block: "start", behavior: "instant" });
     setSeeking(true);
     setPhase(nextPhase);
     setMessage("");
@@ -179,34 +182,51 @@ export default function ComparisonPlayback({ baseline, candidate, preferredPhase
 
   return <section id="comparison-replay" tabIndex={-1} className="comparison-playback" aria-label="Synchronized comparison replay">
     <h3>Replay the section that changed</h3>
-    <p>{practicePair ? "Prepare the two included practice recordings, then replay the changed phase."
-      : "Attach each original recording and confirm its attempt."} Replay uses equal elapsed time from each section's entry; the faster attempt stops at its own finish. Saved summaries do not contain videos.</p>
+    {!canReplay && <p>{practicePair ? "Prepare the two included practice recordings, then replay the changed phase."
+      : "Attach each original recording and confirm its attempt."}</p>}
     <div className="comparison-replay-next">
       {practicePair && !practicePairReady && <button className="primary" disabled={seeking || SIDES.some(side => loading[side])} onClick={preparePracticePair}>Prepare practice replay</button>}
       {preferredPhase && <button className={canReplayPreferred ? "primary" : undefined} disabled={!canReplayPreferred || seeking} onClick={() => { void position(preferredPhase, 0, true); }}>Replay changed {preferredPhase} phase</button>}
+      {!preferredPhase && <button className={canReplay ? "primary" : undefined} disabled={!canReplay || seeking} aria-pressed={phase === "total"} onClick={() => { void position("total", 0, true); }}>Replay whole attempt</button>}
+      {(canReplay || playing || seeking) && <button disabled={!playing && !seeking} onClick={pause}>Pause comparison</button>}
       {practicePairReady && <p role="status">Practice replay ready. Both bundled recordings are verified.</p>}
       {!practicePair && !canReplay && <p>Attach and confirm both recordings below to enable replay.</p>}
     </div>
-    <div className="comparison-players">{SIDES.map(side => <div key={side}>
-      <strong>{side === "baseline" ? "Baseline" : "New attempt"}: {sessions[side].name}</strong>
-      <label>Attach {side === "baseline" ? "baseline" : "new attempt"} recording<input type="file" accept="video/*" disabled={seeking || loading[side]} onChange={event => {
-        const file = event.target.files?.[0]; event.target.value = ""; if (file) void attach(side, file);
-      }} /></label>
-      {practiceIdForLineage(sessions[side].attemptLineageId ?? null) && <button disabled={loading[side] || seeking} onClick={() => { void attach(side); }}>Use {side === "baseline" ? "baseline" : "new attempt"} practice recording</button>}
-      {loading[side] && <p role="status">Checking recording…</p>}
-      {urls[side] && <>
-        <video key={urls[side]} ref={node => { if (node) players.current[side] = node; else delete players.current[side]; }} src={urls[side]} muted playsInline preload="auto"
-          onLoadedData={event => { if (event.currentTarget.src === sources.current[side]?.objectUrl && event.currentTarget.readyState >= 2) setReady(value => ({ ...value, [side]: true })); }}
-          onWaiting={event => { if (event.currentTarget.src === sources.current[side]?.objectUrl && playbackActive.current && !completedSides.current.has(side)) { pause(); setMessage("Playback buffered. Replay this section when the recordings are ready."); } }}
-          onError={event => { if (event.currentTarget.src !== sources.current[side]?.objectUrl) return; pause(); setReady(value => ({ ...value, [side]: false })); setMessage("This attached recording could not be decoded. Choose its original file again."); }} />
-        {verifiedPractice[side] ? <small className="comparison-verified">Verified bundled synthetic recording</small>
-          : <label className="comparison-recording-check"><input type="checkbox" checked={confirmed[side] === true} onChange={event => { pause(); setConfirmed(value => ({ ...value, [side]: event.target.checked })); }} />This is the original recording for {sessions[side].name}</label>}
-      </>}
-    </div>)}</div>
+    <p className="comparison-playback-status" role="status">{phaseLabel} · {playbackStatus}</p>
+    <div className={`comparison-players${canReplay ? " is-ready" : ""}`}>{SIDES.map(side => {
+      const column = side === "baseline" ? 1 : 2;
+      const sideReady = confirmed[side] === true && ready[side] === true;
+      return <div className="comparison-player" key={side}>
+        <strong className="comparison-player-name" style={{ gridColumn: column }}>{side === "baseline" ? "Baseline" : "New attempt"}: {sessions[side].name}</strong>
+        <div className="comparison-player-source" style={{ gridColumn: column }}>
+          <details className="comparison-change-recording" open={!sideReady}>
+            <summary hidden={!sideReady}>Change {side === "baseline" ? "baseline" : "new attempt"} recording</summary>
+            <div className="comparison-attachment-fields">
+              <label>Attach {side === "baseline" ? "baseline" : "new attempt"} recording<input type="file" accept="video/*" disabled={seeking || loading[side]} onChange={event => {
+                const file = event.target.files?.[0]; event.target.value = ""; if (file) void attach(side, file);
+              }} /></label>
+              {practiceIdForLineage(sessions[side].attemptLineageId ?? null) && <button disabled={loading[side] || seeking} onClick={() => { void attach(side); }}>Use {side === "baseline" ? "baseline" : "new attempt"} practice recording</button>}
+            </div>
+          </details>
+          {loading[side] && <p role="status">Checking recording…</p>}
+          {urls[side] && (verifiedPractice[side] ? <small className="comparison-verified">Verified bundled synthetic recording</small>
+            : <label className="comparison-recording-check"><input type="checkbox" checked={confirmed[side] === true} onChange={event => { pause(); setConfirmed(value => ({ ...value, [side]: event.target.checked })); }} />This is the original recording for {sessions[side].name}</label>)}
+        </div>
+        {urls[side] && <div className="comparison-player-media" style={{ gridColumn: column }}>
+          <video key={urls[side]} aria-label={`${side === "baseline" ? "Baseline" : "New attempt"} recording: ${sessions[side].name}`} ref={node => { if (node) players.current[side] = node; else delete players.current[side]; }} src={urls[side]} muted playsInline preload="auto"
+            onLoadedData={event => { if (event.currentTarget.src === sources.current[side]?.objectUrl && event.currentTarget.readyState >= 2) setReady(value => ({ ...value, [side]: true })); }}
+            onWaiting={event => { if (event.currentTarget.src === sources.current[side]?.objectUrl && playbackActive.current && !completedSides.current.has(side)) { pause(); setMessage("Playback buffered. Replay this section when the recordings are ready."); } }}
+            onError={event => { if (event.currentTarget.src !== sources.current[side]?.objectUrl) return; pause(); setReady(value => ({ ...value, [side]: false })); setMessage("This attached recording could not be decoded. Choose its original file again."); }} />
+        </div>}
+      </div>;
+    })}</div>
+    <details className="comparison-replay-help">
+      <summary>How replay is synchronized</summary>
+      <p>Replay uses equal elapsed time from each section's entry; the faster attempt stops at its own finish. Saved summaries do not contain videos.</p>
+    </details>
     <div className="button-row">
-      <button disabled={!canReplay || seeking} onClick={() => { void position("total", 0, true); }}>Replay whole attempt</button>
-      {(["bottom", "top"] as const).map(value => <button key={value} disabled={!canReplay || seeking || !comparisonPlaybackRange(baseline, value) || !comparisonPlaybackRange(candidate, value)} onClick={() => { void position(value, 0, true); }}>Replay {value} phase</button>)}
-      <button disabled={!playing && !seeking} onClick={pause}>Pause comparison</button>
+      {preferredPhase && <button disabled={!canReplay || seeking} aria-pressed={phase === "total"} onClick={() => { void position("total", 0, true); }}>Replay whole attempt</button>}
+      {(["bottom", "top"] as const).map(value => <button key={value} aria-pressed={phase === value} disabled={!canReplay || seeking || !comparisonPlaybackRange(baseline, value) || !comparisonPlaybackRange(candidate, value)} onClick={() => { void position(value, 0, true); }}>Replay {value} phase</button>)}
     </div>
     <label>Section elapsed: {elapsed.toFixed(2)}s<input aria-label="Comparison elapsed time" type="range" min="0" max={maximum || 1} step="0.033333" value={Math.min(maximum, elapsed)} disabled={!canReplay || seeking} onChange={event => { void position(phase, Number(event.target.value), false); }} /></label>
     <p className="muted">Bottom and top replay require a frame-reviewed Hold 10 marker in both attempts. Filename and duration matches alone never establish recording identity.</p>

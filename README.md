@@ -54,7 +54,9 @@ app cannot establish that a selected file belongs to an open attempt, choose
 **Attach to this attempt** only for the original recording, or start a new attempt.
 Matching filenames alone do not establish that they are the same climb.
 
-Comparison replay requires an explicit recording association on each side.
+Personal comparison recordings require an explicit association on each side.
+For the included practice pair, **Prepare practice replay** verifies and attaches
+both bundled synthetic recordings together. Replay remains a separate action.
 Playback uses equal elapsed time from each section's entry and stops each attempt
 at its own endpoint. Recent history groups annotation copies by attempt identity;
 correcting a marker cannot turn one climb into two performances.
@@ -133,6 +135,7 @@ Private videos are deliberately excluded from Git. See the
 
 - [Changelog](CHANGELOG.md): release changes and remaining limitations.
 - [October 22 iteration evidence](docs/iteration-2026-10-22.md): implementation, verification, agent ratings, and field work still required.
+- [Three subsequent review rounds](docs/review-cycles-2026-10-22.md): fixed scoring rubrics, findings, fixes, and verification.
 - [Analysis reference](docs/analysis-reference.md): detector behavior, calibration, review tools, saved sessions, and exports.
 - [Benchmark methodology](REAL_VIDEO_BENCHMARK.md): regression observations, label provenance, and known failures.
 - [Demo guide](COLLEGE_DEMO.md): a short walkthrough with results and limitations to discuss.

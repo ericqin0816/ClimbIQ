@@ -1,20 +1,32 @@
+import { useEffect, useRef } from "react";
 import "./PracticeWalkthrough.css";
 
-export default function PracticeWalkthrough({ active, disabled, canReview, saved, holdReviewed, bothSaved, onOpen, onInspect, onReviewHold, onSave }: {
+export default function PracticeWalkthrough({ active, disabled, canReview, saved, holdReviewed, bothSaved, revealRequested = false, onRevealHandled, onOpen, onInspect, onReviewHold, onSave }: {
   active: "a" | "b" | null;
   disabled: boolean;
   canReview: boolean;
   saved: boolean;
   holdReviewed: boolean;
   bothSaved: boolean;
+  revealRequested?: boolean;
+  onRevealHandled?: () => void;
   onOpen(id: "a" | "b"): void;
   onInspect(event: "start" | "finish"): void;
   onReviewHold(): void;
   onSave(): void;
 }) {
+  const walkthrough = useRef<HTMLElement>(null);
+  useEffect(() => {
+    if (!revealRequested || !active || !canReview || disabled) return;
+    const step = walkthrough.current?.querySelector<HTMLElement>('[aria-current="step"]');
+    if (!step) return;
+    step.scrollIntoView({ block: "center", behavior: "instant" });
+    step.querySelector<HTMLElement>("button.primary, a.primary")?.focus({ preventScroll: true });
+    onRevealHandled?.();
+  }, [revealRequested, active, canReview, disabled, onRevealHandled]);
   const next = !holdReviewed ? "review" : !saved ? "save" : bothSaved ? "compare" : "other";
   const other = active === "a" ? "b" : "a";
-  return <section className="practice-walkthrough" aria-label="Practice walkthrough">
+  return <section ref={walkthrough} className="practice-walkthrough" aria-label="Practice walkthrough">
     <div><strong>{active ? `Practice ${active.toUpperCase()}: check, save, compare` : "Try a practice recording"}</strong>
       <p>Two short synthetic animations with authored timing. Learn the workflow on this device, with no upload or account.</p>
     </div>
@@ -28,7 +40,7 @@ export default function PracticeWalkthrough({ active, disabled, canReview, saved
           <strong>{holdReviewed ? "Contact frame reviewed" : "Check the reference frames"}</strong>
           <p>Inspect the green start cue, finish-pad change, and yellow Hold 10 contact.</p>
           <div className="button-row"><button disabled={disabled || !canReview} onClick={() => onInspect("start")}>View practice start</button><button disabled={disabled || !canReview} onClick={() => onInspect("finish")}>View practice finish</button></div>
-          <button className={next === "review" ? "primary practice-main-action" : undefined} disabled={disabled || !canReview} onClick={onReviewHold}>Review practice Hold 10</button>
+          <button className={next === "review" ? "primary practice-main-action" : undefined} disabled={disabled || !canReview} onClick={event => { event.currentTarget.focus({ preventScroll: true }); onReviewHold(); }}>Review practice Hold 10</button>
         </li>
         <li className={next === "save" ? "practice-current" : saved ? "practice-complete" : undefined} aria-current={next === "save" ? "step" : undefined}>
           <strong>{saved ? `Practice ${active.toUpperCase()} saved` : "Save this attempt"}</strong>

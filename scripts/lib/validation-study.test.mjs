@@ -147,6 +147,13 @@ describe("independent validation report", () => {
 });
 
 describe("label worksheet parsing", () => {
+  it("keeps whitespace-only numeric cells unknown while preserving actual zero observations", () => {
+    const rows = parseLabelWorksheet('labelId,labelReview.rawTime,lastBeforeRawTime,firstAfterRawTime,officialTotalSeconds\nunknown,   ,\t,"  ", \nzero,0, 0 ,0.000,0\n');
+    for (const key of ["labelReview.rawTime", "lastBeforeRawTime", "firstAfterRawTime", "officialTotalSeconds"]) {
+      expect(rows[0][key]).toBeNull();
+      expect(rows[1][key]).toBe(0);
+    }
+  });
   it("preserves quoted methods, blank times, false declarations, and real zero times", () => {
     const rows = parseLabelWorksheet('labelId,labelReview.rawTime,labelReview.method,labelReview.independentOfDetector\r\na,0,"frame, audio\nsecond line",true\r\nb,,"said ""uncertain""",false\r\n');
     expect(rows[0]).toMatchObject({ "labelReview.rawTime": 0, "labelReview.method": "frame, audio\nsecond line", "labelReview.independentOfDetector": true });
