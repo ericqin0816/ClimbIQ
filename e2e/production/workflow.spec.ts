@@ -12,6 +12,8 @@ async function ready(page: Page) {
 async function openPractice(page: Page, id: "A" | "B") {
   const name = id === "A" ? /Open practice A(?: as a new attempt)?$/ : "Open practice B as a new attempt";
   await page.getByRole("button", { name }).click();
+  // The previous recording can still be ready while the candidate is decoding.
+  await expect(page.locator(".upload-dropzone strong")).toHaveText(`climbiq-practice-${id.toLowerCase()}.mp4`);
   await expect(page.locator(".video-meta-line")).toContainText("Ready");
   await expect(page.locator("#results .summary-primary-metric strong")).toHaveText(id === "A" ? "5.600s" : "5.200s");
 }
@@ -184,10 +186,12 @@ test("the shorter phase stops exactly at its reviewed endpoint while the other c
   test.skip(process.platform === "win32" && testInfo.project.name.startsWith("webkit"), "Endpoint media regression runs on macOS WebKit CI.");
   await prepareReplay(page);
   await page.getByRole("button", { name: "Replay bottom phase", exact: true }).click();
-  await expect.poll(() => page.locator(".comparison-players video").evaluateAll(videos => !(videos[0] as HTMLVideoElement).paused && (videos[1] as HTMLVideoElement).paused), { intervals: [50] }).toBe(true);
-  const clocks = await page.locator(".comparison-players video").evaluateAll(videos => videos.map(video => (video as HTMLVideoElement).currentTime));
-  expect(clocks[1]).toBeCloseTo(3.3, 2);
-  expect(clocks[0]).toBeLessThan(3.8);
+  // Capture clocks and playback state together. A second browser round trip can
+  // arrive after the remaining half-second section has also finished.
+  await expect.poll(() => page.locator(".comparison-players video").evaluateAll(videos => {
+    const [baseline, candidate] = videos as HTMLVideoElement[];
+    return !baseline.paused && candidate.paused && Math.abs(candidate.currentTime - 3.3) < .005 && baseline.currentTime < 3.8;
+  }), { intervals: [50] }).toBe(true);
 });
 
 test("calibration owns its decoder task and blocks overlapping session changes", async ({ page }, testInfo) => {

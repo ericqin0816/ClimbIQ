@@ -3692,7 +3692,7 @@ function App() {
           )}
           <RecordingGuide />
           {(!hasOpenAttempt || practiceIdForLineage(attemptLineageId)) && <PracticeWalkthrough
-            active={practiceIdForLineage(attemptLineageId)} disabled={videoAnalysisRunning || !libraryReady}
+            active={practiceIdForLineage(attemptLineageId)} disabled={videoAnalysisRunning || !libraryReady} canReview={hasLoadedVideo}
             onOpen={id => { void openPractice(id); }}
             onInspect={event => {
               const reference = practiceRecordings.find(item => item.id === practiceIdForLineage(attemptLineageId));
