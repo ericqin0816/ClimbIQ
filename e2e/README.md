@@ -9,6 +9,10 @@ save → synchronized comparison → reload, invalid replacements, filename/meta
 collisions, two-tab conflicts, JSON backups, and annotation lineage. A 320px
 Chromium viewport and a WebKit phone viewport check narrow layouts.
 
+Playwright clears only `test-results/production/`. Keep independent benchmark
+reports and visual review evidence elsewhere, such as `test-results/reviews/`;
+the browser suite must not delete those records when it starts.
+
 The two bundled MP4s are original CC0 geometric animations with authored timing,
 not real climbs or independent labels. `npm run fixtures:generate` regenerates
 them with FFmpeg (`CLIMBIQ_FFMPEG` overrides its location). The manifest contains

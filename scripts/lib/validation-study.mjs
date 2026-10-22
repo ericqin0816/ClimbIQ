@@ -87,6 +87,15 @@ function referenceFor(rows, event) {
     `Confirmed adjudication for ${rows[0]?.clipId}/${event} must reference exactly two existing original label IDs from this clip/event.`);
   const originals = reviewers.filter(row => references.has(row.labelId));
   const differentPeople = new Set(originals.map(row => row["labelReview.reviewerId"])).size >= 2;
+  if (adjudication && originals.length === 2) {
+    assert(originals.every(row => Date.parse(row["labelReview.reviewedAt"]) <= Date.parse(adjudication["labelReview.reviewedAt"])),
+      `Adjudication for ${rows[0]?.clipId}/${event} predates an original review.`);
+    const bracketed = originals.every(row => finite(row.lastBeforeRawTime) && finite(row.firstAfterRawTime));
+    const bracketsDisjoint = bracketed && (originals[0].firstAfterRawTime < originals[1].lastBeforeRawTime ||
+      originals[1].firstAfterRawTime < originals[0].lastBeforeRawTime);
+    assert(!bracketsDisjoint || nonempty(adjudication.notes),
+      `Adjudication for ${rows[0]?.clipId}/${event} requires a documented resolution of nonoverlapping observation brackets.`);
+  }
   const comparable = reviewers.length === 2 && reviewers[0].evidenceSource === reviewers[1].evidenceSource;
   const agreement = comparable ? Math.abs(reviewers[0]["labelReview.rawTime"] - reviewers[1]["labelReview.rawTime"]) : null;
   const definitionMatches = originals.every(row => row.evidenceSource === adjudication?.evidenceSource);

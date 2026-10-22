@@ -268,6 +268,10 @@ async function verifySavedWorkflow({ evaluate, send }) {
   const validFrames = saved.biomechanics?.result?.metrics?.validFrames ?? 0;
   const savedNativeFrames = saved.biomechanics?.result?.frames?.filter(frame => Number.isFinite(frame.decodedFrameRawTime)).length ?? 0;
   const timingDataset = await captureDatasetExport(evaluate);
+  if (!saved.analysisBuild || JSON.stringify(saved.analysisBuild) !== JSON.stringify(timingDataset.analysisBuild) ||
+      JSON.stringify(timingDataset.analysisBuild) !== JSON.stringify(timingDataset.exportBuild)) {
+    throw new Error('Accepted detector Start did not retain the actual execution build in saved analysis and dataset provenance.');
+  }
   const laneAudit = timingDataset.startLaneEvidenceAudit;
   if (!laneAudit || laneAudit.isGroundTruthLabel !== false || !Array.isArray(laneAudit.entries) ||
       laneAudit.entries.filter(entry => entry.selected).length > 1 ||
@@ -473,6 +477,9 @@ async function verifyHold10Review({ evaluate, send }, saved) {
     throw new Error('An unsaved Start edit unexpectedly overwrote the saved library.');
   }
   const editedDataset = await captureDatasetExport(evaluate);
+  if (JSON.stringify(editedDataset.analysisBuild) !== JSON.stringify(saved.analysisBuild)) {
+    throw new Error('Manual correction reassigned the original detector Start build.');
+  }
   const exportedAcceptance = editedDataset.acceptedTimestamps;
   if (expectedNativeFrames && editedDataset.sourceFrameTimingAudit !== null) throw new Error('An edited Start retained stale source-frame audit evidence.');
   const editedStart = exportedAcceptance.find(marker => marker.markerId === 'startSignal');

@@ -9,6 +9,8 @@ import { ChangeEvent, CSSProperties, DragEvent, lazy, PointerEvent, Suspense, Sy
 import { Capacitor } from "@capacitor/core";
 import { useLibraryController } from "./lib/useLibraryController";
 import { resolveAttemptLineageId } from "./lib/attemptIdentity";
+import { isSessionSnapshotSaved } from "./lib/sessionSavedState";
+import { hasComparableTiming } from "./lib/attemptComparison";
 import { exportTextFile, exportResultMessage } from "./lib/exportFile";
 import { MobileWorkflow, NextStepCard } from "./components/MobileWorkflow";
 import RecordingGuide from "./components/RecordingGuide";
@@ -23,7 +25,8 @@ import TimestampReviewPanel from "./components/TimestampReviewPanel";
 import type { FinishReviewScan } from "./lib/finishReview";
 import type { FinishPadRecovery } from "./lib/finishPadRecoveryScan";
 import { readDecodedVideoFrameTime, sourceFrameStepTarget } from "./lib/decodedVideoFrame";
-import { summarizeSourceSampleTiming } from "./lib/sourceSampleTiming";
+import { buildSplitMap, createSessionDataset } from "./lib/sessionExport";
+import { createSessionReport } from "./lib/sessionReport";
 import { useVideoFramePresentation } from "./lib/useVideoFramePresentation";
 import { resolvePresentedFrameTime } from "./lib/videoFramePresentation";
 import {
@@ -40,7 +43,6 @@ import { assessCameraStability, assessSceneContinuity } from "./lib/cameraStabil
 import { assessStartLightArtifacts } from "./lib/startArtifactAudit";
 import { detectFirstMovement } from "./lib/detectFirstMovement";
 import { detectFinishSignal } from "./lib/detectFinishSignal";
-import { yamlNumber, yamlString } from "./lib/exportFormatting";
 import { calculateHold10PhaseSplits } from "./lib/hold10Splits";
 import { detectAutomaticStartLight, type GreenBlueLaneCandidate } from "./lib/detectAutomaticStartLight";
 import { detectAudioStartSignal, type AudioStartResult } from "./lib/detectAudioStartSignal";
@@ -66,7 +68,7 @@ import { associateStartLanes, startLaneId, type AnalysisLaneCandidate, type Star
 import { prepareFinishLaneCandidates } from "./lib/finishLaneEvidence";
 import { assessAutomaticStartBodyAudit } from "./lib/startBodyAudit";
 import { deriveAutomaticStartBodyZone, resolveAnalysisBodyZone } from "./lib/startRegion";
-import { applyTimestampAcceptance, clearMarkerTimestamp, sanitizeTimestampSequence, timestampAcceptanceAudit } from "./lib/timestampIntegrity";
+import { applyTimestampAcceptance, clearMarkerTimestamp, sanitizeTimestampSequence } from "./lib/timestampIntegrity";
 import { finishPrecisionNote, timingConfidence } from "./lib/timingEvidence";
 import { captureFrame, captureVideoPixels, clamp, hasUsableVideoMetadata, roundTime, sampleFrameAt, sampleZoneOpponentColor, seekTo } from "./lib/videoFrameSampler";
 import { getVideoUiState } from "./lib/videoUiState";
@@ -2864,244 +2866,14 @@ function App() {
     }
   }
 
-  function buildDetectionWarnings() {
-    const warnings: string[] = [];
-    if (startResult?.debug.failureReason) {
-      warnings.push(startResult.debug.failureReason);
-    }
-    if (movementResult?.debug.failureReason) {
-      warnings.push(movementResult.debug.failureReason);
-    }
-    if (finishResult?.debug.failureReason) {
-      warnings.push(finishResult.debug.failureReason);
-    }
-    if (movementResult?.debug.movementAlreadyUnderway) {
-      warnings.push("Movement appears to already be underway near Start Signal.");
-    }
-    if (movementResult?.debug.suspiciousFirstFrameDetection) {
-      warnings.push("First Movement candidate occurred at the first sampled frame.");
-    }
-    if (startResult?.debug.sceneContinuity?.assessable && !startResult.debug.sceneContinuity.continuous) {
-      warnings.push(startResult.debug.sceneContinuity.reason);
-    }
-    if (zones.startLight && zoneArea(zones.startLight) > 0.05) {
-      warnings.push("Start Light Zone may be large for light detection.");
-    }
-    if (zones.startBody && zoneArea(zones.startBody) > 0.3) {
-      warnings.push("Start Body Zone is large and may include background motion.");
-    }
-    return warnings;
-  }
-
-  function formatCalibrationNote() {
-    if (!startLightCalibration.colorDelta) {
-      return "Not set";
-    }
-    return `Before ${formatRgb(startLightCalibration.beforeStartRGB)}, after ${formatRgb(startLightCalibration.afterStartRGB)}, delta ${startLightCalibration.colorDelta.toFixed(3)}.`;
-  }
-
   function buildDatasetExport() {
-    const session = buildSessionSnapshot();
-    const splits = buildSplitMap(splitRows);
-    const acceptedTimestamps = timestamps.map((item) => ({
-      markerId: item.id,
-      label: item.label,
-      acceptedRawTime: item.rawTime,
-      climbTime: item.climbTime,
-      detectedRawTime: item.detectedRawTime ?? null,
-      offsetApplied: item.offsetApplied ?? 0,
-      source: item.source,
-      confidence: item.confidence,
-      observationIntervalSeconds: item.observationIntervalSeconds ?? null,
-      ...timestampAcceptanceAudit(item),
-      userAdjusted: item.rawTime !== null && item.detectedRawTime !== undefined && item.detectedRawTime !== null
-        ? Math.abs(item.rawTime - item.detectedRawTime) > 0.001
-        : false,
-      note: item.note ?? "",
-    }));
-
-    return {
-      appVersion: APP_VERSION,
-      exportBuild: APP_BUILD,
-      analysisBuild: session.analysisBuild ?? null,
-      exportTimestamp: new Date().toISOString(),
-      session: {
-        sessionId: session.id,
-        attemptLineageId: session.attemptLineageId,
-        sessionName: session.name,
-        climberName: session.climberName,
-        date: session.date,
-        notes: session.notes,
-        location: session.location,
-        gym: session.location,
-        attemptType: session.attemptType,
-      },
-      video: {
-        fileName: metadata?.fileName ?? session.videoFileName ?? "",
-        duration: metadata?.duration ?? null,
-        videoWidth: metadata?.videoWidth ?? null,
-        videoHeight: metadata?.videoHeight ?? null,
-        officialTotalTime: parseOptionalNumber(officialTotalTime),
-      },
-      zones: {
-        startLightZone: zones.startLight ?? null,
-        startBodyZone: zones.startBody ?? null,
-        hold10Zone: zones.hold10 ?? null,
-        finishLightZone: zones.finishLight ?? null,
-        finishPadZone: zones.finishPad ?? null,
-      },
-      calibration: {
-        beforeStartRGB: startLightCalibration.beforeStartRGB ?? null,
-        afterStartRGB: startLightCalibration.afterStartRGB ?? null,
-        calibrationFrameBeforeTime: startLightCalibration.calibrationFrameBeforeTime ?? null,
-        calibrationFrameAfterTime: startLightCalibration.calibrationFrameAfterTime ?? null,
-        colorDelta: startLightCalibration.colorDelta ?? null,
-      },
-      settings: session.settings,
-      acceptedTimestamps,
-      candidates: {
-        startSignal: exportCandidates(startResult?.candidates ?? [], getTimestamp(timestamps, "startSignal")),
-        firstMovement: exportCandidates(movementResult?.candidates ?? [], getTimestamp(timestamps, "firstMovement")),
-        committedLaunch: exportCandidates(movementResult?.candidates ?? [], getTimestamp(timestamps, "committedLaunch")),
-        finishPad: exportCandidates(finishResult?.candidates ?? [], getTimestamp(timestamps, "finishPad")),
-      },
-      splitCalculations: splits,
-      sourceFrameTimingAudit: effectiveBiomechanicsResult ? summarizeSourceSampleTiming(effectiveBiomechanicsResult.frames) : null,
-      hold10PhaseAnalysis: {
-        available: hold10PhaseSplits.available,
-        startToHold10Seconds: hold10PhaseSplits.startToHold10Seconds ?? null,
-        hold10ToFinishSeconds: hold10PhaseSplits.hold10ToFinishSeconds ?? null,
-        bottomPhaseShare: hold10PhaseSplits.hold10Share ?? null,
-        topPhaseShare: hold10PhaseSplits.hold10Share === undefined ? null : roundTime(1 - hold10PhaseSplits.hold10Share),
-        slowerPhase: hold10PhaseSplits.slowerPhase ?? null,
-        phaseDifferenceSeconds: hold10PhaseSplits.phaseDifferenceSeconds ?? null,
-        confidence: hold10PhaseSplits.confidence,
-        reason: hold10PhaseSplits.reason,
-      },
-      hold10SecondPassEvidence: activeHold10SecondPass?.evidence ?? null,
-      detectionWarnings: buildDetectionWarnings(),
-      automationAudit: {
-        startEvidence: startEvidenceStatus || null,
-        automaticAnalysis: autoAnalysisStatus || null,
-        finishAnalysis: finishStatus || null,
-      },
-      startLaneEvidenceAudit: {
-        scope: "current-analysis-only",
-        isGroundTruthLabel: false,
-        audioSearchHintTime: startResult?.debug.audioSearchHintTime ?? null,
-        audioConfidence: startResult?.debug.audioConfidence ?? null,
-        associationTime: startResult?.debug.laneAssociationTime ?? null,
-        entries: startResult?.debug.laneEvidence ?? [],
-        activeLightLaneId: zones.startLight ? startLaneId(zones.startLight) : null,
-      },
-      biomechanics,
-      athleteNotes: sessionNotes.trim(),
-    };
+    return createSessionDataset({ session: buildSessionSnapshot(), exportBuild: APP_BUILD, exportedAt: new Date().toISOString(),
+      biomechanics, effectiveBiomechanicsResult, startResult, movementResult, finishResult,
+      secondPassEvidence: activeHold10SecondPass?.evidence, startEvidenceStatus, autoAnalysisStatus, finishStatus });
   }
 
-  function buildObsidianMarkdown() {
-    const dataset = buildDatasetExport();
-    const start = getTimestamp(timestamps, "startSignal");
-    const earliest = getTimestamp(timestamps, "firstMovement");
-    const committed = getTimestamp(timestamps, "committedLaunch");
-    const firstHold = getTimestamp(timestamps, "firstHold");
-    const hold10 = getTimestamp(timestamps, "hold10");
-    const finish = getTimestamp(timestamps, "finishPad");
-    const splits = buildSplitMap(splitRows);
-    const calculatedTotal = splits["Calculated Total Time"];
-    const reactionTime = splits["Reaction Time"];
-    const launchDelay = splits["Launch Delay"];
-    const startToHold10 = splits["Start to Hold 10"];
-    const hold10ToFinish = splits["Hold 10 to Finish"];
-    const official = parseOptionalNumber(officialTotalTime);
-    const date = attemptDate || todayDateString();
-
-    return `---\n` +
-      `type: climbiq-attempt\n` +
-      `climber: ${yamlString(climberName)}\n` +
-      `date: ${yamlString(date)}\n` +
-      `session_name: ${yamlString(sessionName)}\n` +
-      `video_file: ${yamlString(metadata?.fileName ?? "")}\n` +
-      `official_time: ${yamlNumber(official)}\n` +
-      `reaction_time: ${yamlNumber(reactionTime)}\n` +
-      `launch_delay: ${yamlNumber(launchDelay)}\n` +
-      `start_to_hold_10: ${yamlNumber(startToHold10)}\n` +
-      `hold_10_to_finish: ${yamlNumber(hold10ToFinish)}\n` +
-      `bottom_phase_share: ${yamlNumber(hold10PhaseSplits.hold10Share)}\n` +
-      `top_phase_share: ${yamlNumber(hold10PhaseSplits.hold10Share === undefined ? null : roundTime(1 - hold10PhaseSplits.hold10Share))}\n` +
-      `slower_phase: ${yamlString(hold10PhaseSplits.slowerPhase ?? "Not set")}\n` +
-      `phase_difference: ${yamlNumber(hold10PhaseSplits.phaseDifferenceSeconds)}\n` +
-      `calculated_total_time: ${yamlNumber(calculatedTotal)}\n` +
-      `tags:\n` +
-      `  - climbiq\n` +
-      `  - speed-climbing\n` +
-      `  - training-log\n` +
-      `---\n\n` +
-      `# ClimbIQ Attempt - ${date}\n\n` +
-      `## Summary\n` +
-      `- Session: ${sessionName || "Not set"}\n` +
-      `- Climber: ${climberName || "Not set"}\n` +
-      `- Video file: ${metadata?.fileName ?? "Not set"}\n` +
-      `- Official time: ${formatExportTime(official)}\n` +
-      `- Calculated total: ${formatExportTime(calculatedTotal)}\n` +
-      `- Start → Hold 10: ${formatExportTime(startToHold10)}\n` +
-      `- Hold 10 → Finish: ${formatExportTime(hold10ToFinish)}\n` +
-      `- Phase balance: ${hold10PhaseSplits.available
-        ? `${(hold10PhaseSplits.hold10Share! * 100).toFixed(1)}% before / ${((1 - hold10PhaseSplits.hold10Share!) * 100).toFixed(1)}% after Hold 10; ${hold10PhaseSplits.slowerPhase === "balanced" ? "balanced" : `${hold10PhaseSplits.slowerPhase === "start-to-hold10" ? "bottom" : "top"} phase ${hold10PhaseSplits.phaseDifferenceSeconds!.toFixed(3)}s longer`}`
-        : "Not set"}\n` +
-      `- Attempt type: ${attemptType || "Not set"}\n` +
-      `- Location / gym: ${attemptLocation || "Not set"}\n` +
-      `- Notes: ${sessionNotes || "Not set"}\n\n` +
-      `## Accepted Timestamps\n\n` +
-      `| Marker | Raw Video Time | Climb Time | Source | Confidence | Offset |\n` +
-      `|---|---:|---:|---|---|---:|\n` +
-      markdownTimestampRow("Start Signal", start) +
-      markdownTimestampRow("Earliest Visible Motion", earliest) +
-      markdownTimestampRow("Committed Launch", committed) +
-      markdownTimestampRow("First Hold", firstHold) +
-      markdownTimestampRow("Hold 10", hold10) +
-      markdownTimestampRow("Finish Pad", finish) +
-      `\n## Splits\n\n` +
-      `| Split | Time |\n` +
-      `|---|---:|\n` +
-      markdownSplitRow("Reaction Time", splits) +
-      markdownSplitRow("Launch Delay", splits) +
-      markdownSplitRow("Preload Gap", splits) +
-      markdownSplitRow("Start to First Hold", splits) +
-      markdownSplitRow("Movement to First Hold", splits) +
-      markdownSplitRow("Start to Hold 10", splits) +
-      markdownSplitRow("First Hold to Hold 10", splits) +
-      markdownSplitRow("Hold 10 to Finish", splits) +
-      markdownSplitRow("Movement Time", splits) +
-      markdownSplitRow("Launch-to-Finish Time", splits) +
-      markdownSplitRow("Calculated Total Time", splits) +
-      `\n## Detection Notes\n` +
-      `- Start Signal: ${start.note || startResult?.reason || "Not set"}\n` +
-      `- First Movement: ${earliest.note || movementResult?.reason || "Not set"}\n` +
-      `- Calibration: ${formatCalibrationNote()}\n` +
-      `- Warnings: ${buildDetectionWarnings().join("; ") || "None"}\n\n` +
-      `## Athlete Notes\n` +
-      `Write observations here.\n\n` +
-      `## Review Questions\n` +
-      `- Where did I lose time?\n` +
-      `- Was the start reaction clean?\n` +
-      `- Was the launch delayed?\n` +
-      `- Did I lose more time before or after Hold 10?\n` +
-      `- What should I focus on next?\n\n` +
-      `## Machine Data\n\n` +
-      "```json\n" +
-      JSON.stringify({
-        session: dataset.session,
-        video: dataset.video,
-        timestamps: dataset.acceptedTimestamps,
-        splits: dataset.splitCalculations,
-        zones: dataset.zones,
-        calibration: dataset.calibration,
-        settings: dataset.settings,
-        biomechanics: dataset.biomechanics,
-        warnings: dataset.detectionWarnings,
-      }, null, 2) +
-      "\n```\n";
+  function buildObsidianMarkdown(dataset = buildDatasetExport()) {
+    return createSessionReport(dataset, { fallbackDate: todayDateString(), startReason: startResult?.reason, movementReason: movementResult?.reason });
   }
 
   async function copyObsidianNote() {
@@ -3171,8 +2943,10 @@ function App() {
 
     try {
       const baseName = slugify(sessionName || "climbiq-attempt");
-      await writeFileToDirectory(obsidianDirectoryHandle.current, `${baseName}.md`, buildObsidianMarkdown());
-      await writeFileToDirectory(obsidianDirectoryHandle.current, `${baseName}.climbiq-dataset.json`, JSON.stringify(buildDatasetExport(), null, 2));
+      const dataset = buildDatasetExport();
+      const markdown = buildObsidianMarkdown(dataset);
+      await writeFileToDirectory(obsidianDirectoryHandle.current, `${baseName}.md`, markdown);
+      await writeFileToDirectory(obsidianDirectoryHandle.current, `${baseName}.climbiq-dataset.json`, JSON.stringify(dataset, null, 2));
       setExportStatus(`Saved Markdown and JSON to ${obsidianFolderName || "selected folder"}.`);
     } catch (error) {
       setExportStatus(error instanceof Error ? error.message : "Could not save to selected folder.");
@@ -3556,8 +3330,15 @@ function App() {
 
   const { hasSelectedVideo, hasLoadedVideo } = getVideoUiState(videoUrl, Boolean(metadata?.metadataLoaded));
   const hasOpenAttempt = hasSelectedVideo || activeSessionId !== null || attemptLineageId !== null;
-  const practiceSaved = useMemo(() => savedSessions.some(session => session.id === activeSessionId &&
-    JSON.stringify(session.timestamps) === JSON.stringify(timestamps)), [savedSessions, activeSessionId, timestamps]);
+  const openSnapshot = useMemo(() => buildSessionSnapshot(), [activeSessionId, draftSessionId, attemptLineageId, analysisBuild,
+    sessionName, climberName, attemptDate, attemptLocation, attemptType, sessionNotes, metadata, zones, startLightCalibration,
+    startSearchStart, startSearchEnd, startSensitivity, startLightVisibility, startDetectionProfile, reactionTimeOffset,
+    startSignalOffset, movementSensitivity, firstMovementDefinition, committedLaunchMinDelay, firstMovementOffset,
+    officialTotalTime, timestamps, biomechanics, splitRows, savedSessions]);
+  const openAttemptSaved = useMemo(() => isSessionSnapshotSaved(openSnapshot, savedSessions.find(session => session.id === activeSessionId)),
+    [openSnapshot, savedSessions, activeSessionId]);
+  const canCompareSaved = useMemo(() => savedSessions.some(session =>
+    resolveAttemptLineageId(session) !== resolveAttemptLineageId(openSnapshot) && hasComparableTiming(session)), [savedSessions, openSnapshot]);
   const practicePairSaved = useMemo(() => ["a", "b"].every(id => savedSessions.some(session =>
     practiceIdForLineage(session.attemptLineageId ?? null) === id)), [savedSessions]);
   const acceptedMovementRawTime = getTimestamp(timestamps, "firstMovement").rawTime;
@@ -3656,6 +3437,7 @@ function App() {
       {hasSelectedVideo && <NextStepCard
         stage={!hasLoadedVideo ? "loading" : videoTaskRunning ? "analyzing" : suggestedStartRawTime !== null || startReviewNeeded ? "review-start" : calculatedClimbTime !== null ? "results" : startSignalRaw !== null ? "review-finish" : "ready"}
         status={autoAnalysisStatus || undefined}
+        saved={openAttemptSaved} canCompare={canCompareSaved}
         onAnalyze={() => { void runAutomaticAnalysis(); }}
         onCancel={autoAnalysisRunning ? () => analysisRuns.automatic?.abort() : undefined}
         onReview={suggestedStartRawTime !== null ? () => reviewTimestamp({
@@ -3708,7 +3490,7 @@ function App() {
           <RecordingGuide />
           {(!hasOpenAttempt || practiceIdForLineage(attemptLineageId)) && <PracticeWalkthrough
             active={practiceIdForLineage(attemptLineageId)} disabled={videoAnalysisRunning || !libraryReady} canReview={hasLoadedVideo}
-            saved={practiceSaved} holdReviewed={getTimestamp(timestamps, "hold10").acceptanceMode === "frame-review"} bothSaved={practicePairSaved}
+            saved={openAttemptSaved} holdReviewed={getTimestamp(timestamps, "hold10").acceptanceMode === "frame-review"} bothSaved={practicePairSaved}
             onOpen={id => { void openPractice(id); }}
             onInspect={event => {
               const reference = practiceRecordings.find(item => item.id === practiceIdForLineage(attemptLineageId));
@@ -5671,44 +5453,9 @@ function motionMarkerClass(kind: string) {
   return "earliest";
 }
 
-function buildSplitMap(splitRows: Array<{ label: string; value: number | null }>) {
-  return Object.fromEntries(splitRows.map((row) => [row.label, row.value]));
-}
-
-function exportCandidates(candidates: DetectionCandidate[], acceptedMarker: TimestampMarker) {
-  return candidates.map((candidate) => {
-    const accepted = acceptedMarker.rawTime !== null && Math.abs(acceptedMarker.rawTime - candidate.rawTime) <= 0.02;
-    return {
-      candidateRawTime: candidate.rawTime,
-      candidateType: candidate.kind,
-      score: candidate.score,
-      confidence: candidate.confidence,
-      reason: candidate.reason,
-      accepted,
-      rejected: !accepted,
-    };
-  });
-}
-
 function parseOptionalNumber(value: string) {
   const parsed = Number(value);
   return Number.isFinite(parsed) && value.trim() !== "" ? parsed : null;
-}
-
-function formatExportTime(value: number | null | undefined) {
-  return value === null || value === undefined ? "Not set" : `${value.toFixed(3)}s`;
-}
-
-function markdownTimestampRow(label: string, markerValue: TimestampMarker) {
-  return `| ${label} | ${formatExportTime(markerValue.rawTime)} | ${formatExportTime(markerValue.climbTime)} | ${markerValue.source} | ${markerValue.confidence} | ${formatExportTime(markerValue.offsetApplied ?? null)} |\n`;
-}
-
-function markdownSplitRow(label: string, splits: Record<string, number | null>) {
-  return `| ${label} | ${formatExportTime(splits[label])} |\n`;
-}
-
-function formatRgb(rgb?: RGB) {
-  return rgb ? `${rgb.r}, ${rgb.g}, ${rgb.b}` : "not set";
 }
 
 async function writeFileToDirectory(directoryHandle: any, fileName: string, content: string) {

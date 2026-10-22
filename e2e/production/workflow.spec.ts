@@ -57,6 +57,14 @@ test("practice import, contact review, save, comparison replay and reload", asyn
   await openPractice(page, "B");
   await reviewHold(page);
   await savePractice(page, 2);
+  const nextStep = page.getByRole("region", { name: "Your next step", exact: true });
+  await expect(nextStep.getByRole("link", { name: "Compare saved attempts" })).toHaveAttribute("href", "#attempt-comparison");
+  await page.getByText("Session details & saved analyses", { exact: true }).click();
+  await page.getByText("Session name and athlete details", { exact: true }).click();
+  await page.getByRole("textbox", { name: "Notes", exact: true }).fill("Synthetic workflow note; not a study observation.");
+  await expect(nextStep.getByRole("link", { name: "Save this attempt" })).toBeAttached();
+  await page.getByRole("button", { name: "Save Session", exact: true }).click();
+  await expect(nextStep.getByRole("link", { name: "Compare saved attempts" })).toBeAttached();
   await expect(page.locator(".comparison-insight")).toContainText("0.400s");
   await expect(page.getByRole("button", { name: "Replay whole attempt", exact: true })).toBeDisabled();
   await page.getByRole("button", { name: "Use baseline practice recording", exact: true }).click();

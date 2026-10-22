@@ -10,7 +10,7 @@ import "./ComparisonPlayback.css";
 const SIDES = ["baseline", "candidate"] as const;
 type Side = typeof SIDES[number];
 
-export default function ComparisonPlayback({ baseline, candidate }: { baseline: SavedAnalysisSession; candidate: SavedAnalysisSession }) {
+export default function ComparisonPlayback({ baseline, candidate, preferredPhase }: { baseline: SavedAnalysisSession; candidate: SavedAnalysisSession; preferredPhase?: "bottom" | "top" }) {
   const sessions = { baseline, candidate };
   const players = useRef<Partial<Record<Side, HTMLVideoElement>>>({});
   const sources = useRef<Partial<Record<Side, PreparedVideo>>>({});
@@ -21,6 +21,7 @@ export default function ComparisonPlayback({ baseline, candidate }: { baseline: 
   const frame = useRef<number | null>(null);
   const [urls, setUrls] = useState<Partial<Record<Side, string>>>({});
   const [confirmed, setConfirmed] = useState<Partial<Record<Side, boolean>>>({});
+  const [verifiedPractice, setVerifiedPractice] = useState<Partial<Record<Side, boolean>>>({});
   const [ready, setReady] = useState<Partial<Record<Side, boolean>>>({});
   const [loading, setLoading] = useState<Partial<Record<Side, boolean>>>({});
   const [message, setMessage] = useState("");
@@ -31,6 +32,11 @@ export default function ComparisonPlayback({ baseline, candidate }: { baseline: 
   const ranges = { baseline: comparisonPlaybackRange(baseline, phase), candidate: comparisonPlaybackRange(candidate, phase) };
   const maximum = Math.max(...SIDES.map(side => ranges[side] ? ranges[side]!.end - ranges[side]!.start : 0));
   const canReplay = !SIDES.some(side => loading[side]) && SIDES.every(side => urls[side] && confirmed[side] && ready[side] && ranges[side]);
+  const baselinePractice = practiceIdForLineage(baseline.attemptLineageId ?? null);
+  const candidatePractice = practiceIdForLineage(candidate.attemptLineageId ?? null);
+  const practicePair = baselinePractice !== null && candidatePractice !== null && baselinePractice !== candidatePractice;
+  const practicePairReady = canReplay && SIDES.every(side => verifiedPractice[side]);
+  const canReplayPreferred = canReplay && preferredPhase && comparisonPlaybackRange(baseline, preferredPhase) && comparisonPlaybackRange(candidate, preferredPhase);
 
   function pause() {
     playbackActive.current = false;
@@ -63,7 +69,7 @@ export default function ComparisonPlayback({ baseline, candidate }: { baseline: 
     };
   }, []);
 
-  async function attach(side: Side, file?: File) {
+  async function attach(side: Side, file?: File, associatePractice = false) {
     pause();
     requests.current[side]?.abort();
     const request = new AbortController();
@@ -71,13 +77,21 @@ export default function ComparisonPlayback({ baseline, candidate }: { baseline: 
     setLoading(value => ({ ...value, [side]: true }));
     setMessage("");
     try {
+      let verified = false;
       if (!file) {
         const id = practiceIdForLineage(sessions[side].attemptLineageId ?? null);
         const entry = practiceRecordings.find(item => item.id === id);
         if (!entry) throw new Error("Choose the original recording for this attempt.");
         const response = await fetch(resolveAppAssetUrl("samples/" + entry.file, import.meta.env.BASE_URL, location.href), { signal: request.signal });
         if (!response.ok) throw new Error("The practice recording could not be loaded.");
-        file = new File([await response.blob()], entry.file, { type: "video/mp4" });
+        const bytes = await response.arrayBuffer();
+        if (!globalThis.crypto?.subtle) throw new Error("This browser cannot verify the bundled recording. Choose its original file and confirm the attempt instead.");
+        const digest = await crypto.subtle.digest("SHA-256", bytes);
+        const hash = Array.from(new Uint8Array(digest), value => value.toString(16).padStart(2, "0")).join("");
+        if (hash !== entry.sha256) throw new Error("Practice recording integrity check failed. Reload ClimbIQ and try again.");
+        if (request.signal.aborted) return;
+        file = new File([bytes], entry.file, { type: "video/mp4" });
+        verified = associatePractice;
       }
       const prepared = await prepareVideo(file, { signal: request.signal });
       if (request.signal.aborted || requests.current[side] !== request) { prepared.dispose(); return; }
@@ -89,7 +103,8 @@ export default function ComparisonPlayback({ baseline, candidate }: { baseline: 
       pause();
       sources.current[side]?.dispose();
       sources.current[side] = prepared;
-      setConfirmed(value => ({ ...value, [side]: false }));
+      setConfirmed(value => ({ ...value, [side]: verified }));
+      setVerifiedPractice(value => ({ ...value, [side]: verified }));
       setReady(value => ({ ...value, [side]: false }));
       setUrls(value => ({ ...value, [side]: prepared.objectUrl }));
     } catch (error) {
@@ -100,6 +115,13 @@ export default function ComparisonPlayback({ baseline, candidate }: { baseline: 
         setLoading(value => ({ ...value, [side]: false }));
       }
     }
+  }
+
+  function preparePracticePair() {
+    if (!practicePair || seeking || SIDES.some(side => loading[side])) return;
+    // Both assets have independent abort owners. Each must match its bundled
+    // content hash before its canonical practice lineage is associated.
+    void Promise.all(SIDES.map(side => attach(side, undefined, true)));
   }
 
   async function position(nextPhase: ComparisonPhase, time: number, play: boolean) {
@@ -155,9 +177,16 @@ export default function ComparisonPlayback({ baseline, candidate }: { baseline: 
     }
   }
 
-  return <section className="comparison-playback" aria-label="Synchronized comparison replay">
+  return <section id="comparison-replay" tabIndex={-1} className="comparison-playback" aria-label="Synchronized comparison replay">
     <h3>Replay the section that changed</h3>
-    <p>Attach each original recording and confirm its attempt. Replay uses equal elapsed time from each section's entry; the faster attempt stops at its own finish. Saved summaries do not contain videos.</p>
+    <p>{practicePair ? "Prepare the two included practice recordings, then replay the changed phase."
+      : "Attach each original recording and confirm its attempt."} Replay uses equal elapsed time from each section's entry; the faster attempt stops at its own finish. Saved summaries do not contain videos.</p>
+    <div className="comparison-replay-next">
+      {practicePair && !practicePairReady && <button className="primary" disabled={seeking || SIDES.some(side => loading[side])} onClick={preparePracticePair}>Prepare practice replay</button>}
+      {preferredPhase && <button className={canReplayPreferred ? "primary" : undefined} disabled={!canReplayPreferred || seeking} onClick={() => { void position(preferredPhase, 0, true); }}>Replay changed {preferredPhase} phase</button>}
+      {practicePairReady && <p role="status">Practice replay ready. Both bundled recordings are verified.</p>}
+      {!practicePair && !canReplay && <p>Attach and confirm both recordings below to enable replay.</p>}
+    </div>
     <div className="comparison-players">{SIDES.map(side => <div key={side}>
       <strong>{side === "baseline" ? "Baseline" : "New attempt"}: {sessions[side].name}</strong>
       <label>Attach {side === "baseline" ? "baseline" : "new attempt"} recording<input type="file" accept="video/*" disabled={seeking || loading[side]} onChange={event => {
@@ -170,7 +199,8 @@ export default function ComparisonPlayback({ baseline, candidate }: { baseline: 
           onLoadedData={event => { if (event.currentTarget.src === sources.current[side]?.objectUrl && event.currentTarget.readyState >= 2) setReady(value => ({ ...value, [side]: true })); }}
           onWaiting={event => { if (event.currentTarget.src === sources.current[side]?.objectUrl && playbackActive.current && !completedSides.current.has(side)) { pause(); setMessage("Playback buffered. Replay this section when the recordings are ready."); } }}
           onError={event => { if (event.currentTarget.src !== sources.current[side]?.objectUrl) return; pause(); setReady(value => ({ ...value, [side]: false })); setMessage("This attached recording could not be decoded. Choose its original file again."); }} />
-        <label className="comparison-recording-check"><input type="checkbox" checked={confirmed[side] === true} onChange={event => { pause(); setConfirmed(value => ({ ...value, [side]: event.target.checked })); }} />This is the original recording for {sessions[side].name}</label>
+        {verifiedPractice[side] ? <small className="comparison-verified">Verified bundled synthetic recording</small>
+          : <label className="comparison-recording-check"><input type="checkbox" checked={confirmed[side] === true} onChange={event => { pause(); setConfirmed(value => ({ ...value, [side]: event.target.checked })); }} />This is the original recording for {sessions[side].name}</label>}
       </>}
     </div>)}</div>
     <div className="button-row">

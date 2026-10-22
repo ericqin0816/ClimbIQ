@@ -24,6 +24,16 @@ export interface TimestampReviewPanelProps {
 export default function TimestampReviewPanel(props: TimestampReviewPanelProps) {
   const region = useRef<HTMLElement>(null);
   useEffect(() => {
+    const openingRegion = region.current;
+    const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    return () => {
+      const active = document.activeElement;
+      if (opener?.isConnected && (active === document.body || (active !== null && openingRegion?.contains(active)))) {
+        opener.focus({ preventScroll: true });
+      }
+    };
+  }, []);
+  useEffect(() => {
     region.current?.focus({ preventScroll: true });
   }, [props.label, props.suggestedRawTime]);
   const time = props.decodedRawTime ?? props.currentTime;

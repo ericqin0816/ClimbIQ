@@ -75,6 +75,29 @@ describe("independent validation report", () => {
       expect(() => evaluateValidationStudy(study, labels)).toThrow();
     }
   });
+  it("rejects adjudication before either original review while allowing equal-time records", () => {
+    const { study, labels } = fixture();
+    expect(evaluateValidationStudy(study, labels).endpoints.start.confirmedReferences).toBe(1);
+    labels[1]["labelReview.reviewedAt"] = "2026-10-03T00:00:00Z";
+    expect(() => evaluateValidationStudy(study, labels)).toThrow(/predates an original review/);
+    labels[2]["labelReview.reviewedAt"] = "2026-10-03T00:00:00Z";
+    expect(evaluateValidationStudy(study, labels).endpoints.start.confirmedReferences).toBe(1);
+  });
+  it("requires a resolution for disjoint qualifying frame brackets without fabricating unobservable labels", () => {
+    const { study, labels } = fixture();
+    Object.assign(labels[0], { lastBeforeRawTime: .98, firstAfterRawTime: 1.02 });
+    Object.assign(labels[1], { "labelReview.rawTime": 1.5, lastBeforeRawTime: 1.48, firstAfterRawTime: 1.52 });
+    expect(() => evaluateValidationStudy(study, labels)).toThrow(/documented resolution/);
+    labels[2].notes = "Reviewed the original together; reviewer two selected the next light pulse. The original start cue is at 1.0 s.";
+    expect(evaluateValidationStudy(study, labels).endpoints.start.confirmedReferences).toBe(1);
+    labels[2].notes = "";
+    labels[1]["labelReview.status"] = "unobservable";
+    labels[1]["labelReview.rawTime"] = null;
+    const unobservable = evaluateValidationStudy(study, labels).endpoints.start;
+    expect(unobservable.confirmedReferences).toBe(0);
+    expect(unobservable.labelRowsByStatus.unobservable).toBe(1);
+    expect(unobservable.automaticallyAcceptedWithoutComparableReference).toBe(1);
+  });
   it("keeps missing runs and unobservable events in the automatic coverage denominator", () => {
     const { study, labels } = fixture(); study.predictions = [];
     const report = evaluateValidationStudy(study, labels);

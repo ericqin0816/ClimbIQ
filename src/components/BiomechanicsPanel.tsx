@@ -838,8 +838,8 @@ function BiomechanicsResultView({
   controlsBlocked: boolean;
 }) {
   const { metrics } = result;
-  const hasComData = result.frames.some((frame) => Boolean(frame.smoothedWallCom));
-  const routeSplits = analyzeRouteSplits(result, 15, calibrationConfidence);
+  const hasComData = useMemo(() => result.frames.some((frame) => Boolean(frame.smoothedWallCom)), [result]);
+  const routeSplits = useMemo(() => analyzeRouteSplits(result, 15, calibrationConfidence), [result, calibrationConfidence]);
   const selectedFrames = metrics.selectedFrames ?? metrics.detectedFrames;
   const resultSummary = metrics.validFrames === 0
     ? metrics.detectedFrames === 0
@@ -940,8 +940,12 @@ function BiomechanicsResultView({
 }
 
 function WallTrajectory({ result, currentTime }: { result: BiomechanicsResult; currentTime: number }) {
-  const chunks = chartMetricChunks(result.frames);
-  const usable = chunks.flat();
+  const { usable, peak, segments } = useMemo(() => {
+    const chunks = chartMetricChunks(result.frames);
+    const usable = chunks.flat();
+    return { usable, peak: Math.max(1, ...usable.map(frame => frame.speedMps ?? 0)),
+      segments: chunks.flatMap(chunk => chunk.slice(1).map((frame, index) => ({ previous: chunk[index], frame }))) };
+  }, [result]);
   if (usable.length < 2) {
     return (
       <figure className="wall-trajectory-figure">
@@ -954,10 +958,6 @@ function WallTrajectory({ result, currentTime }: { result: BiomechanicsResult; c
     );
   }
   const current = nearestFrame(usable, currentTime, 0.6 / result.settings.sampleFps);
-  const peak = Math.max(1, ...usable.map((frame) => frame.speedMps ?? 0));
-  const segments = chunks.flatMap(chunk =>
-    chunk.slice(1).map((frame, index) => ({ previous: chunk[index], frame })),
-  );
 
   return (
     <figure className="wall-trajectory-figure">
@@ -997,8 +997,17 @@ function WallTrajectory({ result, currentTime }: { result: BiomechanicsResult; c
 }
 
 function VelocityChart({ result, currentTime }: { result: BiomechanicsResult; currentTime: number }) {
-  const {chunks,gaps,coverage} = describeSpeedTrace(result);
-  const usable = chunks.flat();
+  const { gaps, coverage, usable, minTime, duration, maxSpeed, lines, isolated } = useMemo(() => {
+    const { chunks, gaps, coverage } = describeSpeedTrace(result);
+    const usable = chunks.flat();
+    const minTime = result.startRawTime;
+    const duration = Math.max(0.001, result.endRawTime - minTime);
+    const maxSpeed = Math.max(1, ...usable.map(frame => frame.speedMps ?? 0));
+    return { gaps, coverage, usable, minTime, duration, maxSpeed,
+      lines: chunks.map(chunk => ({ key: chunk[0].rawTime,
+        points: chunk.map(frame => `${chartX(clamp(sourceSampleTime(frame), minTime, result.endRawTime), minTime, duration)},${chartY(frame.speedMps ?? 0, maxSpeed)}`).join(" ") })),
+      isolated: chunks.filter(chunk => chunk.length === 1).map(([frame]) => frame) };
+  }, [result]);
   if (usable.length < 2) {
     return (
       <figure className="velocity-chart-figure">
@@ -1010,9 +1019,6 @@ function VelocityChart({ result, currentTime }: { result: BiomechanicsResult; cu
       </figure>
     );
   }
-  const minTime = result.startRawTime;
-  const duration = Math.max(0.001, result.endRawTime - minTime);
-  const maxSpeed = Math.max(1, ...usable.map((frame) => frame.speedMps ?? 0));
   const markerX = chartX(clamp(currentTime, result.startRawTime, result.endRawTime), minTime, duration);
 
   return (
@@ -1031,15 +1037,15 @@ function VelocityChart({ result, currentTime }: { result: BiomechanicsResult; cu
             <text x="6" y={258 - fraction * 236}>{(maxSpeed * fraction).toFixed(1)}</text>
           </g>
         ))}
-        {chunks.map((chunk) => (
+        {lines.map((line) => (
           <polyline
-            key={chunk[0].rawTime}
-            points={chunk.map((frame) => `${chartX(clamp(sourceSampleTime(frame), minTime, result.endRawTime), minTime, duration)},${chartY(frame.speedMps ?? 0, maxSpeed)}`).join(" ")}
+            key={line.key}
+            points={line.points}
             className="speed-line"
           />
         ))}
         <line x1={markerX} x2={markerX} y1="18" y2="254" className="chart-current-marker" />
-        {chunks.filter(chunk=>chunk.length===1).map(([frame])=><circle key={frame.rawTime}
+        {isolated.map(frame=><circle key={frame.rawTime}
           className="speed-isolated-sample" r="3"
           cx={chartX(clamp(sourceSampleTime(frame),minTime,result.endRawTime),minTime,duration)}
           cy={chartY(frame.speedMps!,maxSpeed)}><title>Isolated estimate; no continuous trace</title></circle>)}

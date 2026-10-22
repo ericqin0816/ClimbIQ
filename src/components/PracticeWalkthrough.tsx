@@ -37,7 +37,7 @@ export default function PracticeWalkthrough({ active, disabled, canReview, saved
         <li className={next === "other" || next === "compare" ? "practice-current" : undefined} aria-current={next === "other" || next === "compare" ? "step" : undefined}>
           <strong>{bothSaved ? "Compare your practice attempts" : "Try the second attempt"}</strong>
           <div className="button-row">
-            {bothSaved && <a className={next === "compare" ? "button-link primary" : "button-link"} href="#saved-attempts">Compare saved attempts</a>}
+            {bothSaved && <a className={next === "compare" ? "button-link primary" : "button-link"} href="#attempt-comparison">Compare saved attempts</a>}
             <button className={next === "other" ? "primary" : undefined} disabled={disabled} onClick={() => onOpen(other)}>Open practice {other.toUpperCase()} as a new attempt</button>
           </div>
           <p>{bothSaved ? "Look for the largest reviewed phase change, then replay it." : "Review and save both attempts to compare their timing."} Corrections keep the same attempt identity.</p>

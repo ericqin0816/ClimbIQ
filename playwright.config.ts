@@ -2,6 +2,8 @@ import { defineConfig, devices } from "@playwright/test";
 
 export default defineConfig({
   testDir: "./e2e/production",
+  // Playwright clears this directory; preserve unrelated benchmark/review evidence.
+  outputDir: "./test-results/production",
   timeout: 60_000,
   expect: { timeout: 12_000 },
   fullyParallel: false,

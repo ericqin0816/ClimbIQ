@@ -119,17 +119,22 @@ try {
     hold10: document.querySelector('.hold10-second-pass')?.textContent ?? '', previews: document.querySelectorAll('.hold10-evidence-frames img').length,
     previewsLoaded: [...document.querySelectorAll('.hold10-evidence-frames img')].every(img => img.complete && img.naturalWidth > 0) })`;
   const priorEvidence = await evaluate(evidenceExpression);
-  const captureLaneLedger = () => evaluate(`(() => {
+  const captureSessionDataset = () => evaluate(`(() => {
     const original = navigator.clipboard.writeText; let captured;
     Object.defineProperty(navigator.clipboard, 'writeText', { configurable:true, value:async text => { captured = text; } });
     try {
       const button = [...document.querySelectorAll('button')].find(b => b.textContent.trim() === 'Copy JSON');
       if (!button) throw new Error('Copy JSON control is missing.');
       for (let parent = button.parentElement; parent; parent = parent.parentElement) if (parent.tagName === 'DETAILS') parent.open = true;
-      button.click(); return JSON.parse(captured).startLaneEvidenceAudit;
+      button.click(); return JSON.parse(captured);
     } finally { Object.defineProperty(navigator.clipboard, 'writeText', { configurable:true, value:original }); }
   })()`);
-  const priorLaneLedger = await captureLaneLedger();
+  const captureLaneLedger = async () => (await captureSessionDataset()).startLaneEvidenceAudit;
+  const priorDataset = await captureSessionDataset();
+  const priorLaneLedger = priorDataset.startLaneEvidenceAudit;
+  if (!priorDataset.analysisBuild || JSON.stringify(priorDataset.analysisBuild) !== JSON.stringify(priorDataset.exportBuild)) {
+    throw new Error('Completed automatic analysis did not capture its execution build.');
+  }
   if (!priorLaneLedger?.entries?.length || !priorLaneLedger.activeLightLaneId) throw new Error('No prior lane evidence was established.');
   // The source-frame strip now includes approach/follow-through context, with
   // 5–9 distinct frames; the old three-thumbnail assertion predates that UI.
@@ -154,6 +159,10 @@ try {
   report.cancelledRerunPreservedPriorEvidence = true;
   if (JSON.stringify(await captureLaneLedger()) !== JSON.stringify(priorLaneLedger)) throw new Error('Cancelled preflight lost prior lane identities or evidence.');
   report.cancelledRerunPreservedLaneEvidence = true;
+  if (JSON.stringify((await captureSessionDataset()).analysisBuild) !== JSON.stringify(priorDataset.analysisBuild)) {
+    throw new Error('Cancelled preflight reassigned the prior analysis build.');
+  }
+  report.cancelledRerunPreservedAnalysisBuild = true;
 
   // Rapid replacements deliberately race the first file's metadata callback.
   await upload(primary, false);
@@ -169,6 +178,8 @@ try {
   const replacedLedger = await captureLaneLedger();
   if (replacedLedger?.entries?.length || replacedLedger?.activeLightLaneId) throw new Error('Lane evidence leaked into a replacement video.');
   report.replacementClearedLaneEvidence = true;
+  if ((await captureSessionDataset()).analysisBuild !== null) throw new Error('Replacement recording inherited an earlier detector build.');
+  report.replacementClearedAnalysisBuild = true;
   report.invalidReplacementPreservedVideo = true;
   }
   if (errors.length) throw new Error(`Browser exceptions: ${errors.join(' | ')}`);

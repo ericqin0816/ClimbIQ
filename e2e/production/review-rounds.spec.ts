@@ -1,5 +1,10 @@
 import { test, expect } from "./fixtures";
 import { createPracticeSession } from "../../src/lib/practiceRecordings";
+import pkg from "../../package.json" with { type: "json" };
+import type { Page } from "@playwright/test";
+import { readFile } from "node:fs/promises";
+import path from "node:path";
+import { createSessionLibraryBackup } from "../../src/lib/sessionLibrary";
 
 test("the shipped policy and source identity are visible without claiming analysis provenance", async ({ page, request }) => {
   const response = await page.goto("/");
@@ -7,7 +12,7 @@ test("the shipped policy and source identity are visible without claiming analys
   const buildResponse = await request.get("/build-info.json");
   expect(buildResponse.ok()).toBe(true);
   const build = await buildResponse.json();
-  expect(build.appVersion).toBe("0.30.0");
+  expect(build.appVersion).toBe(pkg.version);
   expect(build.commitSha).toMatch(/^[a-f0-9]{40}$/);
   expect(typeof build.workingTreeDirty).toBe("boolean");
   await expect(page.locator("[data-build-identity]")).toHaveAttribute("data-build-identity", build.commitSha);
@@ -67,7 +72,6 @@ test("keyboard wall corners can be entered out of order and cleared without inve
   const downloadPromise = page.waitForEvent("download");
   await page.getByRole("button", { name: "Download data", exact: true }).click();
   const downloaded = await (await downloadPromise).path();
-  const { readFile } = await import("node:fs/promises");
   const dataset = JSON.parse(await readFile(downloaded!, "utf8"));
   const build = await (await page.request.get("/build-info.json")).json();
   expect(dataset.exportBuild).toEqual(build);
@@ -98,5 +102,60 @@ test("phone frame review keeps its evidence and acceptance action above navigati
     expect(bounds!.height).toBeGreaterThanOrEqual(44);
     expect(geometry.focused).toBe(true);
     await page.getByRole("button", { name: "Close review", exact: true }).click();
+    await expect(page.getByRole("button", { name: "Review practice Hold 10", exact: true })).toBeFocused();
   }
+});
+
+async function importComparison(page: Page, personal = false) {
+  const sessions = [createPracticeSession("a"), createPracticeSession("b")];
+  sessions.forEach((session, index) => {
+    session.timestamps.find(marker => marker.id === "hold10")!.acceptanceMode = "frame-review";
+    if (personal) session.attemptLineageId = `personal-recording-fixture-${index}`;
+  });
+  await page.goto("/");
+  await expect(page.locator("[data-session-storage-state]")).toHaveAttribute("data-session-storage-state", "ready");
+  await page.locator('input[accept="application/json,.json"]').setInputFiles({ name: "reviewed-workflow-fixtures.json", mimeType: "application/json",
+    buffer: Buffer.from(JSON.stringify(createSessionLibraryBackup(sessions))) });
+  await page.getByLabel("Baseline attempt", { exact: true }).selectOption(sessions[0].id);
+  await page.getByLabel("New attempt", { exact: true }).selectOption(sessions[1].id);
+}
+
+test("known practice pair prepares together and replays the largest reviewed phase", async ({ page }, testInfo) => {
+  test.skip(process.platform === "win32" && testInfo.project.name.startsWith("webkit"), "Media fast path runs in macOS WebKit CI.");
+  await importComparison(page);
+  await page.getByRole("link", { name: "Replay changed bottom phase" }).click();
+  await page.getByRole("button", { name: "Prepare practice replay", exact: true }).click();
+  await expect(page.locator(".comparison-verified")).toHaveCount(2);
+  await expect(page.locator(".comparison-recording-check input")).toHaveCount(0);
+  const replay = page.getByRole("button", { name: "Replay changed bottom phase", exact: true });
+  await expect(replay).toBeEnabled();
+  await replay.click();
+  await expect.poll(() => page.locator(".comparison-players video").evaluateAll(videos => videos.every(video => (video as HTMLVideoElement).currentTime > 1.1))).toBe(true);
+});
+
+test("a mismatched bundled recording never receives automatic identity confirmation", async ({ page }, testInfo) => {
+  test.skip(process.platform === "win32" && testInfo.project.name.startsWith("webkit"), "Media identity rejection runs in macOS WebKit CI.");
+  await importComparison(page);
+  await page.route("**/samples/climbiq-practice-b.mp4", async route => route.fulfill({ contentType: "video/mp4",
+    body: await readFile(path.resolve("public/samples/climbiq-practice-a.mp4")) }));
+  await page.getByRole("button", { name: "Prepare practice replay", exact: true }).click();
+  await expect(page.locator(".comparison-playback [role=alert]")).toContainText("integrity check failed");
+  await expect(page.getByRole("button", { name: "Replay changed bottom phase", exact: true })).toBeDisabled();
+  await expect(page.locator(".comparison-verified")).toHaveCount(1);
+});
+
+test("personal recordings still require an explicit confirmation on each side", async ({ page }, testInfo) => {
+  test.skip(process.platform === "win32" && testInfo.project.name.startsWith("webkit"), "Personal media confirmation runs in macOS WebKit CI.");
+  await importComparison(page, true);
+  await expect(page.getByRole("button", { name: "Prepare practice replay", exact: true })).toHaveCount(0);
+  await page.getByLabel("Attach baseline recording", { exact: true }).setInputFiles(path.resolve("public/samples/climbiq-practice-a.mp4"));
+  await page.getByLabel("Attach new attempt recording", { exact: true }).setInputFiles(path.resolve("public/samples/climbiq-practice-b.mp4"));
+  const confirmations = page.locator(".comparison-recording-check input");
+  const replay = page.getByRole("button", { name: "Replay whole attempt", exact: true });
+  await expect(confirmations).toHaveCount(2);
+  await expect(replay).toBeDisabled();
+  await confirmations.nth(0).check();
+  await expect(replay).toBeDisabled();
+  await confirmations.nth(1).check();
+  await expect(replay).toBeEnabled();
 });

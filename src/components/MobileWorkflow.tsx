@@ -18,6 +18,8 @@ export interface NextStepCardProps {
   onReview?: () => void;
   onChooseVideo?: () => void;
   onCancel?: () => void;
+  saved?: boolean;
+  canCompare?: boolean;
 }
 
 type WorkflowDestination = "upload" | "video-review" | "results" | "saved-attempts";
@@ -158,8 +160,12 @@ const STEP_COPY: Record<NextStepStage, { number: string; label: string; title: s
   },
 };
 
-export function NextStepCard({ stage, status, onAnalyze, onReview, onChooseVideo, onCancel }: NextStepCardProps) {
-  const copy = STEP_COPY[stage];
+export function NextStepCard({ stage, status, onAnalyze, onReview, onChooseVideo, onCancel, saved = false, canCompare = false }: NextStepCardProps) {
+  const copy = stage === "results" && saved ? {
+    number: "04", label: "Saved on this device", title: canCompare ? "See which section changed." : "Ready for your next attempt.",
+    description: canCompare ? "Compare accepted timing and reviewed sections, then replay the change."
+      : "Open another recording, review its timing, and save it to build a comparison.",
+  } : STEP_COPY[stage];
   const action = stage === "waiting" && onChooseVideo
     ? { label: "Choose a video", onClick: onChooseVideo }
     : stage === "ready" && onAnalyze
@@ -179,7 +185,8 @@ export function NextStepCard({ stage, status, onAnalyze, onReview, onChooseVideo
       </div>
       {action ? <button type="button" className="next-step-action" onClick={action.onClick}>{action.label}<span aria-hidden="true">→</span></button> : null}
       {stage === "analyzing" && onCancel ? <button type="button" className="next-step-cancel" onClick={onCancel}>Cancel analysis</button> : null}
-      {stage === "results" ? <a className="next-step-action" href="#save-analysis">Save this attempt<span aria-hidden="true">→</span></a> : null}
+      {stage === "results" ? <a className="next-step-action" href={saved ? canCompare ? "#attempt-comparison" : "#upload" : "#save-analysis"}>
+        {saved ? canCompare ? "Compare saved attempts" : "Open another recording" : "Save this attempt"}<span aria-hidden="true">→</span></a> : null}
     </section>
   );
 }

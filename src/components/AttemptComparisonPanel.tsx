@@ -1,8 +1,9 @@
 import ComparisonPlayback from "./ComparisonPlayback";
-import { memo, useMemo, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import type { SavedAnalysisSession } from "../types";
 import { compareAttempts, hasComparableTiming, type AttemptComparisonRow } from "../lib/attemptComparison";
 import { attemptIdentityConfirmationKey } from "../lib/attemptIdentity";
+import { comparisonPlaybackRange } from "../lib/comparisonPlayback";
 import "./AttemptComparisonPanel.css";
 
 export default memo(function AttemptComparisonPanel({ sessions }: { sessions: SavedAnalysisSession[] }) {
@@ -15,10 +16,36 @@ export default memo(function AttemptComparisonPanel({ sessions }: { sessions: Sa
   const [selectedBaselineId, setSelectedBaselineId] = useState("");
   const [selectedCandidateId, setSelectedCandidateId] = useState("");
   const [confirmedIdentityKey, setConfirmedIdentityKey] = useState("");
+  const target = useRef<HTMLDetailsElement>(null);
+
+  useEffect(() => {
+    const reveal = () => {
+      if (!target.current) return;
+      target.current.open = true;
+      target.current.focus({ preventScroll: true });
+    };
+    const onHashChange = () => {
+      if (location.hash !== "#attempt-comparison") return;
+      reveal();
+      target.current?.scrollIntoView({ block: "start", behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+    };
+    const onLink = (event: MouseEvent) => {
+      if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+      const link = event.target instanceof Element ? event.target.closest("a") : null;
+      if (link?.getAttribute("href") === "#attempt-comparison") reveal();
+    };
+    window.addEventListener("hashchange", onHashChange);
+    document.addEventListener("click", onLink);
+    onHashChange();
+    return () => {
+      window.removeEventListener("hashchange", onHashChange);
+      document.removeEventListener("click", onLink);
+    };
+  }, [eligibleSessions.length]);
 
   if (eligibleSessions.length < 2) {
     return (
-      <div className="comparison-empty">
+      <div id="attempt-comparison" className="comparison-empty" tabIndex={-1}>
         <strong>Save two timed attempts to compare them.</strong>
         <span>ClimbIQ will use accepted timing and reviewed Hold 10 markers already stored in each session.</span>
       </div>
@@ -35,6 +62,12 @@ export default memo(function AttemptComparisonPanel({ sessions }: { sessions: Sa
   const identityKey = attemptIdentityConfirmationKey(sessionById.get(baselineId)!, sessionById.get(candidateId)!);
   const comparison = compareAttempts(sessionById.get(baselineId)!, sessionById.get(candidateId)!, { distinctAttemptsConfirmed: identityKey === confirmedIdentityKey });
   const visibleRows = comparison.rows.filter((row) => row.baseline || row.candidate);
+  const changedPhase = comparison.performanceComparisonAllowed ? comparison.rows
+    .filter(row => (row.id === "bottom-phase" || row.id === "top-phase") && (row.outcome === "gained" || row.outcome === "lost"))
+    .sort((a, b) => Math.abs(b.deltaSeconds!) - Math.abs(a.deltaSeconds!))[0] : undefined;
+  const requestedPhase = changedPhase?.id === "bottom-phase" ? "bottom" : changedPhase?.id === "top-phase" ? "top" : undefined;
+  const preferredPhase = requestedPhase && comparisonPlaybackRange(sessionById.get(baselineId)!, requestedPhase) &&
+    comparisonPlaybackRange(sessionById.get(candidateId)!, requestedPhase) ? requestedPhase : undefined;
 
   function chooseBaseline(nextId: string) {
     setConfirmedIdentityKey("");
@@ -53,7 +86,7 @@ export default memo(function AttemptComparisonPanel({ sessions }: { sessions: Sa
   }
 
   return (
-    <details className="comparison-details" open>
+    <details ref={target} id="attempt-comparison" className="comparison-details" tabIndex={-1} open>
       <summary>
         <span>
           <strong>Compare saved attempts</strong>
@@ -93,6 +126,7 @@ export default memo(function AttemptComparisonPanel({ sessions }: { sessions: Sa
         <div className="comparison-insight" aria-live="polite">
           <span>{comparison.performanceComparisonAllowed ? "Overall result & phase changes" : "Annotation comparison only"}</span>
           <strong>{comparison.primaryInsight}</strong>
+          {preferredPhase && <a className="comparison-replay-link" href="#comparison-replay" onClick={() => document.getElementById("comparison-replay")?.focus({ preventScroll: true })}>Replay changed {preferredPhase} phase <span aria-hidden="true">→</span></a>}
         </div>
 
         <div className="comparison-table" role="table" aria-label="Saved attempt timing comparison">
@@ -105,7 +139,7 @@ export default memo(function AttemptComparisonPanel({ sessions }: { sessions: Sa
           {visibleRows.map((row) => <ComparisonRow key={row.id} row={row} />)}
         </div>
 
-        <ComparisonPlayback key={identityKey} baseline={sessionById.get(baselineId)!} candidate={sessionById.get(candidateId)!} />
+        <ComparisonPlayback key={identityKey} baseline={sessionById.get(baselineId)!} candidate={sessionById.get(candidateId)!} preferredPhase={preferredPhase} />
 
         <div className="comparison-quality">
           <EvidenceQuality label="Baseline" session={comparison.baseline} />

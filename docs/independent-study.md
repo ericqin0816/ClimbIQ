@@ -30,6 +30,11 @@ study files privately outside Git. `.local-npm/studies/` is ignored for local us
    label IDs separated by `;`. Record a resolution in `notes` if the reviewers
    used different event definitions. Do not average ambiguous times. Unresolved
    events remain disputed or unobservable; the report counts them.
+   The adjudication date cannot predate either qualifying original review.
+   When both reviewers supplied observation brackets and those brackets do not
+   overlap, a confirmed adjudication also requires a documented resolution.
+   An unobservable original remains unqualified; an adjudication cannot turn it
+   into a two-reviewer timing reference.
 6. Replay the locked build, preserve its **original automatic** endpoint statuses
    and predictions, then observe import → review → save → compare. Record actual
    correction seconds, assistance, the participant's training decision, and

@@ -2,6 +2,10 @@
   order: 3;
 }
 
+#attempt-comparison { scroll-margin-top: 76px; }
+#attempt-comparison:focus-visible { outline: 2px solid #2864dc; outline-offset: 4px; }
+.comparison-replay-link { display: inline-flex; align-items: center; gap: .5rem; justify-self: start; min-height: 44px; font-weight: 700; }
+
 .comparison-details > summary {
   align-items: center;
   cursor: pointer;
@@ -167,6 +171,7 @@
 }
 
 @media (max-width: 720px) {
+  #attempt-comparison { scroll-margin-top: 14px; }
   .comparison-selectors,
   .comparison-quality {
     grid-template-columns: minmax(0, 1fr);
