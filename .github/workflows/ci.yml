@@ -9,6 +9,45 @@ permissions:
   contents: read
 
 jobs:
+  production-workflows:
+    name: Production workflows (${{ matrix.name }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Chromium
+            os: ubuntu-24.04
+            browser: chromium
+            projects: --project=chromium
+          - name: WebKit and phone viewport
+            os: macos-15
+            browser: webkit
+            projects: --project=webkit --project=webkit-phone
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps ${{ matrix.browser }}
+      - name: Build the shipped app
+        run: npm run build
+      - name: Import, review, save, compare and recover
+        run: npx playwright test ${{ matrix.projects }}
+      - name: Keep production workflow evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: production-workflow-${{ matrix.browser }}
+          path: |
+            playwright-report/
+            test-results/
+          if-no-files-found: ignore
+          retention-days: 7
+
   verify:
     runs-on: ubuntu-24.04
     timeout-minutes: 10

@@ -1,5 +1,28 @@
 # Browser test ownership
 
+## Production user workflows
+
+Run `npx playwright install chromium webkit` once, then `npm run test:workflow`.
+This builds `dist` and starts an owned production preview on port 5188. Tests
+exercise the shipped app without Vite source imports: practice → frame review →
+save → synchronized comparison → reload, invalid replacements, filename/metadata
+collisions, two-tab conflicts, JSON backups, and annotation lineage. A 320px
+Chromium viewport and a WebKit phone viewport check narrow layouts.
+
+The two bundled MP4s are original CC0 geometric animations with authored timing,
+not real climbs or independent labels. `npm run fixtures:generate` regenerates
+them with FFmpeg (`CLIMBIQ_FFMPEG` overrides its location). The manifest contains
+their SHA-256 hashes and explicit synthetic provenance.
+
+CI runs Chromium on Ubuntu and both WebKit projects on macOS. Windows Playwright
+WebKit in this development environment returns media error 4 for both MP4 and
+WebM. Its media scenarios are explicitly skipped locally; saved-JSON scenarios
+still run in that engine. macOS WebKit has no such skip. A green local Windows
+run therefore does not establish Safari video compatibility or native iPhone
+readiness. CI preserves traces/screenshots when checks fail.
+
+## Existing detector and browser harnesses
+
 New browser runners should use `startTestBrowser` from `test-browser.mjs`:
 
 ```js
