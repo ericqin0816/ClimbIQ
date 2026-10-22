@@ -18,7 +18,7 @@ jobs:
           - name: Chromium
             os: ubuntu-24.04
             browser: chromium
-            projects: --project=chromium
+            projects: --project=chromium --project=chromium-phone
           - name: WebKit and phone viewport
             os: macos-15
             browser: webkit
@@ -75,17 +75,19 @@ jobs:
 
       - name: Prepare synthetic video encoder
         run: |
-          if ! command -v ffmpeg >/dev/null; then
-            sudo apt-get update -qq
-            sudo apt-get install -y --no-install-recommends ffmpeg
+          if command -v ffmpeg >/dev/null; then
+            CLIMBIQ_FFMPEG_PATH=$(command -v ffmpeg)
+          else
+            python -m pip install --disable-pip-version-check imageio-ffmpeg==0.6.0
+            CLIMBIQ_FFMPEG_PATH=$(python -c 'import imageio_ffmpeg; print(imageio_ffmpeg.get_ffmpeg_exe())')
           fi
+          echo "CLIMBIQ_FFMPEG=$CLIMBIQ_FFMPEG_PATH" >> "$GITHUB_ENV"
           google-chrome --version
-          ffmpeg -version
+          "$CLIMBIQ_FFMPEG_PATH" -version
 
       - name: Verify encoded source-frame timing in Chrome
         env:
           CLIMBIQ_CHROME: /usr/bin/google-chrome
-          CLIMBIQ_FFMPEG: ffmpeg
         run: |
           ./node_modules/.bin/vite --host 127.0.0.1 --port 5173 --strictPort >/tmp/climbiq-vite.log 2>&1 &
           CLIMBIQ_VITE_PID=$!
