@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "studyId": "climbiq-independent-beta-001",
+  "protocol": {
+    "appCommit": "REPLACE_WITH_FROZEN_COMMIT",
+    "frozenAt": "REPLACE_WITH_ISO_DATE_BEFORE_RUNS",
+    "splitUnit": "climberAlias",
+    "endpointToleranceSeconds": 0.1
+  },
+  "clips": [],
+  "predictions": [],
+  "observations": []
+}
