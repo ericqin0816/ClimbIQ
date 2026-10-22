@@ -32,6 +32,7 @@ import {
   type RouteSplitAnalysis,
 } from "../lib/routeSplits";
 import { projectStandardSpeedRouteToImage } from "../lib/standardSpeedRoute";
+import { completeDraftPoint, completedCalibrationPoints, editCalibrationCoordinate, emptyWallCalibrationDraft, markNextCalibrationCorner, nextCalibrationCorner, undoCalibrationCorner } from "../lib/wallCalibrationDraft";
 import type { AlignedRouteHold, RouteAlignmentResult } from "../lib/routeAlignment";
 
 interface BiomechanicsPanelProps {
@@ -84,7 +85,8 @@ export function BiomechanicsPanel({
 }: BiomechanicsPanelProps) {
   const [calibrationFrame, setCalibrationFrame] = useState<string | null>(null);
   const [calibrationFrameTime, setCalibrationFrameTime] = useState(0);
-  const [draftPoints, setDraftPoints] = useState<NormalizedPoint[]>([]);
+  const [calibrationDraft, setCalibrationDraft] = useState(emptyWallCalibrationDraft);
+  const draftPoints = calibrationDraft.points;
   const [staticCameraConfirmed, setStaticCameraConfirmed] = useState(
     session.calibration?.staticCameraConfirmed ?? false,
   );
@@ -160,7 +162,10 @@ export function BiomechanicsPanel({
   const automaticRangeReady = startRawTime !== null &&
     (finishRawTime !== null || (fallbackFinishRawTime !== null && fallbackFinishRawTime !== undefined)) &&
     rangeValid;
-  const nextCorner = WALL_CORNER_TEMPLATE[draftPoints.length];
+  const nextCornerIndex = nextCalibrationCorner(calibrationDraft);
+  const nextCorner = WALL_CORNER_TEMPLATE[nextCornerIndex];
+  const completePoints = completedCalibrationPoints(calibrationDraft);
+  const hasDraftCoordinates = draftPoints.some(point => point.x !== null || point.y !== null);
 
   useEffect(() => {
     setShowCalibrationEditor(!calibrationReady);
@@ -179,46 +184,41 @@ export function BiomechanicsPanel({
     const captured = captureFrame(video);
     setCalibrationFrame(captured.dataUrl);
     setCalibrationFrameTime(roundTime(video.currentTime));
-    setDraftPoints([]);
+    setCalibrationDraft(emptyWallCalibrationDraft());
     setShowCalibrationEditor(true);
     setError("");
     setStatus("Calibration frame captured. Mark bottom-left, bottom-right, top-right, then top-left.");
   }
 
   function handleCalibrationPointer(event: PointerEvent<HTMLDivElement>) {
-    if (controlsBlocked || abortControllerRef.current || draftPoints.length >= WALL_CORNER_TEMPLATE.length) {
+    if (controlsBlocked || abortControllerRef.current || nextCornerIndex < 0) {
       return;
     }
     const rect = event.currentTarget.getBoundingClientRect();
     if (!rect.width || !rect.height) {
       return;
     }
-    setDraftPoints((current) => [
-      ...current,
+    setCalibrationDraft((current) => markNextCalibrationCorner(current,
       {
         x: clamp((event.clientX - rect.left) / rect.width, 0, 1),
         y: clamp((event.clientY - rect.top) / rect.height, 0, 1),
       },
-    ]);
+    ));
     setError("");
   }
 
-  function updateDraftCoordinate(index: number, axis: "x" | "y", percent: number) {
-    if (controlsBlocked || abortControllerRef.current || !Number.isFinite(percent)) {
+  function updateDraftCoordinate(index: number, axis: "x" | "y", text: string) {
+    if (controlsBlocked || abortControllerRef.current) {
       return;
     }
-    setDraftPoints((current) => {
-      const next = [...current];
-      const existing = next[index] ?? { x: 0.5, y: 0.5 };
-      next[index] = { ...existing, [axis]: clamp(percent / 100, 0, 1) };
-      return next;
-    });
+    setCalibrationDraft(current => editCalibrationCoordinate(current, index, axis, text));
   }
 
   function saveCalibration() {
     if (controlsBlocked || abortControllerRef.current) return;
     try {
-      const calibration = buildWallCalibration(draftPoints, calibrationFrameTime, staticCameraConfirmed);
+      if (!completePoints) throw new Error("Enter both coordinates for all four wall corners before saving.");
+      const calibration = buildWallCalibration(completePoints, calibrationFrameTime, staticCameraConfirmed);
       const validation = validateWallCalibration(calibration);
       if (!validation.valid) {
         throw new Error(validation.error);
@@ -375,15 +375,15 @@ export function BiomechanicsPanel({
             <button className="primary" onClick={captureCalibrationFrame} disabled={!metadata?.metadataLoaded || controlsBlocked}>
               {calibrationFrame ? "Capture a different frame" : "Capture current full-wall frame"}
             </button>
-            {draftPoints.length > 0 && (
+            {hasDraftCoordinates && (
               <>
-                <button onClick={() => { if (!controlsBlocked) setDraftPoints((points) => points.slice(0, -1)); }} disabled={controlsBlocked}>
+                <button onClick={() => { if (!controlsBlocked) setCalibrationDraft(undoCalibrationCorner); }} disabled={controlsBlocked}>
                   Undo last point
                 </button>
                 <button
                   onClick={() => {
                     if (controlsBlocked || abortControllerRef.current) return;
-                    setDraftPoints([]);
+                    setCalibrationDraft(emptyWallCalibrationDraft());
                     setStatus("Draft wall corners cleared.");
                   }}
                   disabled={controlsBlocked}
@@ -396,7 +396,7 @@ export function BiomechanicsPanel({
 
           {calibrationFrame && (
             <p className="calibration-next" aria-live="polite">
-              {nextCorner ? `Next: click ${nextCorner.label.toLowerCase()} (${draftPoints.length + 1} of 4).` : "All four corners marked. Confirm the fixed camera, then save."}
+              {nextCorner ? `Next: click ${nextCorner.label.toLowerCase()} (${nextCornerIndex + 1} of 4).` : "All four corners marked. Confirm the fixed camera, then save."}
             </p>
           )}
 
@@ -412,7 +412,7 @@ export function BiomechanicsPanel({
                 aria-disabled={controlsBlocked}
                 aria-label="Wall calibration image. Mark bottom left, bottom right, top right, then top left."
               >
-                {draftPoints.map((point, index) => (
+                {draftPoints.map((point, index) => completeDraftPoint(point) ? (
                   <span
                     key={WALL_CORNER_TEMPLATE[index].id}
                     className="wall-corner-marker"
@@ -420,7 +420,7 @@ export function BiomechanicsPanel({
                   >
                     {index + 1}
                   </span>
-                ))}
+                ) : null)}
               </div>
             </div>
           )}
@@ -438,8 +438,8 @@ export function BiomechanicsPanel({
                     min="0"
                     max="100"
                     step="0.1"
-                    value={draftPoints[index] ? (draftPoints[index].x * 100).toFixed(1) : ""}
-                    onChange={(event) => updateDraftCoordinate(index, "x", Number(event.target.value))}
+                    value={draftPoints[index].x !== null ? (draftPoints[index].x * 100).toFixed(1) : ""}
+                    onChange={(event) => updateDraftCoordinate(index, "x", event.target.value)}
                     disabled={controlsBlocked}
                   />
                 </label>
@@ -450,8 +450,8 @@ export function BiomechanicsPanel({
                     min="0"
                     max="100"
                     step="0.1"
-                    value={draftPoints[index] ? (draftPoints[index].y * 100).toFixed(1) : ""}
-                    onChange={(event) => updateDraftCoordinate(index, "y", Number(event.target.value))}
+                    value={draftPoints[index].y !== null ? (draftPoints[index].y * 100).toFixed(1) : ""}
+                    onChange={(event) => updateDraftCoordinate(index, "y", event.target.value)}
                     disabled={controlsBlocked}
                   />
                 </label>
@@ -470,7 +470,7 @@ export function BiomechanicsPanel({
             The camera stays fixed from the accepted start through the finish (no pan, tilt, shake, or zoom during the climb).
           </label>
           <div className="button-row">
-            <button className="primary" onClick={saveCalibration} disabled={draftPoints.length !== 4 || !staticCameraConfirmed || controlsBlocked}>
+            <button className="primary" onClick={saveCalibration} disabled={!completePoints || !staticCameraConfirmed || controlsBlocked}>
               Save wall calibration
             </button>
             {session.calibration && (
@@ -478,7 +478,7 @@ export function BiomechanicsPanel({
                 onClick={() => {
                   if (controlsBlocked || abortControllerRef.current) return;
                   onSessionChange({ ...session, calibration: undefined, result: undefined });
-                  setDraftPoints([]);
+                  setCalibrationDraft(emptyWallCalibrationDraft());
                   setStatus("Saved wall calibration and center-of-mass results cleared.");
                 }}
                 disabled={controlsBlocked}

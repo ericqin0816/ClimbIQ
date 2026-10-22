@@ -378,6 +378,8 @@ export interface BiomechanicsSession {
 }
 
 export interface SavedAnalysisSession {
+  /** Build of the last accepted detector Start, not proof that every saved/edited value came from it. */
+  analysisBuild?: import("./lib/buildIdentity").AppBuildIdentity;
   id: string;
   /** Annotation copies retain this identity; a genuinely new attempt gets a new one. */
   attemptLineageId?: string;

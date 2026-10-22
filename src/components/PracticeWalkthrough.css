@@ -1,6 +1,19 @@
 .practice-walkthrough { padding: 1rem; margin: 1rem 0; border: 1px solid #cbd7d8; border-radius: .7rem; background: #f3f8f7; }
 .practice-walkthrough p, .practice-walkthrough small { color: #526268; font-size: .85rem; line-height: 1.6; }
-.practice-walkthrough ol { padding-left: 1.25rem; }
-.practice-walkthrough li { margin: .8rem 0; line-height: 1.6; }
+.practice-walkthrough ol { padding-left: 1.25rem; margin: .6rem 0 1rem; }
+.practice-walkthrough li { margin: .6rem 0; padding: .6rem .75rem; line-height: 1.6; border: 1px solid transparent; border-radius: .45rem; }
+.practice-walkthrough li p { margin: .3rem 0; }
+.practice-walkthrough .practice-current { border-color: #9ab7b3; background: #fff; }
+.practice-walkthrough .practice-complete > strong { color: #246646; }
+.practice-walkthrough .practice-next { margin: .7rem 0; color: #203c3a; }
 .practice-walkthrough .button-row { flex-wrap: wrap; margin-top: .4rem; }
-.practice-walkthrough button { min-height: 44px; white-space: normal; }
+.practice-walkthrough .practice-main-action { margin-top: .5rem; }
+.practice-walkthrough :is(button, .button-link) { min-height: 44px; white-space: normal; }
+.practice-walkthrough .button-link { display: inline-flex; align-items: center; justify-content: center; text-align: center; }
+.practice-walkthrough :is(button, a):focus-visible { outline: 2px solid #2864dc; outline-offset: 3px; }
+@media (max-width: 480px) {
+  .practice-walkthrough { padding: .8rem; }
+  .practice-walkthrough ol { padding-left: 1rem; }
+  .practice-walkthrough li { padding: .55rem; }
+  .practice-walkthrough .button-row > :is(button, a), .practice-walkthrough .practice-main-action { width: 100%; }
+}

@@ -1,4 +1,5 @@
 import PracticeWalkthrough from "./components/PracticeWalkthrough";
+import { APP_BUILD, formatBuildIdentity, type AppBuildIdentity } from "./lib/buildIdentity";
 import { createPracticeSession, practiceIdForLineage, practiceRecordings, type PracticeId } from "./lib/practiceRecordings";
 import { resolveAppAssetUrl } from "./lib/appAssets";
 import {
@@ -107,7 +108,7 @@ const ZONES: Array<{ id: ZoneId; label: string; tone: string }> = [
 ];
 
 
-const APP_VERSION = "0.30.0";
+const APP_VERSION = APP_BUILD.appVersion;
 const NATIVE_APP = Capacitor.isNativePlatform();
 const AttemptComparisonPanel = lazy(() => import("./components/AttemptComparisonPanel"));
 const CoachingReviewPanel = lazy(() => import("./components/CoachingReviewPanel"));
@@ -289,6 +290,7 @@ function App() {
   // The attempt stays the same when a saved annotation is copied or detached
   // after a storage conflict. Its next saved record can have a different id.
   const [attemptLineageId, setAttemptLineageId] = useState<string | null>(null);
+  const [analysisBuild, setAnalysisBuild] = useState<AppBuildIdentity | undefined>();
   const [sessionStatus, setSessionStatus] = useState("");
   const [libraryStatus, setLibraryStatus] = useState("");
   const [recentlyDeletedSession, setRecentlyDeletedSession] = useState<SavedAnalysisSession | null>(null);
@@ -631,6 +633,7 @@ function App() {
     setStartEvidenceStatus("");
     setTimestampReview(null);
     setTimestamps(INITIAL_TIMESTAMPS);
+    setAnalysisBuild(undefined);
     setActiveSessionId(null);
     const nextDraftId = createSessionId();
     setDraftSessionId(nextDraftId);
@@ -1816,6 +1819,7 @@ function App() {
   }
 
   function commitAcceptedStartContext(context: PendingAutomaticAnalysisContext) {
+    setAnalysisBuild(APP_BUILD);
     automaticLaneCandidatesRef.current = context.analysisLaneCandidates ?? [];
     const lane = context.discoveredStartLane;
     if (!lane) return;
@@ -1909,6 +1913,7 @@ function App() {
     const previousLaneCandidates = automaticLaneCandidatesRef.current;
     const hadPreviousAnalysis = timestamps.some(marker => marker.rawTime !== null) || Boolean(startResult || finishResult || biomechanics.result);
     const restorePreviousAnalysis = () => {
+      setAnalysisBuild(analysisBuild);
       setTimestamps(timestamps);
       setZones(zones);
       setStartLightCalibration(startLightCalibration);
@@ -2917,6 +2922,8 @@ function App() {
 
     return {
       appVersion: APP_VERSION,
+      exportBuild: APP_BUILD,
+      analysisBuild: session.analysisBuild ?? null,
       exportTimestamp: new Date().toISOString(),
       session: {
         sessionId: session.id,
@@ -3180,6 +3187,7 @@ function App() {
     return {
       id,
       attemptLineageId: attemptLineageId ?? (existing ? resolveAttemptLineageId(existing) : id),
+      analysisBuild,
       version: 1,
       name,
       climberName: climberName.trim(),
@@ -3282,6 +3290,7 @@ function App() {
     }
     setActiveSessionId(session.id);
     setAttemptLineageId(nextLineage);
+    setAnalysisBuild(session.analysisBuild);
     setSessionName(session.name);
     setClimberName(session.climberName ?? "");
     setAttemptDate(session.date || todayDateString());
@@ -3547,6 +3556,10 @@ function App() {
 
   const { hasSelectedVideo, hasLoadedVideo } = getVideoUiState(videoUrl, Boolean(metadata?.metadataLoaded));
   const hasOpenAttempt = hasSelectedVideo || activeSessionId !== null || attemptLineageId !== null;
+  const practiceSaved = useMemo(() => savedSessions.some(session => session.id === activeSessionId &&
+    JSON.stringify(session.timestamps) === JSON.stringify(timestamps)), [savedSessions, activeSessionId, timestamps]);
+  const practicePairSaved = useMemo(() => ["a", "b"].every(id => savedSessions.some(session =>
+    practiceIdForLineage(session.attemptLineageId ?? null) === id)), [savedSessions]);
   const acceptedMovementRawTime = getTimestamp(timestamps, "firstMovement").rawTime;
   const acceptedFinish = getTimestamp(timestamps, "finishPad");
   const activeFinishRecovery = automaticFinishReview?.source === videoUrl &&
@@ -3621,6 +3634,8 @@ function App() {
             </p>
             <div className="hero-actions">
               <a className="button-link primary hero-primary" href="#upload">Analyze a climb</a>
+              <button type="button" className="button-link hero-secondary" disabled={videoAnalysisRunning || !libraryReady}
+                onClick={() => { void openPractice("a"); }}>Try a practice recording</button>
             </div>
           </div>
         </section>
@@ -3693,6 +3708,7 @@ function App() {
           <RecordingGuide />
           {(!hasOpenAttempt || practiceIdForLineage(attemptLineageId)) && <PracticeWalkthrough
             active={practiceIdForLineage(attemptLineageId)} disabled={videoAnalysisRunning || !libraryReady} canReview={hasLoadedVideo}
+            saved={practiceSaved} holdReviewed={getTimestamp(timestamps, "hold10").acceptanceMode === "frame-review"} bothSaved={practicePairSaved}
             onOpen={id => { void openPractice(id); }}
             onInspect={event => {
               const reference = practiceRecordings.find(item => item.id === practiceIdForLineage(attemptLineageId));
@@ -4826,6 +4842,7 @@ function App() {
         </Card>
 
       </section>
+      <footer className="build-identity" data-build-identity={APP_BUILD.commitSha ?? "unknown"}>ClimbIQ {formatBuildIdentity(APP_BUILD)}</footer>
       <MobileWorkflow hasVideo={hasLoadedVideo} hasResults={hasOpenAttempt && calculatedClimbTime !== null} analysisRunning={videoAnalysisRunning} savedCount={savedSessions.length} />
       <AnalysisActivity active={autoAnalysisRunning} status={autoAnalysisStatus} onCancel={() => analysisRuns.automatic?.abort()} />
     </main>

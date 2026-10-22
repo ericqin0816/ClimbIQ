@@ -1,8 +1,8 @@
 # ClimbIQ: first iPhone beta
 
-The `codex/ios-app` branch adds a Capacitor iPhone project around the shared React analysis app. A branch is a separate line of development; checking it out does not publish an app or change the live website. The installed app runs its bundled web files, not the published website.
+The repository's `main` branch includes a Capacitor iPhone project around the shared React analysis app, including the current reliability and training-workflow changes. The installed app runs its bundled web files, not the published website.
 
-**Handoff status, checked September 22, 2026:** Windows web checks, browser workflows, native source checks, and asset synchronization have passed. No Mac native build, signing, iPhone run, or TestFlight upload has been verified. The first goal below is a working installation on your friend's iPhone; invite testers after the device checks pass.
+**Handoff status, checked October 22, 2026:** the `505d2df` baseline passed hosted web checks and Chromium/macOS WebKit workflows; native source checks and asset synchronization have passed on Windows. No Mac native build, signing, iPhone run, or TestFlight upload has been verified. Use the latest tested `main` commit and record it; invite testers after the device checks pass.
 
 ## What the owner needs to supply
 
@@ -16,14 +16,14 @@ The `codex/ios-app` branch adds a Capacitor iPhone project around the shared Rea
 
 Have your friend sign in on their own Mac. Do not exchange Apple passwords or add credentials/provisioning profiles to Git. For an individual membership, inviting someone to App Store Connect does not make them a member of the signing team; having the account owner perform the first build avoids that access mismatch. [Apple's account roles](https://developer.apple.com/help/account/access/roles)
 
-## Get the branch onto the Mac
+## Get the tested source onto the Mac
 
 Install Node.js **22** (the repository's `.nvmrc` and `engines` version), Xcode **26 or later**, and Xcode's command-line tools. Open Xcode once to finish setup and install iOS platform support. Use a macOS version supported by that Xcode release. This project already uses Swift Package Manager; it does not need CocoaPods. [Capacitor environment setup](https://capacitorjs.com/docs/getting-started/environment-setup), [SPM setup](https://capacitorjs.com/docs/ios/spm)
 
 In Terminal, for a fresh checkout:
 
 ```sh
-git clone --branch codex/ios-app --single-branch https://github.com/ericqin0816/ClimbIQ.git
+git clone --branch main --single-branch https://github.com/ericqin0816/ClimbIQ.git
 cd ClimbIQ
 node --version
 xcodebuild -version
@@ -36,7 +36,7 @@ npm run ios:open
 
 `node --version` should report `v22.x`. Share the commit printed by Git with the team so everyone knows which build is being tested. If the repository is private, your friend needs repository access first. The original/private test videos are not included in a clone; use recordings you have permission to share.
 
-For an existing clean checkout, use `git fetch origin`, `git switch codex/ios-app`, and `git pull --ff-only` instead of cloning. If the local branch does not exist, use `git switch --track origin/codex/ios-app`. Save unfinished local work before switching. Then run the npm commands above.
+For an existing clean checkout, use `git fetch origin`, `git switch main`, and `git pull --ff-only` instead of cloning. If the local branch does not exist, use `git switch --track origin/main`. Save unfinished local work before switching. Confirm that the printed commit has passing CI before the handoff; to reproduce a prior tested build, use `git switch --detach <full-tested-commit>` instead of advancing `main`. The old `codex/ios-app` branch is historical and lacks the later reliability fixes. Then run the npm commands above.
 
 `ios:sync` builds `dist`, copies it into the native project, registers plugins, and checks the source configuration. `ios:open` opens `ios/App/App.xcodeproj`. The first sync/open can use the provisional ID; set the real ID and team in the next step before trying a signed run. Xcode needs network access to resolve the Capacitor Swift package, and the local plugin packages need the `node_modules` installed by `npm ci`.
 
@@ -60,7 +60,7 @@ Apple currently requires uploads to be built with **Xcode 26 or later and the iO
 4. Wait for processing, then open the build in the app's **TestFlight** tab. Resolve the actual processing issues and applicable export-compliance prompts, add beta instructions/contact details, and assign the build to a tester group. The upload role can be Account Holder, Admin, App Manager, or Developer. [Upload and processing](https://developer.apple.com/help/app-store-connect/manage-builds/upload-builds/)
 5. Start with an internal team group. Friends who are not App Store Connect users are **external testers**; the first external build needs TestFlight review before invitations can install it. Testers install Apple's TestFlight app and accept the invitation. Uploading to TestFlight does not publish a public App Store release. [TestFlight setup](https://developer.apple.com/testflight/)
 
-Record the tested Git commit, bundle ID, team, native version/build, device/iOS version, and any failed checks with the beta notes. Keep developer credentials and private recordings out of that shared record.
+Record the tested Git commit, bundle ID, team, native version/build, device/iOS version, and any failed checks with the beta notes. The bundled `build-info.json` records the package version, full commit, and whether source changes were present when the web bundle was built. A modified or unknown source identity is not a reproducible release commit. Keep developer credentials and private recordings out of that shared record.
 
 ## Commands at a glance
 

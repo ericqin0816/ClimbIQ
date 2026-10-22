@@ -1,5 +1,6 @@
 import type { SavedAnalysisSession } from "../types";
 import { sanitizeAttemptLineageId } from "./attemptIdentity";
+import { APP_BUILD, type AppBuildIdentity } from "./buildIdentity";
 
 export const SESSION_LIBRARY_FORMAT = "climbiq-session-library";
 export const SESSION_LIBRARY_VERSION = 1;
@@ -8,6 +9,8 @@ export interface SessionLibraryBackup {
   format: typeof SESSION_LIBRARY_FORMAT;
   version: typeof SESSION_LIBRARY_VERSION;
   exportedAt: string;
+  /** The exporter build, distinct from each session's original analysis provenance. */
+  exportBuild?: AppBuildIdentity;
   sessions: SavedAnalysisSession[];
 }
 
@@ -37,6 +40,7 @@ export function createSessionLibraryBackup(
     format: SESSION_LIBRARY_FORMAT,
     version: SESSION_LIBRARY_VERSION,
     exportedAt,
+    exportBuild: APP_BUILD,
     sessions,
   };
 }

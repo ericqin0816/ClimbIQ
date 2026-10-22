@@ -17,3 +17,8 @@
 }
 .layout-grid > .session-card { order: 8; }
 .layout-grid > .export-card { order: 9; }
+.build-identity { padding: 16px 0; font-size: .75rem; color: #65717c; overflow-wrap: anywhere; }
+@media (max-width: 720px) {
+  .mobile-workflow-enabled .hero-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 20px; }
+  .mobile-workflow-enabled .hero-actions > * { width: 100%; justify-content: center; }
+}

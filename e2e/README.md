@@ -21,6 +21,15 @@ still run in that engine. macOS WebKit has no such skip. A green local Windows
 run therefore does not establish Safari video compatibility or native iPhone
 readiness. CI preserves traces/screenshots when checks fail.
 
+Production previews apply the security and asset-cache headers from
+`vercel.json`, including the deployed Content Security Policy. The standalone
+production worker smoke uses the same policy and checks it on the HTML, worker,
+model, and WASM responses before executing the worker. It verifies bundled
+execution under that policy, not pose accuracy or native readiness. Builds emit
+`build-info.json` with the package version, full Git commit, and dirty/unknown
+source state; this identifies the actual build without embedding private paths
+or environment variables.
+
 ## Existing detector and browser harnesses
 
 New browser runners should use `startTestBrowser` from `test-browser.mjs`:

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { SavedAnalysisSession } from "../types";
 import { assessAttemptIdentity } from "./attemptIdentity";
+import { APP_BUILD } from "./buildIdentity";
 import {
   createSessionLibraryBackup,
   isSessionLibraryBackup,
@@ -60,6 +61,16 @@ describe("session library backups", () => {
     expect(isSessionLibraryBackup({ format: "climbiq-session-library", version: 2, sessions: [] })).toBe(false);
     expect(isSessionLibraryBackup({ format: "something-else", version: 1, exportedAt: "now", sessions: [] })).toBe(false);
     expect(isSessionLibraryBackup({ format: "climbiq-session-library", version: 1, exportedAt: "now", sessions: {} })).toBe(false);
+  });
+
+  it("identifies the exporter while preserving an imported analysis build or its absence", () => {
+    const original = { ...session("older-analysis", "2026-09-02T12:00:00.000Z"),
+      analysisBuild: { schemaVersion: 1 as const, appVersion: "0.28.0", commitSha: "b".repeat(40), workingTreeDirty: false } };
+    const legacy = session("legacy", "2026-09-02T12:00:00.000Z");
+    const backup = createSessionLibraryBackup([original, legacy]);
+    expect(backup.exportBuild).toEqual(APP_BUILD);
+    expect(backup.sessions[0].analysisBuild).toEqual(original.analysisBuild);
+    expect(backup.sessions[1].analysisBuild).toBeUndefined();
   });
 });
 

@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { preview } from "vite";
 import { createProtocolClient } from "./cdp-client.mjs";
 import { startTestBrowser } from "./test-browser.mjs";
+import { productionHeadersPlugin, productionPreviewHeaders } from "../scripts/lib/production-headers.mjs";
 
 // Strict production-worker plumbing check. The frames are synthetic blank
 // canvases; an array response proves execution, never pose/timing accuracy.
@@ -72,7 +73,7 @@ const delay = milliseconds => new Promise(resolve => setTimeout(resolve, millise
 try {
   let appUrl = options.url;
   if (!appUrl) {
-    previewServer = await preview({ root, configFile: false, logLevel: "error", build: { outDir: buildDir }, preview: { host: "127.0.0.1", port: 0, strictPort: true } });
+    previewServer = await preview({ root, configFile: false, logLevel: "error", plugins: [productionHeadersPlugin()], build: { outDir: buildDir }, preview: { host: "127.0.0.1", port: 0, strictPort: true, headers: productionPreviewHeaders } });
     const address = previewServer.httpServer.address();
     if (!address || typeof address === "string") throw new Error("Could not discover the owned preview server's ephemeral port.");
     appUrl = `http://127.0.0.1:${address.port}/`;
@@ -88,6 +89,9 @@ try {
   ];
   for (const asset of assets) {
     const response = await fetch(asset.url, { signal: AbortSignal.timeout(15000) });
+    for (const [key, value] of Object.entries(productionPreviewHeaders)) {
+      if (response.headers.get(key) !== value) throw new Error(`Preview is missing production ${key} on ${new URL(asset.url).pathname}.`);
+    }
     if (!response.ok || digest(new Uint8Array(await response.arrayBuffer())) !== digest(asset.bytes)) {
       throw new Error(`Preview does not serve the selected build asset: ${new URL(asset.url).pathname}`);
     }

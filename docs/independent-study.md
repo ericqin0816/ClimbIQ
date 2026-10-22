@@ -75,6 +75,18 @@ The physical event must match the adjudicated definition before its error is
 scored. Missing runs remain in the coverage denominator. Reruns cannot replace
 the predeclared primary run after viewing their errors.
 
+The app and its emitted `build-info.json` expose the package version, full Git
+commit, and a source-modified flag. Freeze a clean commit for the study: modified
+or unknown source identity cannot establish a reproducible locked build. Dataset
+and library exports carry `exportBuild`, the current exporter. A saved session's
+optional `analysisBuild` records the build that last accepted a detector Start;
+it is preserved on import and may accompany later manual marker edits. It does
+not claim that every saved value was produced by that build. Legacy imports and
+authored practice references leave analysis provenance unknown. Retain the
+original run log and unmodified predictions; do not substitute an exporter's
+identity for the build that produced an older analysis. The reporting command
+checks the IDs declared in the manifest; it cannot attest which executable ran.
+
 Each `observations` entry has `participantAlias`, `captureSessionId`, `taskRole`
 (`first-use` or `follow-up`), `observedAt` (ISO date),
 `correctionSeconds`, `completedImportReviewSave`, `assistanceRequired`,

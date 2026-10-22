@@ -5,6 +5,41 @@ import { sanitizeBiomechanicsSession } from "./biomechanicsSession";
 import { sanitizeVideoMetadata, sanitizeZoneMap, sanitizeStartLightCalibration } from "./sessionEvidenceIntegrity";
 import { sanitizeAcceptanceMode, sanitizeTimestampSequence } from "./timestampIntegrity";
 import { sanitizeObservationInterval } from "./timingEvidence";
+import { sanitizeAppBuildIdentity } from "./buildIdentity";
+
+/** Legacy text fields may be absent, but recognized fields must have safe scalar types. */
+interface SavedSessionInput {
+  id: string;
+  version: 1;
+  name: string;
+  createdAt: string;
+  updatedAt: string;
+  climberName?: string | null;
+  date?: string | null;
+  location?: string | null;
+  attemptType?: string | null;
+  notes?: string | null;
+  videoFileName?: string | null;
+  attemptLineageId?: unknown;
+  analysisBuild?: unknown;
+  videoMetadata?: unknown;
+  zones?: unknown;
+  startLightCalibration?: unknown;
+  settings: unknown;
+  timestamps: unknown[];
+  splitCalculations?: unknown;
+  biomechanics?: unknown;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function importedText(value: unknown, field: string, fallback = ""): string {
+  if (value === undefined || value === null) return fallback;
+  if (typeof value !== "string") throw new Error(`The imported ${field} must be text.`);
+  return value;
+}
 export const INITIAL_TIMESTAMPS: TimestampMarker[] = [
   marker("startSignal", "Start Signal"),
   marker("firstMovement", "Earliest Visible Motion"),
@@ -28,19 +63,29 @@ export function getTimestamp(timestamps: TimestampMarker[], id: TimestampMarker[
   return timestamps.find((item) => item.id === id) ?? marker(id, id);
 }
 
-export function isDatasetExport(value: unknown): value is any {
-  if (!value || typeof value !== "object") {
-    return false;
-  }
-  const candidate = value as Record<string, unknown>;
-  return typeof candidate.appVersion === "string" && Boolean(candidate.session) && Boolean(candidate.acceptedTimestamps);
+export function isDatasetExport(value: unknown): value is Record<string, unknown> & { session: Record<string, unknown>; acceptedTimestamps: unknown[] } {
+  return isRecord(value) && typeof value.appVersion === "string" && isRecord(value.session) && Array.isArray(value.acceptedTimestamps);
 }
 
-export function datasetToSavedSession(dataset: any): SavedAnalysisSession {
-  const session = dataset.session ?? {};
-  const video = dataset.video ?? {};
-  const zonesFromDataset = dataset.zones ?? {};
-  const settings = dataset.settings ?? {};
+export function datasetToSavedSession(dataset: unknown): SavedAnalysisSession {
+  if (!isDatasetExport(dataset)) throw new Error("This file is not a ClimbIQ dataset export.");
+  const session = dataset.session;
+  const video = isRecord(dataset.video) ? dataset.video : {};
+  const zonesFromDataset = isRecord(dataset.zones) ? dataset.zones : {};
+  const settings = isRecord(dataset.settings) ? dataset.settings : {};
+  const calibration = isRecord(dataset.calibration) ? dataset.calibration : {};
+  // Validate even fallback aliases: malformed text must never reach editable state.
+  const sessionId = importedText(session.sessionId, "session ID");
+  const name = importedText(session.sessionName, "session name");
+  const climberName = importedText(session.climberName, "climber name");
+  const date = importedText(session.date, "recording date");
+  const location = importedText(session.location, "location");
+  const gym = importedText(session.gym, "gym");
+  const attemptType = importedText(session.attemptType, "attempt type");
+  const notes = importedText(session.notes, "notes");
+  const athleteNotes = importedText(dataset.athleteNotes, "athlete notes");
+  const fileName = importedText(video.fileName, "video filename");
+  const exportedAt = importedText(dataset.exportTimestamp, "export timestamp");
   const sanitizedSettings = sanitizeAnalysisSessionSettings({
     ...settings,
     officialTotalTime: video.officialTotalTime !== null && video.officialTotalTime !== undefined
@@ -50,21 +95,22 @@ export function datasetToSavedSession(dataset: any): SavedAnalysisSession {
   const timestamps = timestampsFromDataset(dataset.acceptedTimestamps ?? [], Number(video.duration) || undefined);
 
   return {
-    id: session.sessionId || createSessionId(),
+    id: sessionId || createSessionId(),
     attemptLineageId: sanitizeAttemptLineageId(session.attemptLineageId),
+    analysisBuild: sanitizeAppBuildIdentity(dataset.analysisBuild),
     version: 1,
-    name: session.sessionName || "Imported ClimbIQ session",
-    climberName: session.climberName || "",
-    date: session.date || todayDateString(),
-    location: session.location || session.gym || "",
-    attemptType: session.attemptType || "Training",
-    notes: session.notes || dataset.athleteNotes || "",
-    createdAt: dataset.exportTimestamp || new Date().toISOString(),
+    name: name || "Imported ClimbIQ session",
+    climberName,
+    date: date || todayDateString(),
+    location: location || gym,
+    attemptType: attemptType || "Training",
+    notes: notes || athleteNotes,
+    createdAt: exportedAt || new Date().toISOString(),
     updatedAt: new Date().toISOString(),
-    videoFileName: video.fileName || "",
-    videoMetadata: video.fileName
+    videoFileName: fileName,
+    videoMetadata: fileName
       ? {
-          fileName: video.fileName,
+          fileName,
           duration: Number(video.duration) || 0,
           videoWidth: Number(video.videoWidth) || 0,
           videoHeight: Number(video.videoHeight) || 0,
@@ -79,23 +125,24 @@ export function datasetToSavedSession(dataset: any): SavedAnalysisSession {
       finishPad: zonesFromDataset.finishPadZone ?? undefined,
     }),
     startLightCalibration: sanitizeStartLightCalibration({
-      beforeStartRGB: dataset.calibration?.beforeStartRGB ?? undefined,
-      afterStartRGB: dataset.calibration?.afterStartRGB ?? undefined,
-      calibrationFrameBeforeTime: dataset.calibration?.calibrationFrameBeforeTime ?? undefined,
-      calibrationFrameAfterTime: dataset.calibration?.calibrationFrameAfterTime ?? undefined,
-      colorDelta: dataset.calibration?.colorDelta ?? undefined,
+      beforeStartRGB: calibration.beforeStartRGB,
+      afterStartRGB: calibration.afterStartRGB,
+      calibrationFrameBeforeTime: calibration.calibrationFrameBeforeTime,
+      calibrationFrameAfterTime: calibration.calibrationFrameAfterTime,
+      colorDelta: calibration.colorDelta,
     }, Number(video.duration) || undefined),
     settings: sanitizedSettings,
     timestamps,
-    splitCalculations: dataset.splitCalculations ?? {},
+    splitCalculations: sanitizeSplitCalculations(dataset.splitCalculations),
     biomechanics: sanitizeBiomechanicsSession(dataset.biomechanics),
   };
 }
 
-export function timestampsFromDataset(values: any[], durationSeconds?: number): TimestampMarker[] {
+export function timestampsFromDataset(values: unknown[], durationSeconds?: number): TimestampMarker[] {
   const next = INITIAL_TIMESTAMPS.map((item) => ({ ...item }));
   for (const value of values) {
-    const markerId = value.markerId as TimestampMarker["id"];
+    if (!isRecord(value)) continue;
+    const markerId = value.markerId;
     const existing = next.find((item) => item.id === markerId);
     if (!existing) {
       continue;
@@ -104,21 +151,24 @@ export function timestampsFromDataset(values: any[], durationSeconds?: number): 
     existing.climbTime = typeof value.climbTime === "number" ? value.climbTime : null;
     existing.detectedRawTime = typeof value.detectedRawTime === "number" ? value.detectedRawTime : null;
     existing.offsetApplied = typeof value.offsetApplied === "number" ? value.offsetApplied : 0;
-    existing.source = value.source ?? "Not set";
-    existing.confidence = value.confidence ?? "None";
-    existing.note = value.note ?? "";
+    // The sequence sanitizer validates detector labels, confidence, and notes.
+    const evidence = mergeTimestampDefaults([{ ...value, id: markerId,
+      source: value.source ?? "Not set", confidence: value.confidence ?? "None" }]).find(item => item.id === markerId)!;
+    existing.source = evidence.source;
+    existing.confidence = evidence.confidence;
+    existing.note = typeof value.note === "string" ? value.note : "";
     existing.acceptanceMode = sanitizeAcceptanceMode(value.acceptanceMode);
     existing.observationIntervalSeconds = sanitizeObservationInterval(value.observationIntervalSeconds);
   }
   return sanitizeTimestampSequence(next, durationSeconds);
 }
 
-export function mergeTimestampDefaults(values: TimestampMarker[]) {
+export function mergeTimestampDefaults(values: unknown[]) {
   return INITIAL_TIMESTAMPS.map((defaultMarker) => {
-    const imported = values.find((item) => item?.id === defaultMarker.id);
+    const imported = values.find((item) => isRecord(item) && item.id === defaultMarker.id);
     return {
       ...defaultMarker,
-      ...imported,
+      ...(isRecord(imported) ? imported : {}),
       id: defaultMarker.id,
       label: defaultMarker.label,
     };
@@ -156,11 +206,23 @@ export function decodeSavedSession(value: unknown): SavedAnalysisSession | null 
   return isSavedAnalysisSession(value) ? sanitizeSavedSession(value) : null;
 }
 
-export function sanitizeSavedSession(session: SavedAnalysisSession): SavedAnalysisSession {
+export function sanitizeSavedSession(session: SavedSessionInput): SavedAnalysisSession {
+  if (!isSavedAnalysisSession(session)) throw new Error("This file contains malformed ClimbIQ session fields.");
   const videoMetadata = sanitizeVideoMetadata(session.videoMetadata);
   return {
-    ...session,
+    id: session.id,
+    version: 1,
+    name: session.name,
+    createdAt: session.createdAt,
+    updatedAt: session.updatedAt,
+    climberName: session.climberName ?? "",
+    date: session.date || todayDateString(),
+    location: session.location ?? "",
+    attemptType: session.attemptType ?? "Training",
+    notes: session.notes ?? "",
+    videoFileName: session.videoFileName ?? videoMetadata?.fileName,
     attemptLineageId: sanitizeAttemptLineageId(session.attemptLineageId),
+    analysisBuild: sanitizeAppBuildIdentity(session.analysisBuild),
     videoMetadata,
     zones: sanitizeZoneMap(session.zones),
     startLightCalibration: sanitizeStartLightCalibration(
@@ -173,15 +235,13 @@ export function sanitizeSavedSession(session: SavedAnalysisSession): SavedAnalys
       videoMetadata?.duration,
     ),
     biomechanics: sanitizeBiomechanicsSession(session.biomechanics),
+    splitCalculations: sanitizeSplitCalculations(session.splitCalculations),
   };
 }
 
-export function isSavedAnalysisSession(value: unknown): value is SavedAnalysisSession {
-  if (!value || typeof value !== "object") {
-    return false;
-  }
-
-  const candidate = value as Partial<SavedAnalysisSession>;
+export function isSavedAnalysisSession(value: unknown): value is SavedSessionInput {
+  if (!isRecord(value)) return false;
+  const candidate = value;
   return (
     candidate.version === 1 &&
     typeof candidate.id === "string" &&
@@ -189,9 +249,20 @@ export function isSavedAnalysisSession(value: unknown): value is SavedAnalysisSe
     typeof candidate.name === "string" &&
     typeof candidate.createdAt === "string" &&
     typeof candidate.updatedAt === "string" &&
+    ["climberName", "date", "location", "attemptType", "notes", "videoFileName"].every(field =>
+      candidate[field] === undefined || candidate[field] === null || typeof candidate[field] === "string") &&
     Boolean(candidate.settings) &&
     Array.isArray(candidate.timestamps)
   );
+}
+
+function sanitizeSplitCalculations(value: unknown): Record<string, number | null> | undefined {
+  if (!isRecord(value)) return undefined;
+  const entries: Array<[string, number | null]> = [];
+  for (const [key, seconds] of Object.entries(value)) {
+    if (seconds === null || typeof seconds === "number" && Number.isFinite(seconds)) entries.push([key, seconds]);
+  }
+  return Object.fromEntries(entries);
 }
 
 export function createSessionId() {
@@ -200,6 +271,6 @@ export function createSessionId() {
     : `session-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
-export function todayDateString() {
-  return new Date().toISOString().slice(0, 10);
+export function todayDateString(now = new Date()) {
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
 }
