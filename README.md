@@ -132,6 +132,7 @@ Private videos are deliberately excluded from Git. See the
 ## Documentation
 
 - [Changelog](CHANGELOG.md): release changes and remaining limitations.
+- [October 22 iteration evidence](docs/iteration-2026-10-22.md): implementation, verification, agent ratings, and field work still required.
 - [Analysis reference](docs/analysis-reference.md): detector behavior, calibration, review tools, saved sessions, and exports.
 - [Benchmark methodology](REAL_VIDEO_BENCHMARK.md): regression observations, label provenance, and known failures.
 - [Demo guide](COLLEGE_DEMO.md): a short walkthrough with results and limitations to discuss.
