@@ -1,9 +1,9 @@
 import { generateText } from "ai";
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
-import { buildCoachingCatalog, validateCoachingPlan, type CoachingPacket } from "../src/lib/coachingPolicy.js";
+import { buildCoachingSelectionCatalog, validateCoachingPlan, type CoachingPacket } from "../src/lib/coachingPolicy.js";
 
 export async function generateNimReview(packet: CoachingPacket, apiKey: string, modelId: string, customFetch?: typeof fetch) {
-  const catalog = buildCoachingCatalog(packet);
+  const catalog = buildCoachingSelectionCatalog(packet);
   const provider = createOpenAICompatible({ name: "nvidia", baseURL: "https://integrate.api.nvidia.com/v1", apiKey, fetch: customFetch });
   const result = await generateText({
     model: provider.chatModel(modelId),
@@ -12,7 +12,8 @@ export async function generateNimReview(packet: CoachingPacket, apiKey: string, 
       providerOptions: { nvidia: { chat_template_kwargs: { enable_thinking: false } } },
     } : {}),
     instructions: "Select review priorities from the supplied catalog. Return ONLY JSON with observationIds (up to three distinct approved observation IDs) and focusId (one approved focus ID). Select at least one observation when available. Do not add prose, measurements, diagnoses, causes, training prescriptions, or other keys. Required limitations are always displayed separately.",
-    prompt: JSON.stringify({ goal: packet.goal, observations: catalog.observations, focuses: catalog.focuses }),
+    prompt: JSON.stringify({ goal: packet.goal, headline: catalog.headline, comparisonRows: catalog.comparisonRows,
+      observations: catalog.observations, focuses: catalog.focuses, suggestedPlan: catalog.defaultPlan }),
     maxOutputTokens: 700, maxRetries: 0, abortSignal: AbortSignal.timeout(40_000),
   });
   let plan = null;

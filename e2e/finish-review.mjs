@@ -1,29 +1,20 @@
-import { spawn } from "node:child_process";
 import path from "node:path";
-import { tmpdir } from "node:os";
 import { mkdir, writeFile } from "node:fs/promises";
 import { createProtocolClient } from "./cdp-client.mjs";
-import { closeTestBrowser } from "./browser-lifecycle.mjs";
+import { startTestBrowser } from "./test-browser.mjs";
+import { readSessionLibraryJson, saveCurrentSession } from "./session-library.mjs";
 
 const url = process.env.CLIMBIQ_E2E_URL ?? "http://127.0.0.1:5173/";
 const disableNative = process.env.CLIMBIQ_E2E_DISABLE_VIDEO_FRAME === "1";
 const directory = path.resolve(process.env.CLIMBIQ_VIDEO_DIR ?? "node_modules/.climbiq-private-videos");
 const recoveryVideo = path.resolve(process.env.CLIMBIQ_RECOVERY_VIDEO ?? "node_modules/.climbiq-robustness/IMG_9076--control-720.mp4");
-const chromePath = process.env.CLIMBIQ_CHROME ?? (process.platform === "darwin" ? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
-  : process.platform === "win32" ? "C:/Program Files/Google/Chrome/Application/chrome.exe" : "/usr/bin/google-chrome");
-const port = 9336;
-const chrome = spawn(chromePath, ["--headless=new", "--no-first-run", "--no-default-browser-check", "--disable-background-timer-throttling",
-  "--disable-renderer-backgrounding", `--remote-debugging-port=${port}`, `--user-data-dir=${path.join(tmpdir(), `climbiq-finish-review-${Date.now()}`)}`, "about:blank"], { stdio: "ignore", windowsHide: true });
+let browser;
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 const report = { appUrl: url, isGroundTruthLabel: false, disableNative };
 let socket; let send;
 try {
-  let connected = false;
-  for (let i = 0; i < 100; i++) {
-    try { if ((await fetch(`http://127.0.0.1:${port}/json/version`)).ok) { connected = true; break; } } catch {}
-    await delay(100);
-  }
-  if (!connected) throw new Error("Chrome did not start.");
+  browser = await startTestBrowser({ label: "finish-review", args: ["--disable-background-timer-throttling", "--disable-renderer-backgrounding"] });
+  const { port } = browser;
   const target = await (await fetch(`http://127.0.0.1:${port}/json/new?${encodeURIComponent(disableNative ? "about:blank" : url)}`, { method: "PUT" })).json();
   socket = new WebSocket(target.webSocketDebuggerUrl);
   await new Promise((resolve, reject) => { socket.addEventListener("open", resolve, { once: true }); socket.addEventListener("error", reject, { once: true }); });
@@ -43,6 +34,13 @@ try {
   const until = async (expression, label, timeout = 20000) => {
     const started = Date.now();
     while (Date.now() - started < timeout) { if (await evaluate(expression)) return; await delay(100); }
+    report.failureDiagnostic = { label, ...await evaluate(`(()=>{const video=document.querySelector('video');const buttons=[...document.querySelectorAll('button')];const rescan=buttons.find(button=>button.textContent==='Rescan near current frame');return {
+      video:video?{readyState:video.readyState,duration:Number.isFinite(video.duration)?video.duration:null,currentTime:video.currentTime,seeking:video.seeking,paused:video.paused,source:video.src,currentSource:video.currentSrc}:null,
+      timestampReview:document.querySelector('.timestamp-review')?.textContent??document.querySelector('.timestamp-review-actions')?.parentElement?.textContent??null,
+      finishTools:document.querySelector('[data-finish-review-tools]')?.textContent??null,
+      rescan:rescan?{disabled:rescan.disabled,text:rescan.textContent}:null,
+      metadata:document.querySelector('.video-meta-line')?.textContent??null,
+      error:document.querySelector('.upload-error')?.textContent??null};})()`) };
     throw new Error(`Timed out: ${label}. ${await evaluate("document.querySelector('.quick-analysis-box')?.textContent ?? ''")}`);
   };
   const button = name => `[...document.querySelectorAll('button')].find(b => b.textContent.trim() === ${JSON.stringify(name)})`;
@@ -52,7 +50,7 @@ try {
     await send("DOM.setFileInputFiles", { files: [path.resolve(directory, name)], objectId: node.result.objectId });
     await until(`document.querySelector('.upload-copy strong')?.textContent === ${JSON.stringify(path.basename(name))} && document.querySelector('.video-meta-line')?.textContent.includes('Ready')`, "video ready");
   };
-  const markers = "JSON.stringify([...document.querySelectorAll('#results tbody tr')].map(r => [...r.querySelectorAll('td')].slice(0,5).map(c => c.textContent)))";
+  const markers = "JSON.stringify([...document.querySelectorAll('#timing-markers tbody tr, #results tbody tr')].map(r => [...r.querySelectorAll('td')].slice(0,5).map(c => c.textContent)))";
   const ready = `${button("Rescan near current frame")} && !${button("Rescan near current frame")}.disabled`;
   await until("Boolean(document.querySelector('input[accept=\"video/*\"]'))", "app");
   report.version = await evaluate("document.querySelector('main').dataset.appVersion");
@@ -116,13 +114,15 @@ try {
   if (await evaluate("Boolean(document.querySelector('[data-finish-review-tools]'))") || await evaluate(markers) !== before) throw new Error("Closed scan published stale results or altered markers.");
   report.closeCancelsWithoutStaleResults = true;
 
-  await click("Save Session");
-  const saved = await evaluate("JSON.parse(localStorage.getItem('climbiq.analysisSessions.v1'))[0]");
+  const saved = JSON.parse(await saveCurrentSession(evaluate))[0];
   if (saved.zones.finishPad?.x1 !== 0.45 || saved.zones.finishPad?.y2 !== 0.12) throw new Error("Pad area was not saved separately.");
   await evaluate("window.__finishReviewReload = true"); await send("Page.reload");
   await until("!window.__finishReviewReload && Boolean(document.querySelector('input[accept=\"video/*\"]'))", "reload");
   await upload("IMG_9199.MOV");
+  await until("Boolean(document.querySelector('.session-load-row select:not(:disabled)'))", "saved attempts loaded");
   await evaluate(`(() => { const s = document.querySelector('.session-load-row select'); s.value = ${JSON.stringify(saved.id)}; s.dispatchEvent(new Event('change',{bubbles:true})); })()`);
+  await until("Boolean(document.querySelector('[data-video-attachment-choice]'))", "saved recording confirmation");
+  await click("Attach to this attempt");
   await until(`${button("Review finish / mark pad")} && !${button("Review finish / mark pad")}.disabled`, "restored session");
   await click("Review finish / mark pad"); await until(ready, "restored pad region");
   report.padAreaSurvivesReload = true;
@@ -139,8 +139,7 @@ try {
   await click("Review finish / mark pad"); await until(ready, "imported pad area");
   report.datasetPadAreaImported = true;
   await evaluate("document.querySelector('.timestamp-review-actions .primary').click()");
-  await click("Save Session");
-  const reviewed = await evaluate("JSON.parse(localStorage.getItem('climbiq.analysisSessions.v1'))[0].timestamps.find(m => m.id === 'finishPad')");
+  const reviewed = JSON.parse(await saveCurrentSession(evaluate))[0].timestamps.find(m => m.id === "finishPad");
   if (reviewed.acceptanceMode !== "frame-review" || !reviewed.note.includes("user-marked finish-pad area")) throw new Error("Manual acceptance lost pad-review provenance.");
   report.explicitAcceptanceProvenance = true;
   // A deliberately unrelated manual body region must not reuse the old lane
@@ -150,7 +149,8 @@ try {
   await click("Capture Current Frame for Zone Setup");
   await until("Boolean(document.querySelector('.zone-frame')?.naturalWidth)", "manual lane frame");
   await evaluate("(() => { const s = document.querySelector('#zones select'); s.value = 'startBody'; s.dispatchEvent(new Event('change', {bubbles:true})); document.querySelector('.zone-overlay').scrollIntoView({block:'center',behavior:'instant'}); })()");
-  const manualRegion = await evaluate(`(() => { const z = JSON.parse(localStorage.getItem('climbiq.analysisSessions.v1'))[0].zones.startLight;
+  const originalLight = JSON.parse(await readSessionLibraryJson(evaluate))[0].zones.startLight;
+  const manualRegion = await evaluate(`(() => { const z = ${JSON.stringify(originalLight)};
     if (!z) throw new Error('Missing original light for lane exclusion test');
     const x = (z.x1 + z.x2) / 2 > .5 ? .02 : .9;
     const r = document.querySelector('.zone-overlay').getBoundingClientRect();
@@ -160,8 +160,7 @@ try {
   await send("Input.dispatchMouseEvent", { type:"mouseMoved", x:manualRegion.x2, y:manualRegion.y2, button:"left", buttons:1 });
   await evaluate("new Promise(resolve => requestAnimationFrame(resolve))");
   await send("Input.dispatchMouseEvent", { type:"mouseReleased", x:manualRegion.x2, y:manualRegion.y2, button:"left", clickCount:1 });
-  await click("Save Session");
-  const manualBody = await evaluate("JSON.parse(localStorage.getItem('climbiq.analysisSessions.v1'))[0].zones.startBody");
+  const manualBody = JSON.parse(await saveCurrentSession(evaluate))[0].zones.startBody;
   if (!manualBody || manualBody.label.startsWith('Automatic lane') || manualBody.x2 - manualBody.x1 > .08) throw new Error("Manual lane test failed to replace the body region.");
   const beforeExcludedFinish = await evaluate(markers);
   await click("Find finish automatically");
@@ -170,8 +169,7 @@ try {
   report.manualBodyLaneExcludesStaleLight = true;
   await upload("IMG_9076.MOV");
   if (await evaluate("Boolean(document.querySelector('[data-finish-review-tools]'))")) throw new Error("Old finish review leaked to a replacement video.");
-  await click("Save Session");
-  if (await evaluate("Boolean(JSON.parse(localStorage.getItem('climbiq.analysisSessions.v1'))[0].zones.finishPad)")) throw new Error("Pad area leaked to a different video.");
+  if (JSON.parse(await saveCurrentSession(evaluate))[0].zones.finishPad) throw new Error("Pad area leaked to a different video.");
   report.replacementClearsPadArea = true;
   }
   // Exercise the real unresolved-Finish path. No imported Start, official total,
@@ -180,7 +178,7 @@ try {
   await click("Run full analysis");
   await until(`${button("Run full analysis")} && !${button("Run full analysis")}.disabled`, "automatic target recovery", 180000);
   const unresolved = await evaluate(markers);
-  const finishUnset = "[...document.querySelectorAll('#results tbody tr')].find(r=>r.textContent.includes('Finish Pad'))?.textContent.includes('Not set')";
+  const finishUnset = "[...document.querySelectorAll('#timing-markers tbody tr, #results tbody tr')].find(r=>r.textContent.includes('Finish Pad'))?.textContent.includes('Not set')";
   if (!(await evaluate(finishUnset))) throw new Error("Automatic target review must not accept Finish.");
   await click("Review finish / mark pad");
   await until("document.querySelectorAll('.finish-review-filmstrip img').length >= 7", "automatic approach filmstrip");
@@ -189,8 +187,7 @@ try {
   if (!autoText?.includes('Approach window:')) throw new Error("Automatic approach window was not shown.");
   await evaluate("document.querySelector('.finish-review-filmstrip button').click()");
   if (await evaluate(markers) !== unresolved) throw new Error("Automatic review thumbnail changed timing.");
-  await click("Save Session");
-  const automaticSaved = await evaluate("JSON.parse(localStorage.getItem('climbiq.analysisSessions.v1'))[0]");
+  const automaticSaved = JSON.parse(await saveCurrentSession(evaluate))[0];
   if (automaticSaved.zones.finishPad || JSON.stringify(automaticSaved).includes('data:image/')) throw new Error("Automatic target or private frames leaked into persisted user labels.");
   if (!(await evaluate("Boolean(document.querySelector('[data-automatic-finish-review]'))"))) throw new Error("Saving the current session cleared its automatic review strip.");
   report.automaticTargetReview = { reason:autoText, finishAccepted:false, preservesUserPadProvenance:true };
@@ -209,4 +206,4 @@ try {
   if (errors.length) throw new Error(`Browser exceptions: ${errors.join(', ')}`);
   report.passed = true;
 } catch (error) { report.passed = false; report.error = String(error); process.exitCode = 1; }
-finally { await closeTestBrowser(chrome, send); socket?.close(); chrome.kill(); console.log(JSON.stringify(report, null, 2)); }
+finally { try { await browser?.close(send); } finally { socket?.close(); } console.log(JSON.stringify(report, null, 2)); }

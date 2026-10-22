@@ -1,0 +1,984 @@
+{
+  "schemaVersion": 1,
+  "capturedAt": "2026-09-22T08:03:35.404Z",
+  "interpretation": "Desktop Chrome repeatability evidence, not timing or pose accuracy. The canvas hint changes rasterized inputs and model trajectories; higher or lower usable-frame counts are not correctness labels. iPhone/WKWebView behavior remains unverified.",
+  "environment": {
+    "os": "Windows",
+    "cpu": "AMD Ryzen 7 8700F, 8 cores / 16 threads",
+    "browser": "Chrome/153.0.8010.53",
+    "nativeIOS": false
+  },
+  "change": {
+    "canvasOptions": {
+      "alpha": false,
+      "willReadFrequently": true
+    },
+    "explicitReadbackAdded": false,
+    "modelOrGateChanges": false,
+    "baselinePoseSourceSha256": "5e0f460b66ac5b5df4c7bb9c68fe200bc7e41c0313def9a308a063d7cd17b42c",
+    "candidatePoseSourceSha256": "9f73abf189ce0cef04e5f2069e957cdadd121d53ba9f20819ce5daa5838e1c37",
+    "pinnedModelSha256": "4eaa5eb7a98365221087693fcc286334cf0858e2eb6e15b506aa4a7ecdcec4ad"
+  },
+  "methodology": {
+    "source": "Original local recordings checked against existing reference checksums; identical calibration, settings, source timestamps, and identity gates within each comparison.",
+    "tracker": "Fresh VIDEO tracker per repeat; same verified model and CPU delegate for main-thread and worker.",
+    "baselineInstrumentation": "Logs crop metadata and copies raw unrounded outputs; no extra pixel reads or VideoFrames. Instrumentation can still affect scheduling. The pre-existing cold/warm variation was reproduced.",
+    "controls": "Fresh documents per mode, three tracker passes per document, reversed order in fresh browser processes, delay-only and before/after readback controls, fixed-RGBA replay.",
+    "pixelPrivacy": "Private crop buffers stayed only in the owned browser during replay; this report stores hashes and aggregate deltas, no pixels or local video paths.",
+    "primarySpecification": "https://html.spec.whatwg.org/multipage/canvas.html",
+    "specificationLimit": "willReadFrequently expresses a software-canvas preference; imageSmoothingQuality does not mandate an interpolation algorithm. Internal browser backing is inferred, not measured."
+  },
+  "runs": [
+    {
+      "fileName": "12.24.mov",
+      "sourceSha256": "b981cc57f8d3d4fe9c57e4e6414f23457ad8bc7eb7cbec5a95c969707d21b333",
+      "backend": "main-thread",
+      "modeOrder": [
+        "baseline",
+        "software",
+        "flush",
+        "delay",
+        "post-readback"
+      ],
+      "modes": [
+        {
+          "mode": "baseline",
+          "elapsedMs": [
+            5348,
+            5528,
+            5923
+          ],
+          "validFrames": [
+            45,
+            35,
+            35
+          ],
+          "requestedFrames": 62,
+          "cropCounts": [
+            84,
+            88,
+            88
+          ],
+          "rawOutputSha256": [
+            "9965ccba56dc662e43173b4945c3b95c0d930266aabec38a48dec812778e4931",
+            "3172173258b9283366e189acf775d9f7718d59dd8d3130ca8832c480b5450e73",
+            "3172173258b9283366e189acf775d9f7718d59dd8d3130ca8832c480b5450e73"
+          ],
+          "cropSequenceSha256": [
+            "29959daceb695704591dc9f3fd17f4f0fee8ee75c55c8eb78a34f5cc808f2ee9",
+            "2270d877db33ac3a885924f65b7aa45152273827ddd23be470eb91c06e46a9f2",
+            "2270d877db33ac3a885924f65b7aa45152273827ddd23be470eb91c06e46a9f2"
+          ],
+          "framesSha256": [
+            "4bbedd6836b1e3d7875dd7af9c5e038fdaee1816e77a1cefb576772fdbd42011",
+            "d1cd107902801a031462c41e1cd9278cd102b37683ba78340f5647fa46040752",
+            "d1cd107902801a031462c41e1cd9278cd102b37683ba78340f5647fa46040752"
+          ]
+        },
+        {
+          "mode": "software",
+          "elapsedMs": [
+            5521,
+            5337,
+            5342
+          ],
+          "validFrames": [
+            44,
+            44,
+            44
+          ],
+          "requestedFrames": 62,
+          "cropCounts": [
+            86,
+            86,
+            86
+          ],
+          "rawOutputSha256": [
+            "b62fa27ba1af44286b06c393dc0c1ef7e4e72aeae870da5a3165cd918eb060da",
+            "b62fa27ba1af44286b06c393dc0c1ef7e4e72aeae870da5a3165cd918eb060da",
+            "b62fa27ba1af44286b06c393dc0c1ef7e4e72aeae870da5a3165cd918eb060da"
+          ],
+          "cropSequenceSha256": [
+            "3f915a40399b06a3f6665eaa2785ce03fd3f3c3c3dadaa2514016290a26a90a9",
+            "3f915a40399b06a3f6665eaa2785ce03fd3f3c3c3dadaa2514016290a26a90a9",
+            "3f915a40399b06a3f6665eaa2785ce03fd3f3c3c3dadaa2514016290a26a90a9"
+          ],
+          "framesSha256": [
+            "b4859621ce65baf0672bbebf62cf352d53ac39de25fba7ed290ad63db8e9d098",
+            "b4859621ce65baf0672bbebf62cf352d53ac39de25fba7ed290ad63db8e9d098",
+            "b4859621ce65baf0672bbebf62cf352d53ac39de25fba7ed290ad63db8e9d098"
+          ]
+        },
+        {
+          "mode": "flush",
+          "elapsedMs": [
+            5535,
+            5573,
+            5441
+          ],
+          "validFrames": [
+            45,
+            45,
+            44
+          ],
+          "requestedFrames": 62,
+          "cropCounts": [
+            80,
+            80,
+            86
+          ],
+          "rawOutputSha256": [
+            "93a54508a299e47f32ed2c8bf76278a3f73e5e1ca77b77faee8b254ce1ab9d2a",
+            "e635885a3c785f919e94a44da64ec04585358bc60fc9c5421ec0ad8c562c0273",
+            "b62fa27ba1af44286b06c393dc0c1ef7e4e72aeae870da5a3165cd918eb060da"
+          ],
+          "cropSequenceSha256": [
+            "fc13b446abf6d1e3eb0a8b3e905707899a1cffabcefed318e521218ca00c9772",
+            "fc13b446abf6d1e3eb0a8b3e905707899a1cffabcefed318e521218ca00c9772",
+            "3f915a40399b06a3f6665eaa2785ce03fd3f3c3c3dadaa2514016290a26a90a9"
+          ],
+          "framesSha256": [
+            "15e235c993619cfdcd32e74bc0fa64c97103e981950ea6c2a3416253483fc796",
+            "15e235c993619cfdcd32e74bc0fa64c97103e981950ea6c2a3416253483fc796",
+            "b4859621ce65baf0672bbebf62cf352d53ac39de25fba7ed290ad63db8e9d098"
+          ]
+        },
+        {
+          "mode": "delay",
+          "elapsedMs": [
+            5344,
+            6319,
+            6747
+          ],
+          "validFrames": [
+            45,
+            35,
+            35
+          ],
+          "requestedFrames": 62,
+          "cropCounts": [
+            84,
+            88,
+            88
+          ],
+          "rawOutputSha256": [
+            "9965ccba56dc662e43173b4945c3b95c0d930266aabec38a48dec812778e4931",
+            "3172173258b9283366e189acf775d9f7718d59dd8d3130ca8832c480b5450e73",
+            "3172173258b9283366e189acf775d9f7718d59dd8d3130ca8832c480b5450e73"
+          ],
+          "cropSequenceSha256": [
+            "29959daceb695704591dc9f3fd17f4f0fee8ee75c55c8eb78a34f5cc808f2ee9",
+            "2270d877db33ac3a885924f65b7aa45152273827ddd23be470eb91c06e46a9f2",
+            "2270d877db33ac3a885924f65b7aa45152273827ddd23be470eb91c06e46a9f2"
+          ],
+          "framesSha256": [
+            "4bbedd6836b1e3d7875dd7af9c5e038fdaee1816e77a1cefb576772fdbd42011",
+            "d1cd107902801a031462c41e1cd9278cd102b37683ba78340f5647fa46040752",
+            "d1cd107902801a031462c41e1cd9278cd102b37683ba78340f5647fa46040752"
+          ]
+        },
+        {
+          "mode": "post-readback",
+          "elapsedMs": [
+            5692,
+            5653,
+            5462
+          ],
+          "validFrames": [
+            45,
+            45,
+            44
+          ],
+          "requestedFrames": 62,
+          "cropCounts": [
+            80,
+            80,
+            86
+          ],
+          "rawOutputSha256": [
+            "93a54508a299e47f32ed2c8bf76278a3f73e5e1ca77b77faee8b254ce1ab9d2a",
+            "e635885a3c785f919e94a44da64ec04585358bc60fc9c5421ec0ad8c562c0273",
+            "b62fa27ba1af44286b06c393dc0c1ef7e4e72aeae870da5a3165cd918eb060da"
+          ],
+          "cropSequenceSha256": [
+            "fc13b446abf6d1e3eb0a8b3e905707899a1cffabcefed318e521218ca00c9772",
+            "fc13b446abf6d1e3eb0a8b3e905707899a1cffabcefed318e521218ca00c9772",
+            "3f915a40399b06a3f6665eaa2785ce03fd3f3c3c3dadaa2514016290a26a90a9"
+          ],
+          "framesSha256": [
+            "15e235c993619cfdcd32e74bc0fa64c97103e981950ea6c2a3416253483fc796",
+            "15e235c993619cfdcd32e74bc0fa64c97103e981950ea6c2a3416253483fc796",
+            "b4859621ce65baf0672bbebf62cf352d53ac39de25fba7ed290ad63db8e9d098"
+          ]
+        }
+      ]
+    },
+    {
+      "fileName": "12.24.mov",
+      "sourceSha256": "b981cc57f8d3d4fe9c57e4e6414f23457ad8bc7eb7cbec5a95c969707d21b333",
+      "backend": "worker",
+      "modeOrder": [
+        "baseline",
+        "software",
+        "flush"
+      ],
+      "modes": [
+        {
+          "mode": "baseline",
+          "elapsedMs": [
+            5305,
+            5524,
+            5873
+          ],
+          "validFrames": [
+            45,
+            35,
+            35
+          ],
+          "requestedFrames": 62,
+          "cropCounts": [
+            84,
+            88,
+            88
+          ],
+          "rawOutputSha256": [
+            "a21b9b4dffa504d0db747dc8dbd1558485d7c9c159d03cff288e3dae4654a30c",
+            "3172173258b9283366e189acf775d9f7718d59dd8d3130ca8832c480b5450e73",
+            "3172173258b9283366e189acf775d9f7718d59dd8d3130ca8832c480b5450e73"
+          ],
+          "cropSequenceSha256": [
+            "29959daceb695704591dc9f3fd17f4f0fee8ee75c55c8eb78a34f5cc808f2ee9",
+            "2270d877db33ac3a885924f65b7aa45152273827ddd23be470eb91c06e46a9f2",
+            "2270d877db33ac3a885924f65b7aa45152273827ddd23be470eb91c06e46a9f2"
+          ],
+          "framesSha256": [
+            "4bbedd6836b1e3d7875dd7af9c5e038fdaee1816e77a1cefb576772fdbd42011",
+            "d1cd107902801a031462c41e1cd9278cd102b37683ba78340f5647fa46040752",
+            "d1cd107902801a031462c41e1cd9278cd102b37683ba78340f5647fa46040752"
+          ]
+        },
+        {
+          "mode": "software",
+          "elapsedMs": [
+            5609,
+            5363,
+            5292
+          ],
+          "validFrames": [
+            44,
+            44,
+            44
+          ],
+          "requestedFrames": 62,
+          "cropCounts": [
+            86,
+            86,
+            86
+          ],
+          "rawOutputSha256": [
+            "b62fa27ba1af44286b06c393dc0c1ef7e4e72aeae870da5a3165cd918eb060da",
+            "b62fa27ba1af44286b06c393dc0c1ef7e4e72aeae870da5a3165cd918eb060da",
+            "b62fa27ba1af44286b06c393dc0c1ef7e4e72aeae870da5a3165cd918eb060da"
+          ],
+          "cropSequenceSha256": [
+            "3f915a40399b06a3f6665eaa2785ce03fd3f3c3c3dadaa2514016290a26a90a9",
+            "3f915a40399b06a3f6665eaa2785ce03fd3f3c3c3dadaa2514016290a26a90a9",
+            "3f915a40399b06a3f6665eaa2785ce03fd3f3c3c3dadaa2514016290a26a90a9"
+          ],
+          "framesSha256": [
+            "b4859621ce65baf0672bbebf62cf352d53ac39de25fba7ed290ad63db8e9d098",
+            "b4859621ce65baf0672bbebf62cf352d53ac39de25fba7ed290ad63db8e9d098",
+            "b4859621ce65baf0672bbebf62cf352d53ac39de25fba7ed290ad63db8e9d098"
+          ]
+        },
+        {
+          "mode": "flush",
+          "elapsedMs": [
+            5222,
+            5459,
+            5389
+          ],
+          "validFrames": [
+            45,
+            45,
+            44
+          ],
+          "requestedFrames": 62,
+          "cropCounts": [
+            80,
+            80,
+            86
+          ],
+          "rawOutputSha256": [
+            "93a54508a299e47f32ed2c8bf76278a3f73e5e1ca77b77faee8b254ce1ab9d2a",
+            "e635885a3c785f919e94a44da64ec04585358bc60fc9c5421ec0ad8c562c0273",
+            "b62fa27ba1af44286b06c393dc0c1ef7e4e72aeae870da5a3165cd918eb060da"
+          ],
+          "cropSequenceSha256": [
+            "fc13b446abf6d1e3eb0a8b3e905707899a1cffabcefed318e521218ca00c9772",
+            "fc13b446abf6d1e3eb0a8b3e905707899a1cffabcefed318e521218ca00c9772",
+            "3f915a40399b06a3f6665eaa2785ce03fd3f3c3c3dadaa2514016290a26a90a9"
+          ],
+          "framesSha256": [
+            "15e235c993619cfdcd32e74bc0fa64c97103e981950ea6c2a3416253483fc796",
+            "15e235c993619cfdcd32e74bc0fa64c97103e981950ea6c2a3416253483fc796",
+            "b4859621ce65baf0672bbebf62cf352d53ac39de25fba7ed290ad63db8e9d098"
+          ]
+        }
+      ]
+    },
+    {
+      "fileName": "12.24.mov",
+      "sourceSha256": "b981cc57f8d3d4fe9c57e4e6414f23457ad8bc7eb7cbec5a95c969707d21b333",
+      "backend": "worker",
+      "modeOrder": [
+        "software",
+        "baseline"
+      ],
+      "modes": [
+        {
+          "mode": "software",
+          "elapsedMs": [
+            5301,
+            5216,
+            5589
+          ],
+          "validFrames": [
+            44,
+            44,
+            44
+          ],
+          "requestedFrames": 62,
+          "cropCounts": [
+            86,
+            86,
+            86
+          ],
+          "rawOutputSha256": [
+            "b62fa27ba1af44286b06c393dc0c1ef7e4e72aeae870da5a3165cd918eb060da",
+            "b62fa27ba1af44286b06c393dc0c1ef7e4e72aeae870da5a3165cd918eb060da",
+            "b62fa27ba1af44286b06c393dc0c1ef7e4e72aeae870da5a3165cd918eb060da"
+          ],
+          "cropSequenceSha256": [
+            "3f915a40399b06a3f6665eaa2785ce03fd3f3c3c3dadaa2514016290a26a90a9",
+            "3f915a40399b06a3f6665eaa2785ce03fd3f3c3c3dadaa2514016290a26a90a9",
+            "3f915a40399b06a3f6665eaa2785ce03fd3f3c3c3dadaa2514016290a26a90a9"
+          ],
+          "framesSha256": [
+            "b4859621ce65baf0672bbebf62cf352d53ac39de25fba7ed290ad63db8e9d098",
+            "b4859621ce65baf0672bbebf62cf352d53ac39de25fba7ed290ad63db8e9d098",
+            "b4859621ce65baf0672bbebf62cf352d53ac39de25fba7ed290ad63db8e9d098"
+          ]
+        },
+        {
+          "mode": "baseline",
+          "elapsedMs": [
+            5368,
+            5681,
+            5692
+          ],
+          "validFrames": [
+            45,
+            35,
+            35
+          ],
+          "requestedFrames": 62,
+          "cropCounts": [
+            84,
+            88,
+            88
+          ],
+          "rawOutputSha256": [
+            "9965ccba56dc662e43173b4945c3b95c0d930266aabec38a48dec812778e4931",
+            "3172173258b9283366e189acf775d9f7718d59dd8d3130ca8832c480b5450e73",
+            "3172173258b9283366e189acf775d9f7718d59dd8d3130ca8832c480b5450e73"
+          ],
+          "cropSequenceSha256": [
+            "29959daceb695704591dc9f3fd17f4f0fee8ee75c55c8eb78a34f5cc808f2ee9",
+            "2270d877db33ac3a885924f65b7aa45152273827ddd23be470eb91c06e46a9f2",
+            "2270d877db33ac3a885924f65b7aa45152273827ddd23be470eb91c06e46a9f2"
+          ],
+          "framesSha256": [
+            "4bbedd6836b1e3d7875dd7af9c5e038fdaee1816e77a1cefb576772fdbd42011",
+            "d1cd107902801a031462c41e1cd9278cd102b37683ba78340f5647fa46040752",
+            "d1cd107902801a031462c41e1cd9278cd102b37683ba78340f5647fa46040752"
+          ]
+        }
+      ]
+    },
+    {
+      "fileName": "IMG_9199.MOV",
+      "sourceSha256": "c906a632d57519e75a8ea95da28a1059a613b7bdb0d63781681b6c71ece8ec26",
+      "backend": "main-thread",
+      "modeOrder": [
+        "baseline",
+        "software"
+      ],
+      "modes": [
+        {
+          "mode": "baseline",
+          "elapsedMs": [
+            3885,
+            3557,
+            3803
+          ],
+          "validFrames": [
+            42,
+            42,
+            42
+          ],
+          "requestedFrames": 52,
+          "cropCounts": [
+            54,
+            54,
+            54
+          ],
+          "rawOutputSha256": [
+            "38983d6ce65beca288a51a0030df3baace03d2e5c00f9f662c79d4dbb1d16886",
+            "38983d6ce65beca288a51a0030df3baace03d2e5c00f9f662c79d4dbb1d16886",
+            "38983d6ce65beca288a51a0030df3baace03d2e5c00f9f662c79d4dbb1d16886"
+          ],
+          "cropSequenceSha256": [
+            "63e7afd87ec99b8d967cf7217cef3c46becce9a18e101a83693e8d9a05d5cfc4",
+            "63e7afd87ec99b8d967cf7217cef3c46becce9a18e101a83693e8d9a05d5cfc4",
+            "63e7afd87ec99b8d967cf7217cef3c46becce9a18e101a83693e8d9a05d5cfc4"
+          ],
+          "framesSha256": [
+            "c5a225584f2a7b4dc9be62b70c4de423f85c0fa7589d9f4ad93b4b41bf5d8e10",
+            "c5a225584f2a7b4dc9be62b70c4de423f85c0fa7589d9f4ad93b4b41bf5d8e10",
+            "c5a225584f2a7b4dc9be62b70c4de423f85c0fa7589d9f4ad93b4b41bf5d8e10"
+          ]
+        },
+        {
+          "mode": "software",
+          "elapsedMs": [
+            4745,
+            4480,
+            4457
+          ],
+          "validFrames": [
+            43,
+            43,
+            43
+          ],
+          "requestedFrames": 52,
+          "cropCounts": [
+            56,
+            56,
+            56
+          ],
+          "rawOutputSha256": [
+            "7df2523ae9f32b86d65017f18b5bb2e36f5ee99334b2358d109287060a9b98b7",
+            "7df2523ae9f32b86d65017f18b5bb2e36f5ee99334b2358d109287060a9b98b7",
+            "7df2523ae9f32b86d65017f18b5bb2e36f5ee99334b2358d109287060a9b98b7"
+          ],
+          "cropSequenceSha256": [
+            "fa879c3cc4d6b856ad40c423bad1b62eebd7fde3387c3de11c66d2b174f19e1d",
+            "fa879c3cc4d6b856ad40c423bad1b62eebd7fde3387c3de11c66d2b174f19e1d",
+            "fa879c3cc4d6b856ad40c423bad1b62eebd7fde3387c3de11c66d2b174f19e1d"
+          ],
+          "framesSha256": [
+            "289385e3ba9f83f654f348884632f9b0c04a94068852abaccea4c6c5f0332dea",
+            "289385e3ba9f83f654f348884632f9b0c04a94068852abaccea4c6c5f0332dea",
+            "289385e3ba9f83f654f348884632f9b0c04a94068852abaccea4c6c5f0332dea"
+          ]
+        }
+      ]
+    },
+    {
+      "fileName": "IMG_9199.MOV",
+      "sourceSha256": "c906a632d57519e75a8ea95da28a1059a613b7bdb0d63781681b6c71ece8ec26",
+      "backend": "worker",
+      "modeOrder": [
+        "software",
+        "baseline"
+      ],
+      "modes": [
+        {
+          "mode": "software",
+          "elapsedMs": [
+            4572,
+            4345,
+            4529
+          ],
+          "validFrames": [
+            43,
+            43,
+            43
+          ],
+          "requestedFrames": 52,
+          "cropCounts": [
+            56,
+            56,
+            56
+          ],
+          "rawOutputSha256": [
+            "7df2523ae9f32b86d65017f18b5bb2e36f5ee99334b2358d109287060a9b98b7",
+            "7df2523ae9f32b86d65017f18b5bb2e36f5ee99334b2358d109287060a9b98b7",
+            "7df2523ae9f32b86d65017f18b5bb2e36f5ee99334b2358d109287060a9b98b7"
+          ],
+          "cropSequenceSha256": [
+            "fa879c3cc4d6b856ad40c423bad1b62eebd7fde3387c3de11c66d2b174f19e1d",
+            "fa879c3cc4d6b856ad40c423bad1b62eebd7fde3387c3de11c66d2b174f19e1d",
+            "fa879c3cc4d6b856ad40c423bad1b62eebd7fde3387c3de11c66d2b174f19e1d"
+          ],
+          "framesSha256": [
+            "289385e3ba9f83f654f348884632f9b0c04a94068852abaccea4c6c5f0332dea",
+            "289385e3ba9f83f654f348884632f9b0c04a94068852abaccea4c6c5f0332dea",
+            "289385e3ba9f83f654f348884632f9b0c04a94068852abaccea4c6c5f0332dea"
+          ]
+        },
+        {
+          "mode": "baseline",
+          "elapsedMs": [
+            3958,
+            3805,
+            3840
+          ],
+          "validFrames": [
+            42,
+            42,
+            42
+          ],
+          "requestedFrames": 52,
+          "cropCounts": [
+            54,
+            54,
+            54
+          ],
+          "rawOutputSha256": [
+            "38983d6ce65beca288a51a0030df3baace03d2e5c00f9f662c79d4dbb1d16886",
+            "38983d6ce65beca288a51a0030df3baace03d2e5c00f9f662c79d4dbb1d16886",
+            "38983d6ce65beca288a51a0030df3baace03d2e5c00f9f662c79d4dbb1d16886"
+          ],
+          "cropSequenceSha256": [
+            "63e7afd87ec99b8d967cf7217cef3c46becce9a18e101a83693e8d9a05d5cfc4",
+            "63e7afd87ec99b8d967cf7217cef3c46becce9a18e101a83693e8d9a05d5cfc4",
+            "63e7afd87ec99b8d967cf7217cef3c46becce9a18e101a83693e8d9a05d5cfc4"
+          ],
+          "framesSha256": [
+            "c5a225584f2a7b4dc9be62b70c4de423f85c0fa7589d9f4ad93b4b41bf5d8e10",
+            "c5a225584f2a7b4dc9be62b70c4de423f85c0fa7589d9f4ad93b4b41bf5d8e10",
+            "c5a225584f2a7b4dc9be62b70c4de423f85c0fa7589d9f4ad93b4b41bf5d8e10"
+          ]
+        }
+      ]
+    }
+  ],
+  "decisiveControls": {
+    "delayFiveMsMatchesEachBaselineRun": [
+      true,
+      true,
+      true
+    ],
+    "beforeReadbackMatchesAfterReadbackPerRun": [
+      true,
+      true,
+      true
+    ],
+    "softwareSameAcrossBackends": [
+      true,
+      true,
+      true
+    ],
+    "softwareSameAcrossFreshProcessReversedOrder": [
+      true,
+      true,
+      true
+    ],
+    "secondClipSoftwareSameAcrossBackendsAndReversedOrder": [
+      true,
+      true,
+      true
+    ],
+    "firstBaselineRawDivergence": {
+      "ordinal": 4,
+      "requestedRawTime": 10.2,
+      "sourcePts": [
+        10.171667,
+        10.171667,
+        10.171667
+      ],
+      "sameCropGeometry": true,
+      "nextCropGeometryDiverges": true
+    },
+    "fixedRgbaReplays": [
+      {
+        "backend": "main-thread",
+        "matchesCapture": true,
+        "rawOutputSha256": "b62fa27ba1af44286b06c393dc0c1ef7e4e72aeae870da5a3165cd918eb060da"
+      },
+      {
+        "backend": "main-thread",
+        "matchesCapture": true,
+        "rawOutputSha256": "b62fa27ba1af44286b06c393dc0c1ef7e4e72aeae870da5a3165cd918eb060da"
+      },
+      {
+        "backend": "main-thread",
+        "matchesCapture": true,
+        "rawOutputSha256": "b62fa27ba1af44286b06c393dc0c1ef7e4e72aeae870da5a3165cd918eb060da"
+      },
+      {
+        "backend": "worker",
+        "matchesCapture": true,
+        "rawOutputSha256": "b62fa27ba1af44286b06c393dc0c1ef7e4e72aeae870da5a3165cd918eb060da"
+      },
+      {
+        "backend": "worker",
+        "matchesCapture": true,
+        "rawOutputSha256": "b62fa27ba1af44286b06c393dc0c1ef7e4e72aeae870da5a3165cd918eb060da"
+      },
+      {
+        "backend": "worker",
+        "matchesCapture": true,
+        "rawOutputSha256": "b62fa27ba1af44286b06c393dc0c1ef7e4e72aeae870da5a3165cd918eb060da"
+      }
+    ]
+  },
+  "costSecondClip": [
+    {
+      "backend": "main-thread",
+      "baselineMedianMs": 3803,
+      "softwareMedianMs": 4480,
+      "caveat": "Three local observations; changed trajectories/crop counts make this a practical workload comparison, not isolated rasterization cost or a general speed guarantee."
+    },
+    {
+      "backend": "worker",
+      "baselineMedianMs": 3840,
+      "softwareMedianMs": 4529,
+      "caveat": "Three local observations; changed trajectories/crop counts make this a practical workload comparison, not isolated rasterization cost or a general speed guarantee."
+    }
+  ],
+  "rasterProbe": [
+    {
+      "rawTime": 10.2,
+      "cursor": 10.2,
+      "pts": 10.171667,
+      "format": "NV12",
+      "colorSpace": {
+        "fullRange": false,
+        "matrix": "bt709",
+        "primaries": "bt709",
+        "transfer": "bt709"
+      },
+      "softwareFirst": false,
+      "output": [
+        {
+          "sourceKind": "video",
+          "kind": "full",
+          "defaultHash": "28e99c630d57a29d33739e0df66c08ee4de8acea9ba98773958b80792c607cc0",
+          "softwareHash": "28e99c630d57a29d33739e0df66c08ee4de8acea9ba98773958b80792c607cc0",
+          "difference": {
+            "differentChannels": 0,
+            "channelCount": 1639680,
+            "meanAbsolute": 0,
+            "maxAbsolute": 0
+          }
+        },
+        {
+          "sourceKind": "video",
+          "kind": "crop",
+          "defaultHash": "5ccd6ad024c049166409ef4b8f1f95d8919af08c0613bd17df8f260f6999dc49",
+          "softwareHash": "81e078fd89774abd4d7b48295c507e22fcb06aac826655862cf14ffb3a60922d",
+          "difference": {
+            "differentChannels": 2854,
+            "channelCount": 182016,
+            "meanAbsolute": 0.01567994022503516,
+            "maxAbsolute": 1
+          }
+        },
+        {
+          "sourceKind": "pinned",
+          "kind": "full",
+          "defaultHash": "28e99c630d57a29d33739e0df66c08ee4de8acea9ba98773958b80792c607cc0",
+          "softwareHash": "28e99c630d57a29d33739e0df66c08ee4de8acea9ba98773958b80792c607cc0",
+          "difference": {
+            "differentChannels": 0,
+            "channelCount": 1639680,
+            "meanAbsolute": 0,
+            "maxAbsolute": 0
+          }
+        },
+        {
+          "sourceKind": "pinned",
+          "kind": "crop",
+          "defaultHash": "5ccd6ad024c049166409ef4b8f1f95d8919af08c0613bd17df8f260f6999dc49",
+          "softwareHash": "5ccd6ad024c049166409ef4b8f1f95d8919af08c0613bd17df8f260f6999dc49",
+          "difference": {
+            "differentChannels": 0,
+            "channelCount": 182016,
+            "meanAbsolute": 0,
+            "maxAbsolute": 0
+          }
+        }
+      ]
+    },
+    {
+      "rawTime": 10.2,
+      "cursor": 10.2,
+      "pts": 10.171667,
+      "format": "NV12",
+      "colorSpace": {
+        "fullRange": false,
+        "matrix": "bt709",
+        "primaries": "bt709",
+        "transfer": "bt709"
+      },
+      "softwareFirst": true,
+      "output": [
+        {
+          "sourceKind": "video",
+          "kind": "full",
+          "defaultHash": "28e99c630d57a29d33739e0df66c08ee4de8acea9ba98773958b80792c607cc0",
+          "softwareHash": "28e99c630d57a29d33739e0df66c08ee4de8acea9ba98773958b80792c607cc0",
+          "difference": {
+            "differentChannels": 0,
+            "channelCount": 1639680,
+            "meanAbsolute": 0,
+            "maxAbsolute": 0
+          }
+        },
+        {
+          "sourceKind": "video",
+          "kind": "crop",
+          "defaultHash": "5ccd6ad024c049166409ef4b8f1f95d8919af08c0613bd17df8f260f6999dc49",
+          "softwareHash": "81e078fd89774abd4d7b48295c507e22fcb06aac826655862cf14ffb3a60922d",
+          "difference": {
+            "differentChannels": 2854,
+            "channelCount": 182016,
+            "meanAbsolute": 0.01567994022503516,
+            "maxAbsolute": 1
+          }
+        },
+        {
+          "sourceKind": "pinned",
+          "kind": "full",
+          "defaultHash": "28e99c630d57a29d33739e0df66c08ee4de8acea9ba98773958b80792c607cc0",
+          "softwareHash": "28e99c630d57a29d33739e0df66c08ee4de8acea9ba98773958b80792c607cc0",
+          "difference": {
+            "differentChannels": 0,
+            "channelCount": 1639680,
+            "meanAbsolute": 0,
+            "maxAbsolute": 0
+          }
+        },
+        {
+          "sourceKind": "pinned",
+          "kind": "crop",
+          "defaultHash": "5ccd6ad024c049166409ef4b8f1f95d8919af08c0613bd17df8f260f6999dc49",
+          "softwareHash": "5ccd6ad024c049166409ef4b8f1f95d8919af08c0613bd17df8f260f6999dc49",
+          "difference": {
+            "differentChannels": 0,
+            "channelCount": 182016,
+            "meanAbsolute": 0,
+            "maxAbsolute": 0
+          }
+        }
+      ]
+    }
+  ],
+  "frozenPrototype": {
+    "singleOptionEdit": true,
+    "sixOriginalWorkflowsPassed": true,
+    "outcomes": [
+      {
+        "fileName": "12.24.mov",
+        "start": {
+          "rawTime": "9.400s",
+          "climbTime": "0.000s",
+          "source": "Fused start detection",
+          "confidence": "High"
+        },
+        "finish": {
+          "rawTime": "21.655s",
+          "climbTime": "12.255s",
+          "source": "Finish light detection",
+          "confidence": "High"
+        },
+        "reviewStart": null,
+        "usableComFrames": 44,
+        "status": "Quick Analyze finished: 44/62 usable COM frames, with start and first movement accepted. 18/20 visible holds were registered to the video."
+      },
+      {
+        "fileName": "IMG_8903.MOV",
+        "start": {
+          "rawTime": "4.290s",
+          "climbTime": "0.000s",
+          "source": "Fused start detection",
+          "confidence": "High"
+        },
+        "finish": {
+          "rawTime": "Not set",
+          "climbTime": "Not set",
+          "source": "Not set",
+          "confidence": "None"
+        },
+        "reviewStart": null,
+        "usableComFrames": null,
+        "status": "Start and movement were analyzed, but COM was paused. No finish boundary was verified, so COM analysis was stopped before scanning the descent. Review or set Finish Pad, then analyze center of mass."
+      },
+      {
+        "fileName": "IMG_9075.MOV",
+        "start": {
+          "rawTime": "Not set",
+          "climbTime": "Not set",
+          "source": "Not set",
+          "confidence": "None"
+        },
+        "finish": {
+          "rawTime": "Not set",
+          "climbTime": "Not set",
+          "source": "Not set",
+          "confidence": "None"
+        },
+        "reviewStart": "Review suggested start (8.435s)",
+        "usableComFrames": null,
+        "status": "Start evidence needs review at 8.435s. Open “Review suggested start,” step to the exact frame, then accept the frame on screen."
+      },
+      {
+        "fileName": "IMG_9076.MOV",
+        "start": {
+          "rawTime": "Not set",
+          "climbTime": "Not set",
+          "source": "Not set",
+          "confidence": "None"
+        },
+        "finish": {
+          "rawTime": "Not set",
+          "climbTime": "Not set",
+          "source": "Not set",
+          "confidence": "None"
+        },
+        "reviewStart": "Review suggested start (2.790s)",
+        "usableComFrames": null,
+        "status": "Start evidence needs review at 2.790s. Open “Review suggested start,” step to the exact frame, then accept the frame on screen."
+      },
+      {
+        "fileName": "IMG_9077.MOV",
+        "start": {
+          "rawTime": "Not set",
+          "climbTime": "Not set",
+          "source": "Not set",
+          "confidence": "None"
+        },
+        "finish": {
+          "rawTime": "Not set",
+          "climbTime": "Not set",
+          "source": "Not set",
+          "confidence": "None"
+        },
+        "reviewStart": "Review suggested start (5.250s)",
+        "usableComFrames": null,
+        "status": "Start evidence needs review at 5.250s. Open “Review suggested start,” step to the exact frame, then accept the frame on screen."
+      },
+      {
+        "fileName": "IMG_9199.MOV",
+        "start": {
+          "rawTime": "7.121s",
+          "climbTime": "0.000s",
+          "source": "Fused start detection",
+          "confidence": "High"
+        },
+        "finish": {
+          "rawTime": "17.472s",
+          "climbTime": "10.351s",
+          "source": "Finish light detection",
+          "confidence": "High"
+        },
+        "reviewStart": null,
+        "usableComFrames": 44,
+        "status": "Quick Analyze finished: 44/52 usable COM frames, with start and first movement accepted. 19/20 visible holds were registered to the video."
+      }
+    ],
+    "pointer": {
+      "passed": true,
+      "handlerMs": 2,
+      "cancellationAndRestoreMs": 1690,
+      "created": 1,
+      "terminated": 1,
+      "pending": 0
+    }
+  },
+  "productionSourceVerification": {
+    "passed": true,
+    "emittedEntry": [
+      "/assets/index-CUDOg9Ix.js"
+    ],
+    "browser": "Chrome/153.0.8010.53",
+    "command": "node e2e/pose-repeatability.mjs --repeats=2",
+    "sameDocumentRepeats": 2,
+    "browserExceptions": [],
+    "outcomes": [
+      {
+        "fileName": "12.24.mov",
+        "sourceSha256": "b981cc57f8d3d4fe9c57e4e6414f23457ad8bc7eb7cbec5a95c969707d21b333",
+        "identical": {
+          "frames": true,
+          "markers": true,
+          "calibration": true,
+          "identityZone": true,
+          "samplingAudit": true
+        },
+        "framesSha256": [
+          "f80fc64116c51199fcb7ae3d6561d02d97a50af526da972f6f3d16bc4776d37d",
+          "f80fc64116c51199fcb7ae3d6561d02d97a50af526da972f6f3d16bc4776d37d"
+        ],
+        "acceptedMarkersSha256": [
+          "2ab87ffb20754c2457dfe7c281373497fe4d7f27036ce136243fee6d577cdff5",
+          "2ab87ffb20754c2457dfe7c281373497fe4d7f27036ce136243fee6d577cdff5"
+        ],
+        "calibrationSha256": [
+          "2327d58e2e91a6d92475ea639ce486a1d93a4bc2644d125d390feccddf4b8d76",
+          "2327d58e2e91a6d92475ea639ce486a1d93a4bc2644d125d390feccddf4b8d76"
+        ],
+        "usableComFrames": [
+          44,
+          44
+        ],
+        "matchesSeparateEarlierBrowserProcess": true
+      },
+      {
+        "fileName": "IMG_9199.MOV",
+        "sourceSha256": "c906a632d57519e75a8ea95da28a1059a613b7bdb0d63781681b6c71ece8ec26",
+        "identical": {
+          "frames": true,
+          "markers": true,
+          "calibration": true,
+          "identityZone": true,
+          "samplingAudit": true
+        },
+        "framesSha256": [
+          "dea27a683fabc80204186bf1c954312167e9de4126fc62389b4a49f0dc8a9461",
+          "dea27a683fabc80204186bf1c954312167e9de4126fc62389b4a49f0dc8a9461"
+        ],
+        "acceptedMarkersSha256": [
+          "18562216e5ba37b7564eaaee5225333c07358e0cf4899e4412600199376ba9b6",
+          "18562216e5ba37b7564eaaee5225333c07358e0cf4899e4412600199376ba9b6"
+        ],
+        "calibrationSha256": [
+          "2beb662540e77c163a5a7157290c47848fd388c9cdf0db8cfe76a0c9f601bd09",
+          "2beb662540e77c163a5a7157290c47848fd388c9cdf0db8cfe76a0c9f601bd09"
+        ],
+        "usableComFrames": [
+          44,
+          44
+        ],
+        "matchesSeparateEarlierBrowserProcess": true
+      }
+    ],
+    "sixOriginalFullWorkflowPassed": true,
+    "acceptedTimingMatchesPrototype": true,
+    "weakStartsRemainReviewOnly": true,
+    "unverifiedFinishStillPausesCom": true,
+    "pointer": {
+      "passed": true,
+      "handlerMs": 1,
+      "cancellationAndRestoreMs": 1707,
+      "created": 1,
+      "terminated": 1,
+      "pending": 0
+    },
+    "note": "Current source build, serial real-video runs. Observed repeatability and ownership cleanup do not establish native or independent accuracy guarantees."
+  },
+  "conclusion": "The observed instability is localized before or during raster preprocessing: same PTS and crop geometry can precede different raw results, fixed pixels replay exactly, waiting alone does not fix it, and software preference gives repeatable raw/crop/frame outputs in these controls. Fractional-crop pixel differences support a rendering-path mechanism; no specific internal GPU implementation or independent accuracy improvement is established."
+}

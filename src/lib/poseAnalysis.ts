@@ -13,6 +13,9 @@ import { sampleFramesInRange, seekTo } from "./videoFrameSampler";
 import { validateWallCalibration } from "./wallCalibration";
 import { readDecodedVideoFrameTime } from "./decodedVideoFrame";
 import { summarizeSourceSampleTiming } from "./sourceSampleTiming";
+import { resolveAppAssetUrl } from "./appAssets";
+import { verifiedPoseModelCache } from "./verifiedModelCache";
+import { configuredPoseExecutionMode, createPoseInference, type PoseExecutionMode } from "./poseInference";
 
 const MEDIAPIPE_WASM_RELATIVE_PATH = "mediapipe/wasm";
 const MODEL_RELATIVE_PATH = "models/pose_landmarker_full.task";
@@ -37,6 +40,9 @@ export interface AnalyzePoseVideoOptions {
   onProgress?: (progress: PoseAnalysisProgress) => void;
   isCancelled?: () => boolean;
   signal?: AbortSignal;
+  /** Explicit backend selection for paired runtime verification. */
+  executionMode?: PoseExecutionMode;
+  onBackendSelected?: (selection: { backend: "main-thread" | "worker"; fallbackReason?: string }) => void;
 }
 
 export class PoseAnalysisCancelledError extends Error {
@@ -57,6 +63,8 @@ export async function analyzePoseVideo({
   onProgress,
   isCancelled,
   signal,
+  executionMode = configuredPoseExecutionMode(import.meta.env.VITE_POSE_EXECUTION),
+  onBackendSelected,
 }: AnalyzePoseVideoOptions): Promise<BiomechanicsResult> {
   validateAnalysisInput(video, startRawTime, endRawTime, settings);
   const calibrationValidation = validateWallCalibration(calibration);
@@ -75,24 +83,15 @@ export async function analyzePoseVideo({
   onProgress?.({ phase: "loading", processed: 0, total: times.length });
   checkCancelled(isCancelled, signal);
 
-  const { FilesetResolver, PoseLandmarker } = await import("@mediapipe/tasks-vision");
+  // Keep main-thread setup parallel with model loading. Worker runs load their
+  // SDK inside the worker so parsing it does not block this document.
+  const [, modelAssetBuffer] = await Promise.all([
+    !executionMode || executionMode === "main-thread" ? import("@mediapipe/tasks-vision") : Promise.resolve(),
+    loadVerifiedModel(signal),
+  ]);
   checkCancelled(isCancelled, signal);
-  const modelAssetBuffer = await loadVerifiedModel(signal);
-  checkCancelled(isCancelled, signal);
-  const vision = await FilesetResolver.forVisionTasks(assetUrl(MEDIAPIPE_WASM_RELATIVE_PATH));
-  checkCancelled(isCancelled, signal);
-  const landmarker = await PoseLandmarker.createFromOptions(vision, {
-    baseOptions: {
-      modelAssetBuffer,
-      delegate: "CPU",
-    },
-    runningMode: "VIDEO",
-    numPoses: 2,
-    minPoseDetectionConfidence: 0.2,
-    minPosePresenceConfidence: 0.2,
-    minTrackingConfidence: 0.25,
-    outputSegmentationMasks: false,
-  });
+  const landmarker = await createPoseInference(modelAssetBuffer, assetUrl(MEDIAPIPE_WASM_RELATIVE_PATH), signal, executionMode)
+    .catch(error => { checkCancelled(isCancelled, signal); throw error; });
 
   const frames: BiomechanicsFrame[] = [];
   const runWarnings = new Set<string>();
@@ -103,9 +102,13 @@ export async function analyzePoseVideo({
   let missedFrames = 0;
   let lastInferenceTimestamp = -1;
   const cropCanvas = document.createElement("canvas");
-  const cropContext = cropCanvas.getContext("2d", { alpha: false });
+  // Prefer a consistent software raster path for fractional video crops.
+  // Default canvas resampling varied across otherwise identical repeated passes.
+  const cropContext = cropCanvas.getContext("2d", { alpha: false, willReadFrequently: true });
 
   try {
+    onBackendSelected?.({ backend: landmarker.backend, fallbackReason: landmarker.fallbackReason });
+    checkCancelled(isCancelled, signal);
     if (!cropContext) {
       throw new Error("Center-of-mass analysis could not create a video crop canvas on this device.");
     }
@@ -126,7 +129,7 @@ export async function analyzePoseVideo({
       renderPoseCrop(video, searchRegion, cropCanvas, cropContext);
       lastInferenceTimestamp = nextPoseInferenceTimestamp(requestedTime, lastInferenceTimestamp);
       let detectedLandmarks = mapPoseCandidatesFromRegion(
-        landmarker.detectForVideo(cropCanvas, lastInferenceTimestamp).landmarks,
+        await landmarker.detect(cropCanvas, lastInferenceTimestamp),
         searchRegion,
       );
       const elapsedSincePrevious = previousCenterTime === undefined
@@ -154,7 +157,7 @@ export async function analyzePoseVideo({
           renderPoseCrop(video, recoveryRegion, cropCanvas, cropContext);
           lastInferenceTimestamp = nextPoseInferenceTimestamp(requestedTime, lastInferenceTimestamp);
           const recoveryLandmarks = mapPoseCandidatesFromRegion(
-            landmarker.detectForVideo(cropCanvas, lastInferenceTimestamp).landmarks,
+            await landmarker.detect(cropCanvas, lastInferenceTimestamp),
             recoveryRegion,
           );
           const recoverySelection = selectTrackedPose(
@@ -215,6 +218,9 @@ export async function analyzePoseVideo({
       onProgress?.({ phase: "analyzing", processed: index + 1, total: times.length });
       await yieldToBrowser();
     }
+  } catch (error) {
+    checkCancelled(isCancelled, signal);
+    throw error;
   } finally {
     landmarker.close();
   }
@@ -460,21 +466,11 @@ export function buildPoseSampleTimes(start: number, end: number, fps: number): n
 
 export async function loadVerifiedModel(signal?: AbortSignal): Promise<Uint8Array> {
   try {
-    const response = await fetch(assetUrl(MODEL_RELATIVE_PATH), { signal });
-    const contentType = response.headers.get("content-type")?.toLowerCase() ?? "";
-    if (!response.ok || contentType.includes("text/html")) {
-      throw new Error("The local pose model is missing or was served as an HTML fallback. Redeploy the complete production build.");
-    }
-    const buffer = await response.arrayBuffer();
-    if (buffer.byteLength !== MODEL_EXPECTED_BYTES) {
-      throw new Error(`Pose model size check failed (${buffer.byteLength} bytes).`);
-    }
-    const digest = await crypto.subtle.digest("SHA-256", buffer);
-    const hash = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
-    if (hash !== MODEL_SHA256) {
-      throw new Error("Pose model integrity check failed.");
-    }
-    return new Uint8Array(buffer);
+    return await verifiedPoseModelCache.load({
+      url: assetUrl(MODEL_RELATIVE_PATH),
+      expectedBytes: MODEL_EXPECTED_BYTES,
+      sha256: MODEL_SHA256,
+    }, signal);
   } catch (error) {
     if (signal?.aborted || (error instanceof DOMException && error.name === "AbortError")) {
       throw new PoseAnalysisCancelledError();
@@ -923,8 +919,7 @@ function fitRegion(centerX: number, centerY: number, width: number, height: numb
 }
 
 function assetUrl(relativePath: string): string {
-  const base = import.meta.env.BASE_URL.endsWith("/") ? import.meta.env.BASE_URL : `${import.meta.env.BASE_URL}/`;
-  return new URL(`${base}${relativePath.replace(/^\//, "")}`, window.location.origin).toString();
+  return resolveAppAssetUrl(relativePath, import.meta.env.BASE_URL, document.baseURI || window.location.href);
 }
 
 function checkCancelled(isCancelled?: () => boolean, signal?: AbortSignal): void {

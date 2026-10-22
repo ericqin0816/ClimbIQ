@@ -8,6 +8,11 @@
   },
   "scripts": {
     "dev": "vite",
+    "preview": "vite preview --host 127.0.0.1",
+    "ios:add": "node scripts/ios.mjs add",
+    "ios:sync": "node scripts/ios.mjs sync",
+    "ios:open": "node scripts/ios.mjs open",
+    "ios:check": "node scripts/ios.mjs check",
     "benchmark:summary": "node scripts/summarize-real-video-benchmark.mjs",
     "benchmark:timing": "node e2e/real-video-timing.mjs",
     "benchmark:robustness": "node scripts/run-video-robustness.mjs",
@@ -18,6 +23,16 @@
     "test:source-frames": "node e2e/source-frame-refinement.mjs",
     "test:upload": "node e2e/upload-flow.mjs",
     "test:coaching": "node e2e/coaching-review.mjs",
+    "test:coaching-save-recovery": "node e2e/coaching-save-recovery.mjs",
+    "test:mobile-library": "node e2e/mobile-library.mjs",
+    "test:library-concurrency": "node e2e/library-concurrency.mjs",
+    "test:video-attachment": "node e2e/video-attachment.mjs",
+    "test:biomechanics-ownership": "node e2e/biomechanics-ownership.mjs",
+    "test:browser-harness": "vitest run e2e/test-browser.test.mjs",
+    "test:pose-worker-build": "node e2e/pose-worker-build-smoke.mjs",
+    "test:analysis-transaction": "node e2e/analysis-transaction.mjs",
+    "benchmark:timing-scope": "node e2e/timing-scope.mjs",
+    "benchmark:pose-repeatability": "node e2e/pose-repeatability.mjs",
     "build": "tsc -b && vite build",
     "check": "npm run typecheck && npm test && npm run build && npm run test:coaching-server",
     "test:coaching-server": "tsc -p tsconfig.coaching-server.json && node scripts/check-coaching-runtime.mjs",
@@ -26,6 +41,11 @@
   },
   "dependencies": {
     "@ai-sdk/openai-compatible": "^3.0.45",
+    "@capacitor/app": "8.1.1",
+    "@capacitor/core": "8.5.2",
+    "@capacitor/filesystem": "8.1.3",
+    "@capacitor/ios": "8.5.2",
+    "@capacitor/share": "8.0.2",
     "@mediapipe/tasks-vision": "0.10.35",
     "@vitejs/plugin-react": "^5.1.2",
     "ai": "^7.0.94",
@@ -36,9 +56,10 @@
     "vite": "7.3.6"
   },
   "devDependencies": {
+    "@capacitor/cli": "8.5.2",
     "@types/node": "^22.20.1",
     "@types/react": "^19.2.7",
     "@types/react-dom": "^19.2.3",
-    "vitest": "4.1.10"
+    "vitest": "4.1.11"
   }
 }

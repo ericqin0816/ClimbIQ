@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import type { SavedAnalysisSession } from "../types";
+import { assessAttemptIdentity } from "./attemptIdentity";
 import {
   createSessionLibraryBackup,
   isSessionLibraryBackup,
   mergeSessionLibraries,
+  preserveKnownAttemptLineage,
 } from "./sessionLibrary";
 
 function session(id: string, updatedAt: string, name = id): SavedAnalysisSession {
@@ -91,5 +93,37 @@ describe("mergeSessionLibraries", () => {
 
     expect(result.sessions[0].name).toBe("Mac copy");
     expect(result).toMatchObject({ addedCount: 0, updatedCount: 0, unchangedCount: 1 });
+  });
+  it.each([undefined, "bad\nlineage", "unrelated-attempt"])("preserves known identity when a newer import supplies %j", incomingLineage => {
+    const original = { ...session("copy", "2026-09-01", "Before edit"), attemptLineageId: "original-attempt" };
+    const imported = { ...session("copy", "2026-09-02", "Corrected annotation"), attemptLineageId: incomingLineage };
+    const before = JSON.stringify(imported);
+    const result = mergeSessionLibraries([original], [imported]);
+    expect(result.sessions[0]).toMatchObject({ name: "Corrected annotation", attemptLineageId: "original-attempt" });
+    expect(result.updatedSessionIds).toEqual(["copy"]);
+    expect(result.updatedCount).toBe(1);
+    expect(JSON.stringify(imported)).toBe(before);
+    // Callers must use updatedSessionIds, not object identity, to detach an open draft.
+    expect(result.sessions[0]).not.toBe(imported);
+    expect(assessAttemptIdentity(session("original-attempt", "2026-09-01"), result.sessions[0]).relationship).toBe("same-attempt");
+  });
+  it("allows legacy records without explicit lineage to adopt valid imported lineage", () => {
+    const result = mergeSessionLibraries([session("copy", "2026-09-01")], [
+      { ...session("copy", "2026-09-02"), attemptLineageId: "original-attempt" },
+    ]);
+    expect(result.sessions[0].attemptLineageId).toBe("original-attempt");
+  });
+  it("does not assign another record's lineage to a new incoming ID", () => {
+    const existing = { ...session("a", "2026-09-01"), attemptLineageId: "ancestor-a" };
+    const incoming = session("b", "2026-09-02");
+    expect(preserveKnownAttemptLineage(existing, incoming).attemptLineageId).toBeUndefined();
+    expect(preserveKnownAttemptLineage(undefined, { ...incoming, attemptLineageId: "new-valid-lineage" }).attemptLineageId).toBe("new-valid-lineage");
+    expect(preserveKnownAttemptLineage(undefined, { ...incoming, attemptLineageId: "bad\nvalue" }).attemptLineageId).toBeUndefined();
+  });
+  it("reports updates by stable IDs while keeping additions and unchanged copies separate", () => {
+    const result = mergeSessionLibraries([session("same", "2026-09-02"), session("changed", "2026-09-01")], [
+      session("same", "2026-09-01"), session("changed", "2026-09-03"), session("new", "2026-09-03"),
+    ]);
+    expect(result).toMatchObject({ addedCount: 1, updatedCount: 1, unchangedCount: 1, updatedSessionIds: ["changed"] });
   });
 });

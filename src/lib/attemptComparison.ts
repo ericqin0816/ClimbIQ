@@ -4,6 +4,7 @@ import { isBiomechanicsResultFresh } from "./biomechanicsFreshness";
 import { sanitizeTimestampSequence } from "./timestampIntegrity";
 import { validateWallCalibration } from "./wallCalibration";
 import { observationComparisonFloor } from "./timingEvidence";
+import { assessAttemptIdentity, type AttemptIdentityAssessment } from "./attemptIdentity";
 
 export type AttemptMetricId =
   | "total"
@@ -42,7 +43,7 @@ export interface AttemptComparisonRow {
   candidate?: AttemptMetric;
   deltaSeconds?: number;
   comparisonFloorSeconds?: number;
-  outcome: "gained" | "lost" | "similar" | "unavailable" | "review";
+  outcome: "gained" | "lost" | "similar" | "unavailable" | "review" | "identity-review";
   explanation: string;
 }
 
@@ -52,6 +53,8 @@ export interface AttemptComparison {
   rows: AttemptComparisonRow[];
   comparableMetricCount: number;
   primaryInsight: string;
+  identity: AttemptIdentityAssessment;
+  performanceComparisonAllowed: boolean;
 }
 
 const METRIC_ORDER: AttemptMetricId[] = [
@@ -81,7 +84,8 @@ const CONFIDENCE_RANK: Record<Confidence, number> = {
   High: 3,
 };
 
-export function summarizeAttempt(session: SavedAnalysisSession): AttemptSummary {
+/** Accepted timing only: safe for library selectors without traversing stored COM. */
+export function summarizeAttemptTiming(session: SavedAnalysisSession): { metrics: AttemptMetric[]; timestamps: TimestampMarker[] } {
   const metrics: AttemptMetric[] = [];
   const timestamps = sanitizeTimestampSequence(session.timestamps, session.videoMetadata?.duration);
   const start = validMarker(timestamps, "startSignal");
@@ -119,6 +123,13 @@ export function summarizeAttempt(session: SavedAnalysisSession): AttemptSummary 
     );
   }
 
+  return { metrics, timestamps };
+}
+
+export function summarizeAttempt(session: SavedAnalysisSession): AttemptSummary {
+  const { metrics, timestamps } = summarizeAttemptTiming(session);
+  const start = validMarker(timestamps, "startSignal");
+  const finish = validMarker(timestamps, "finishPad");
   const biomechanics = session.biomechanics;
   const storedResult = biomechanics?.result;
   const result = validateWallCalibration(biomechanics?.calibration).valid &&
@@ -165,17 +176,22 @@ export function summarizeAttempt(session: SavedAnalysisSession): AttemptSummary 
 export function compareAttempts(
   baselineSession: SavedAnalysisSession,
   candidateSession: SavedAnalysisSession,
+  options: { distinctAttemptsConfirmed?: boolean } = {},
 ): AttemptComparison {
   const baseline = summarizeAttempt(baselineSession);
   const candidate = summarizeAttempt(candidateSession);
   const baselineById = new Map(baseline.metrics.map((item) => [item.id, item]));
   const candidateById = new Map(candidate.metrics.map((item) => [item.id, item]));
+  const identity = assessAttemptIdentity(baselineSession, candidateSession);
+  const performanceComparisonAllowed = identity.relationship !== "same-attempt" &&
+    (!identity.requiresDistinctAttemptConfirmation || options.distinctAttemptsConfirmed === true);
   const rows = METRIC_ORDER.map((id) => compareMetric(
     id,
     baselineById.get(id),
     candidateById.get(id),
     candidate.name,
-  ));
+  )).map(row => !performanceComparisonAllowed && row.deltaSeconds !== undefined
+    ? { ...row, outcome: "identity-review" as const, explanation: identity.explanation } : row);
   const comparable = rows.filter((row) => row.deltaSeconds !== undefined);
   const total = comparable.find((row) => row.id === "total");
   // Contact phases partition the race. Prefer these over overlapping COM thirds
@@ -190,15 +206,26 @@ export function compareAttempts(
     baseline,
     candidate,
     rows,
-    comparableMetricCount: comparable.length,
-    primaryInsight: insights.length ? insights.join(" ")
+    identity, performanceComparisonAllowed,
+    comparableMetricCount: performanceComparisonAllowed ? comparable.length : 0,
+    primaryInsight: !performanceComparisonAllowed ? identity.explanation : insights.length ? insights.join(" ")
       : comparable.length ? "The available differences are below the comparison thresholds. No gain or loss is established."
       : "No comparable timing meets the evidence requirements in both saved attempts.",
   };
 }
 
 export function hasComparableTiming(session: SavedAnalysisSession): boolean {
-  return summarizeAttempt(session).metrics.length > 0;
+  // Hold 10 phases and COM thirds require a total, so they cannot make an
+  // otherwise ineligible attempt eligible. Library filtering must not build
+  // route splits for every stored pose result just to populate two selectors.
+  const timestamps = sanitizeTimestampSequence(session.timestamps, session.videoMetadata?.duration);
+  const start = validMarker(timestamps, "startSignal");
+  if (!start) return false;
+  const finish = validMarker(timestamps, "finishPad");
+  if (finish && finish.rawTime! > start.rawTime!) return true;
+  const movement = validMarker(timestamps, "firstMovement");
+  return Boolean(movement && movement.rawTime! >= start.rawTime! &&
+    (!finish || movement.rawTime! <= finish.rawTime!));
 }
 
 function compareMetric(

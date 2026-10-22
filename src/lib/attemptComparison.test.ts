@@ -26,6 +26,24 @@ describe("attempt comparison", () => {
   it("does not flag evenly timed wall thirds", () => {
     expect(buildSectionReview(withRouteTracking(makeSession("even", { start: 2, finish: 5 }), 2, 5)).items).toHaveLength(0);
   });
+  it("retains diagnostic timing but withholds gain claims for annotation copies", () => {
+    const original = makeSession("original", { start: 1, finish: 11 });
+    const copy = makeSession("copy", { start: 1, finish: 10.6 }); copy.attemptLineageId = original.id;
+    const result = compareAttempts(original, copy, { distinctAttemptsConfirmed: true });
+    expect(result.performanceComparisonAllowed).toBe(false);
+    expect(result.comparableMetricCount).toBe(0);
+    expect(row(result, "total")).toMatchObject({ deltaSeconds: -.4, outcome: "identity-review", baseline: { valueSeconds: 10 }, candidate: { valueSeconds: 9.6 } });
+    expect(result.primaryInsight).toContain("annotation differences");
+  });
+  it("needs explicit distinct-attempt confirmation for overlapping recording details", () => {
+    const a = makeSession("a", { start: 1, finish: 11 }), b = makeSession("b", { start: 1, finish: 10.6 });
+    a.videoMetadata = b.videoMetadata = { fileName: "meet.mp4", duration: 120, videoWidth: 640, videoHeight: 480, metadataLoaded: true };
+    expect(row(compareAttempts(a, b), "total")?.outcome).toBe("identity-review");
+    expect(row(compareAttempts(a, b, { distinctAttemptsConfirmed: true }), "total")?.outcome).toBe("gained");
+    b.timestamps.find(marker => marker.id === "startSignal")!.rawTime = 31;
+    b.timestamps.find(marker => marker.id === "finishPad")!.rawTime = 40.6;
+    expect(compareAttempts(a, b).performanceComparisonAllowed).toBe(true);
+  });
   it("does not call a 150 ms difference a gain when finish observations were 200 ms apart", () => {
     const baseline=makeSession("baseline",{start:1,finish:11});
     const candidate=makeSession("candidate",{start:1,finish:10.85});
@@ -71,6 +89,41 @@ describe("attempt comparison", () => {
   it("recognizes sessions with any accepted comparable timing", () => {
     expect(hasComparableTiming(makeSession("timed", { start: 1, movement: 1.2 }))).toBe(true);
     expect(hasComparableTiming(makeSession("empty", {}))).toBe(false);
+  });
+
+  it("filters eligibility without reading stored tracking for either timed or untimed attempts", () => {
+    for (const [times, expected] of [[{ start: 2, finish: 5 }, true], [{ start: 2, movement: 2.2 }, true], [{ start: 2 }, false]] as const) {
+      const session = makeSession("large stored analysis", times);
+      Object.defineProperty(session, "biomechanics", { get() { throw new Error("Eligibility must not load or traverse COM frames"); } });
+      expect(hasComparableTiming(session)).toBe(expected);
+    }
+  });
+
+  it("matches full-summary eligibility across invalid chronology, duration bounds, and incomplete or unaccepted markers", () => {
+    const starts = [undefined, -1, 0, 2, Number.NaN];
+    const finishes = [undefined, -1, 0, 2, 2.0005, 3, 5, Number.POSITIVE_INFINITY];
+    const movements = [undefined, 0, 2, 2.1, 5];
+    for (const start of starts) for (const finish of finishes) for (const movement of movements) {
+      for (const sourceState of ["accepted", "missing-start", "missing-finish", "missing-movement"] as const) {
+        for (const duration of [undefined, 3]) {
+          const session = makeSession("eligibility", { start, finish, movement, hold10: 2.5 }, "Low");
+          if (duration !== undefined) session.videoMetadata = { fileName: "clip.mp4", duration, videoWidth: 640, videoHeight: 480, metadataLoaded: false };
+          const missingId = sourceState === "missing-start" ? "startSignal" : sourceState === "missing-finish" ? "finishPad" : sourceState === "missing-movement" ? "firstMovement" : undefined;
+          if (missingId) session.timestamps.find(marker => marker.id === missingId)!.source = "Not set";
+          expect(hasComparableTiming(session), JSON.stringify({ start, finish, movement, duration, sourceState })).toBe(summarizeAttempt(session).metrics.length > 0);
+        }
+      }
+    }
+  });
+
+  it("keeps eligibility equivalent with valid, stale, invalid, and legacy tracking/contact evidence", () => {
+    const tracked = withRouteTracking(makeSession("tracked", { start: 2, movement: 2.2, hold10: 3.5, finish: 5 }), 2, 5);
+    const cases = [tracked, structuredClone(tracked), structuredClone(tracked), structuredClone(tracked), structuredClone(tracked)];
+    cases[1].timestamps.find(marker => marker.id === "finishPad")!.rawTime = 4.9;
+    cases[2].biomechanics!.calibration!.staticCameraConfirmed = false;
+    cases[3].timestamps.find(marker => marker.id === "hold10")!.source = "COM halfway estimate";
+    cases[4].timestamps.find(marker => marker.id === "startSignal")!.source = "Not set";
+    for (const session of cases) expect(hasComparableTiming(session)).toBe(summarizeAttempt(session).metrics.length > 0);
   });
 
   it("describes an overall-only comparison without calling it a detailed split", () => {
@@ -162,7 +215,7 @@ describe("attempt comparison", () => {
 
   it("uses pose sample spacing for the COM comparison floor", () => {
     const a = withRouteTracking(makeSession("a", { start: 2, finish: 5 }), 2, 5);
-    const result = compareAttempts(a, structuredClone(a));
+    const result = compareAttempts(a, { ...structuredClone(a), id: "another-recording" });
     expect(row(result, "lower-third")).toMatchObject({ outcome: "similar", comparisonFloorSeconds: 0.4 });
   });
 

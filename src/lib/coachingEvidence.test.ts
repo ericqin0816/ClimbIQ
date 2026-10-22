@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { SavedAnalysisSession, TimestampMarker } from "../types";
-import { buildCoachingEvidence, coachingRunFacts } from "./coachingEvidence";
+import { buildCoachingEvidence, coachingBaselineOptions, coachingEvidenceFingerprint, coachingRunFacts, coachingTimingFacts } from "./coachingEvidence";
 
 function session(): SavedAnalysisSession {
   const markers = [["startSignal", 9.4], ["firstMovement", 9.6], ["hold10", 15.9], ["finishPad", 21.655]] as const;
@@ -25,7 +25,7 @@ describe("coaching session adapter", () => {
     expect(buildCoachingEvidence(current, "overview", baseline).sectionReview.items).toHaveLength(0);
   });
   it("does not flag phase changes inside the threshold or from low-confidence endpoints", () => {
-    const baseline = session(), current = session();
+    const baseline = session(), current = session(); baseline.id = "baseline";
     for (const s of [baseline, current]) s.timestamps.find(m => m.id === "hold10")!.acceptanceMode = "frame-review";
     current.timestamps.find(m => m.id === "hold10")!.rawTime! += .05;
     expect(buildCoachingEvidence(current, "overview", baseline).sectionReview.items).toHaveLength(0);
@@ -51,5 +51,107 @@ describe("coaching session adapter", () => {
     expect(coachingRunFacts(s).timingState).toBe("review");
     s.timestamps.find(m => m.id === "finishPad")!.rawTime = 8;
     expect(coachingRunFacts(s).totalSeconds).toBeNull();
+  });
+  it("prevents self-comparison and rejects incomplete baseline timing", () => {
+    const current = session();
+    const missing = { ...session(), id: "missing", timestamps: [] };
+    const other = { ...session(), id: "other", name: "Other attempt" };
+    expect(coachingBaselineOptions(current, [current, missing, other])).toMatchObject([
+      { id: current.id, eligible: false, reason: "Current attempt" },
+      { id: "missing", eligible: false, reason: "Start or Finish needs review" },
+      { id: "other", eligible: true, totalSeconds: 12.255 },
+    ]);
+    expect(() => buildCoachingEvidence(current, "overview", current)).toThrow("different saved attempt");
+    expect(() => buildCoachingEvidence(current, "overview", missing)).toThrow("different saved attempt");
+  });
+  it("lists baseline eligibility without reading every saved tracking result", () => {
+    const current = session(), candidate = { ...session(), id: "other" };
+    Object.defineProperty(candidate, "biomechanics", { get() { throw new Error("A baseline selector must not traverse saved COM"); } });
+    expect(coachingBaselineOptions(current, [candidate])).toMatchObject([{ eligible: true, totalSeconds: 12.255 }]);
+    candidate.timestamps.find(marker => marker.id === "finishPad")!.confidence = "Low";
+    expect(coachingBaselineOptions(current, [candidate])).toMatchObject([{ eligible: false, totalSeconds: null }]);
+  });
+  it("preserves full-facts timing eligibility and floors at duration, confidence, source, and rounding boundaries", () => {
+    const starts = [null, -1, 0, 9.4, Number.NaN];
+    const finishes = [null, 9.4, 9.4011, 9.402, 21.655, 609.4, 609.4004, 609.402, 610, Number.POSITIVE_INFINITY];
+    for (const start of starts) for (const finish of finishes) for (const confidence of ["High", "Medium", "Low", "None"] as const) {
+      for (const source of ["Manual", "Not set", "Motion-based estimate"] as const) for (const duration of [undefined, 20]) {
+        const candidate = { ...session(), id: "candidate" };
+        const startMarker = candidate.timestamps.find(marker => marker.id === "startSignal")!;
+        const finishMarker = candidate.timestamps.find(marker => marker.id === "finishPad")!;
+        startMarker.rawTime = start;
+        startMarker.source = source;
+        startMarker.observationIntervalSeconds = 1 / 60;
+        finishMarker.rawTime = finish;
+        finishMarker.confidence = confidence;
+        finishMarker.observationIntervalSeconds = .35;
+        if (duration !== undefined) candidate.videoMetadata = { fileName: "clip.mp4", duration, videoWidth: 640, videoHeight: 480, metadataLoaded: false };
+        const fullFacts = coachingRunFacts(candidate);
+        const timingFacts = coachingTimingFacts(candidate);
+        expect(timingFacts, JSON.stringify({ start, finish, confidence, source, duration })).toEqual({ timingState: fullFacts.timingState, totalSeconds: fullFacts.totalSeconds, comparisonFloorSeconds: fullFacts.comparisonFloorsSeconds.total });
+        const option = coachingBaselineOptions(session(), [candidate])[0];
+        expect(option.eligible).toBe(fullFacts.timingState === "accepted");
+        expect(option.totalSeconds).toBe(fullFacts.totalSeconds);
+      }
+    }
+  });
+  it("requests distinct-attempt confirmation for ambiguous metadata collisions", () => {
+    const current = session();
+    current.videoMetadata = { fileName: "run.mov", duration: 25, videoWidth: 640, videoHeight: 480, metadataLoaded: true };
+    const copy = { ...current, id: "copy", name: "Copy" };
+    const independent = { ...copy, id: "independent", videoMetadata: { ...current.videoMetadata, fileName: "next.mov" } };
+    expect(coachingBaselineOptions(current, [copy, independent])).toMatchObject([
+      { eligible: true, requiresDistinctAttemptConfirmation: true }, { eligible: true, requiresDistinctAttemptConfirmation: false },
+    ]);
+    expect(() => buildCoachingEvidence(current, "overview", copy)).toThrow("two distinct climbing attempts");
+    expect(buildCoachingEvidence(current, "overview", copy, { distinctAttemptsConfirmed: true }).packet.baseline).not.toBeNull();
+    copy.attemptLineageId = current.id;
+    expect(() => buildCoachingEvidence(current, "overview", copy, { distinctAttemptsConfirmed: true })).toThrow("different saved attempt");
+  });
+  it("invalidates changed source identity and raw timing even when numeric intervals match", () => {
+    const current = session();
+    const before = coachingEvidenceFingerprint(current);
+    expect(coachingEvidenceFingerprint({ ...current, updatedAt: "2099-01-01" })).toBe(before);
+    expect(coachingEvidenceFingerprint({ ...current, id: "different" })).not.toBe(before);
+    const shifted = { ...current, timestamps: current.timestamps.map(marker => ({ ...marker, rawTime: marker.rawTime! + 2 })) };
+    expect(coachingRunFacts(shifted)).toEqual(coachingRunFacts(current));
+    expect(coachingEvidenceFingerprint(shifted)).not.toBe(before);
+  });
+  it("includes baseline revisions in local identity but never in the hosted packet", () => {
+    const current = session(), baseline = { ...session(), id: "baseline" };
+    const before = buildCoachingEvidence(current, "overview", baseline);
+    baseline.timestamps = baseline.timestamps.map(marker => marker.id === "finishPad" ? { ...marker, rawTime: 22 } : marker);
+    expect(coachingEvidenceFingerprint(current, baseline)).not.toBe(before.sourceFingerprint);
+    expect(JSON.stringify(before.packet)).not.toMatch(/PRIVATE|sourceFingerprint|attemptLineageId|rawTime|fileName|location|notes/);
+  });
+  it("does not alter accepted markers while producing review links", () => {
+    const current = session();
+    const before = JSON.stringify(current);
+    buildCoachingEvidence(current, "halves");
+    expect(JSON.stringify(current)).toBe(before);
+  });
+  it("keeps a coarse Hold 10 interval out of the total comparison rule", () => {
+    const current = session();
+    current.timestamps.forEach(marker => { marker.observationIntervalSeconds = 1 / 60; });
+    const hold = current.timestamps.find(marker => marker.id === "hold10")!;
+    hold.acceptanceMode = "frame-review"; hold.observationIntervalSeconds = .35;
+    const facts = coachingRunFacts(current);
+    expect(facts.comparisonFloorsSeconds.total).toBe(.1);
+    expect(facts.comparisonFloorsSeconds.bottom).toBeCloseTo(.733333);
+    expect(facts.comparisonFloorsSeconds.top).toBeCloseTo(.733333);
+    const baseline = { ...session(), id: "baseline", timestamps: current.timestamps.map(marker => marker.id === "finishPad" ? { ...marker, rawTime: marker.rawTime! + .3 } : { ...marker }) };
+    const evidence = buildCoachingEvidence(current, "overview", baseline);
+    expect(evidence.packet.version).toBe(2);
+    expect(evidence.catalog.comparisonRows[0]).toMatchObject({ outcome: "shorter", thresholdSeconds: .1, deltaSeconds: -.3 });
+  });
+  it.each(["startSignal", "finishPad"] as const)("raises only comparisons that use a coarse %s boundary", boundary => {
+    const current = session();
+    current.timestamps.forEach(marker => { marker.observationIntervalSeconds = 1 / 60; });
+    current.timestamps.find(marker => marker.id === "hold10")!.acceptanceMode = "frame-review";
+    current.timestamps.find(marker => marker.id === boundary)!.observationIntervalSeconds = .35;
+    const floors = coachingRunFacts(current).comparisonFloorsSeconds;
+    expect(floors.total).toBeCloseTo(.733333);
+    expect(floors[boundary === "startSignal" ? "bottom" : "top"]).toBeCloseTo(.733333);
+    expect(floors[boundary === "startSignal" ? "top" : "bottom"]).toBe(.1);
   });
 });

@@ -379,6 +379,8 @@ export interface BiomechanicsSession {
 
 export interface SavedAnalysisSession {
   id: string;
+  /** Annotation copies retain this identity; a genuinely new attempt gets a new one. */
+  attemptLineageId?: string;
   version: 1;
   name: string;
   climberName: string;

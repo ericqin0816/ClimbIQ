@@ -3,6 +3,88 @@
 User-facing changes and their limits. Detailed experiments and regression
 observations are recorded in [benchmarks](benchmarks).
 
+## Unreleased — iPhone beta foundation
+
+- Manual center-of-mass and calibration controls now honor video preparation,
+  attachment, review, and library-save activity. Their own analysis still supports
+  cancellation and publishes completed results.
+- Native exports use secure random bytes when the browser's UUID helper is
+  unavailable. Local coaching works without UUID generation; online request IDs
+  are created only when an online review is requested.
+- Saved comparison and coaching selectors use accepted timing directly instead
+  of processing every stored motion trace. Full tracking summaries are still
+  calculated for the selected attempts.
+- Online coaching waits have a timeout and a Stop waiting action. Local evidence
+  stays available after interrupted or unreadable responses, and retries keep
+  the same request ID to avoid starting a duplicate generation. Saved-review
+  responses must match the requested ID before they can replace the display.
+  Saving unchanged evidence preserves a pending review; changes to its selected
+  baseline invalidate the review and reject late responses.
+- Improved phone focus and layout for video attachment, saved-attempt search,
+  and comparison, including long attempt names and accessible headings.
+- Added an optional Start & finish only scope using the same timing acceptance
+  checks while skipping movement results, pose tracking, and hold splits. Full
+  analysis remains the default; a reviewed Start resumes the scope that requested
+  it even if the selector changes while review is pending.
+- A rerun that finds no confirmed Start or needs review preserves the prior
+  accepted analysis. Discovered lane calibration becomes active only after a
+  replacement Start is accepted; new suggestions remain separate from old timing.
+- Pose inference now uses a background worker on supported browsers, keeping the
+  interface responsive during model processing. Unsupported or blocked workers
+  fall back before processing; native remains on the existing path pending device
+  tests. Paired desktop crop/output checks matched; overall throughput is similar.
+- Pose crops prefer software rendering to reduce repeated-run variation observed
+  in desktop Chrome. Full app repeats matched exactly on two tested recordings;
+  the change has a small processing cost and does not establish pose accuracy or
+  repeatability on an iPhone.
+- Opening a replacement video waits for a decoded frame before changing the
+  current analysis. Damaged or cancelled selections preserve unsaved work. Unknown
+  associations between a recording and saved timing require an explicit choice;
+  matching filenames alone no longer attach old measurements to new footage.
+- Made the total time more readable on phones, clarified timing status, and made
+  Duplicate include the current unsaved edits while preserving the original.
+- Added searchable saved attempts, timing filters, offline saved-run editing and
+  review, and undo for the most recent deletion. Visual and keyboard workflow
+  order now agree, with the saved library after the current analysis.
+- Protected browser saves against stale tabs: a conflicting write preserves the
+  newer library, while the open analysis can be exported or saved as a separate
+  copy after reloading. Migration and first saves use the same transaction guard.
+- Copied analyses retain the original attempt identity through save, duplication,
+  import, and export. Editing their markers cannot become a performance gain;
+  ambiguous legacy recordings require confirmation that they are distinct runs.
+- Coaching comparisons now use separate timing thresholds for the total and each
+  reviewed phase, so a coarse Hold 10 marker does not hide a supported total-time
+  difference. Existing version-one hosted reviews remain readable.
+- Coaching now leads with supported overall/section changes, explains offsetting
+  phases, and keeps unresolved evidence checks visible. Source fingerprints
+  reject stale review links and responses; native review remains local.
+- Refined upper electronic finish cues using actual source frames, including
+  distinct low-frame-rate observations. Failed fine verification cannot retain
+  a High-confidence coarse finish. Motion scans now honor cancellation promptly.
+- Reused one integrity-verified pose model while retaining a fresh tracker for
+  each analysis. Three-pass fetches fell from three to one; measured warm setup
+  savings were small, and no general analysis speedup is claimed.
+- Added elapsed analysis feedback and best-effort screen-awake handling while
+  automatic analysis is active, with release on completion or backgrounding.
+- Added a Capacitor iPhone project with bundled analysis assets, official App,
+  Filesystem and Share plugins, privacy metadata, and portable setup/check commands.
+- Added a phone workflow with larger touch controls, safe-area spacing, recording
+  guidance, and quick navigation between analysis, review, and saved attempts.
+- Moved the saved library to IndexedDB on the web and private filesystem snapshots
+  on iOS. Existing localStorage records are retained during migration; failed
+  loads or writes are surfaced without claiming the library was saved.
+- Added native Share / Save to Files exports and explicit cancelled-export handling.
+- Cancelled automatic analysis and cancellable frame-review passes when the native app becomes inactive, and disabled
+  hosted coaching in the native shell until its backend is configured separately.
+- Fixed model/WASM URLs for Capacitor's custom scheme and patched Vitest to 4.1.11.
+- Added the [iPhone handoff](docs/ios-beta.md), [beta study plan](docs/beta-validation.md),
+  and empty reviewer worksheet. These are preparation, not newly measured accuracy.
+
+The bundle ID and native icon/launch artwork remain placeholders. Xcode compilation,
+signing, permission prompts, and real-device performance have not been verified on
+Windows. Three moderate development-only Capacitor CLI dependency advisories remain
+documented in the handoff; production dependencies pass the setup-time npm audit.
+
 ## 0.29.0 — 2026-09-08
 
 - Added a local evidence-review panel with accepted timing, frame-reviewed

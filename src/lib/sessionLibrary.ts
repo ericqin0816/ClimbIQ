@@ -1,4 +1,5 @@
 import type { SavedAnalysisSession } from "../types";
+import { sanitizeAttemptLineageId } from "./attemptIdentity";
 
 export const SESSION_LIBRARY_FORMAT = "climbiq-session-library";
 export const SESSION_LIBRARY_VERSION = 1;
@@ -15,6 +16,17 @@ export interface SessionLibraryMergeResult {
   addedCount: number;
   updatedCount: number;
   unchangedCount: number;
+  updatedSessionIds: string[];
+}
+
+/** Updating an existing record cannot erase or reassign its known attempt identity. */
+export function preserveKnownAttemptLineage(
+  existing: SavedAnalysisSession | undefined,
+  incoming: SavedAnalysisSession,
+): SavedAnalysisSession {
+  const known = existing?.id === incoming.id ? sanitizeAttemptLineageId(existing.attemptLineageId) : undefined;
+  const lineage = known ?? sanitizeAttemptLineageId(incoming.attemptLineageId);
+  return incoming.attemptLineageId === lineage ? incoming : { ...incoming, attemptLineageId: lineage };
 }
 
 export function createSessionLibraryBackup(
@@ -49,18 +61,20 @@ export function mergeSessionLibraries(
   let addedCount = 0;
   let updatedCount = 0;
   let unchangedCount = 0;
+  const updatedSessionIds = new Set<string>();
 
   for (const incoming of imported) {
     const existing = merged.get(incoming.id);
     if (!existing) {
-      merged.set(incoming.id, incoming);
+      merged.set(incoming.id, preserveKnownAttemptLineage(undefined, incoming));
       addedCount += 1;
       continue;
     }
 
     if (timestampValue(incoming.updatedAt) > timestampValue(existing.updatedAt)) {
-      merged.set(incoming.id, incoming);
+      merged.set(incoming.id, preserveKnownAttemptLineage(existing, incoming));
       updatedCount += 1;
+      updatedSessionIds.add(incoming.id);
     } else {
       unchangedCount += 1;
     }
@@ -71,6 +85,7 @@ export function mergeSessionLibraries(
     addedCount,
     updatedCount,
     unchangedCount,
+    updatedSessionIds: [...updatedSessionIds],
   };
 }
 
