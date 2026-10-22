@@ -4,6 +4,7 @@ const nonempty = value => typeof value === "string" && value.trim().length > 0;
 const assert = (condition, message) => { if (!condition) throw new Error(message); };
 const date = value => nonempty(value) && Number.isFinite(Date.parse(value));
 const hash = value => typeof value === "string" && /^[a-f0-9]{64}$/i.test(value);
+const canonicalHash = value => typeof value === "string" ? value.toLowerCase() : value;
 const median = values => quantile(values, .5);
 function quantile(values, q) {
   if (!values.length) return null;
@@ -74,11 +75,16 @@ function validReview(row) {
 
 function referenceFor(rows, event) {
   const eventRows = rows.filter(row => row.event === event);
+  const originalRows = eventRows.filter(row => row.reviewRole === "reviewer");
+  assert(originalRows.length <= 2, `Expected exactly two original reviewers for ${rows[0]?.clipId}/${event}; preserve additional reviews outside this scoring worksheet.`);
   const reviewers = eventRows.filter(row => row.reviewRole === "reviewer" && validReview(row));
   const adjudications = eventRows.filter(row => row.reviewRole === "adjudicator" && validReview(row) && row["labelReview.status"] === "confirmed");
   assert(adjudications.length <= 1, `Multiple confirmed adjudications for ${rows[0]?.clipId}/${event}.`);
   const adjudication = adjudications[0];
-  const references = new Set(adjudication?.adjudicationReference?.split(/[;|]/).map(value => value.trim()) ?? []);
+  const tokens = adjudication?.adjudicationReference?.split(/[;|]/).map(value => value.trim()) ?? [];
+  const references = new Set(tokens);
+  if (adjudication) assert(tokens.length === 2 && references.size === 2 && tokens.every(id => originalRows.some(row => row.labelId === id)),
+    `Confirmed adjudication for ${rows[0]?.clipId}/${event} must reference exactly two existing original label IDs from this clip/event.`);
   const originals = reviewers.filter(row => references.has(row.labelId));
   const differentPeople = new Set(originals.map(row => row["labelReview.reviewerId"])).size >= 2;
   const comparable = reviewers.length === 2 && reviewers[0].evidenceSource === reviewers[1].evidenceSource;
@@ -116,8 +122,8 @@ export function evaluateValidationStudy(study, labels) {
       assert(!groups.has(key) || groups.get(key) === clip.datasetSplit, `Split leakage in ${key}.`); groups.set(key, clip.datasetSplit);
     }
     if (!clip.parentClipId) {
-      assert(!attempts.has(clip.attemptId) && !originalHashes.has(clip.sourceSha256), `Repeated independent attempt/file ${clip.attemptId}; identify derivatives with parentClipId.`);
-      attempts.add(clip.attemptId); originalHashes.add(clip.sourceSha256);
+      assert(!attempts.has(clip.attemptId) && !originalHashes.has(canonicalHash(clip.sourceSha256)), `Repeated independent attempt/file ${clip.attemptId}; identify derivatives with parentClipId.`);
+      attempts.add(clip.attemptId); originalHashes.add(canonicalHash(clip.sourceSha256));
     }
     clips.set(clip.clipId, clip);
   }
@@ -128,7 +134,7 @@ export function evaluateValidationStudy(study, labels) {
   for (const run of study.predictions) {
     const clip = clips.get(run.clipId);
     assert(nonempty(run.runId) && !runs.has(run.runId) && clip, "Duplicate run ID or unknown prediction clip.");
-    assert(run.sourceSha256 === clip.sourceSha256 && run.appCommit === protocol.appCommit, `Run ${run.runId} does not match the original hash or locked build.`);
+    assert(canonicalHash(run.sourceSha256) === canonicalHash(clip.sourceSha256) && run.appCommit === protocol.appCommit, `Run ${run.runId} does not match the original hash or locked build.`);
     assert(date(run.startedAt) && Date.parse(run.startedAt) >= Date.parse(protocol.frozenAt), `Run ${run.runId} predates the frozen protocol.`);
     assert(run.events && typeof run.events === "object", `Missing immutable automatic predictions for ${run.runId}.`);
     for (const event of EVENTS) {
@@ -141,7 +147,7 @@ export function evaluateValidationStudy(study, labels) {
   for (const row of labels) {
     const clip = clips.get(row.clipId);
     assert(nonempty(row.labelId) && !labelIds.has(row.labelId), "Every original label and adjudication needs a unique labelId."); labelIds.add(row.labelId);
-    assert(clip && row.studyId === study.studyId && row.sourceSha256 === clip.sourceSha256, `Label ${row.labelId} does not match the study/recording hash.`);
+    assert(clip && row.studyId === study.studyId && canonicalHash(row.sourceSha256) === canonicalHash(clip.sourceSha256), `Label ${row.labelId} does not match the study/recording hash.`);
     assert([...EVENTS, "firstMovement", "padRelease", "officialTotal"].includes(row.event), `Unknown label event ${row.event}.`);
     assert(["reviewer", "adjudicator"].includes(row.reviewRole) && ["pending", "confirmed", "disputed", "unobservable"].includes(row["labelReview.status"]), `Invalid role/status for label ${row.labelId}.`);
     if (row.reviewRole === "reviewer") {
@@ -153,6 +159,8 @@ export function evaluateValidationStudy(study, labels) {
       (!finite(row["labelReview.rawTime"]) || row["labelReview.rawTime"] >= row.lastBeforeRawTime && row["labelReview.rawTime"] <= row.firstAfterRawTime), `Invalid observation bracket for label ${row.labelId}.`);
   }
   for (const clip of study.clips) assert(!runs.has(clip.primaryRunId) || runs.get(clip.primaryRunId).clipId === clip.clipId, `Primary run belongs to another clip: ${clip.clipId}.`);
+  const referencesByClip = new Map(study.clips.map(clip => [clip.clipId,
+    Object.fromEntries(EVENTS.map(event => [event, referenceFor(labels.filter(row => row.clipId === clip.clipId), event)]))]));
   const originals = study.clips.filter(clip => !clip.parentClipId);
   const heldOut = originals.filter(clip => clip.datasetSplit === "held-out" && clip.cohort === "fixed-phone");
   const output = {};
@@ -163,7 +171,7 @@ export function evaluateValidationStudy(study, labels) {
       const run = runs.get(clip.primaryRunId);
       assert(!run || run.clipId === clip.clipId, `Primary run belongs to another clip: ${clip.clipId}.`);
       const prediction = run?.events[event];
-      const reference = referenceFor(labels.filter(row => row.clipId === clip.clipId), event);
+      const reference = referencesByClip.get(clip.clipId)[event];
       for (const status of Object.keys(statuses)) statuses[status] += reference.statuses[status];
       if (reference.time !== null) confirmedReferences++;
       if (reference.agreement !== null) agreements.push(reference.agreement);
@@ -186,16 +194,28 @@ export function evaluateValidationStudy(study, labels) {
       needsReview, missing, failed, notRun,
       preAdjudicationAgreement: { comparablePairs: agreements.length, medianAbsoluteDifferenceSeconds: median(agreements), p95AbsoluteDifferenceSeconds: quantile(agreements, .95), definitionDisagreements } };
   }
+  const firstUse = new Map();
   for (const observation of study.observations) {
     assert(nonempty(observation.participantAlias) && nonempty(observation.captureSessionId), "Workflow observations require participant and session aliases.");
+    assert(["first-use", "follow-up"].includes(observation.taskRole) && date(observation.observedAt), "Workflow observations require taskRole (first-use/follow-up) and an observedAt date.");
     assert(observation.correctionSeconds == null || finite(observation.correctionSeconds), "Correction seconds must be measured, nonnegative, or null.");
     for (const field of ["completedImportReviewSave", "assistanceRequired", "voluntaryReturn"]) assert(observation[field] == null || typeof observation[field] === "boolean", `Observation ${field} must be true, false, or null.`);
+    if (observation.taskRole === "first-use") {
+      assert(!firstUse.has(observation.participantAlias), "Only one first-use observation is allowed per participant.");
+      assert(observation.voluntaryReturn == null, "A first-use session cannot establish a voluntary return.");
+      firstUse.set(observation.participantAlias, observation);
+    }
+  }
+  for (const observation of study.observations.filter(row => row.taskRole === "follow-up")) {
+    const baseline = firstUse.get(observation.participantAlias);
+    assert(baseline && baseline.captureSessionId !== observation.captureSessionId && Date.parse(observation.observedAt) > Date.parse(baseline.observedAt),
+      "Follow-up observations require this participant's first-use record and a distinct, later training session.");
   }
   const corrections = study.observations.map(row => row.correctionSeconds).filter(finite);
   const participants = new Set(study.observations.map(row => row.participantAlias));
   const returned = new Set(study.observations.filter(row => row.voluntaryReturn === true).map(row => row.participantAlias));
   const returnObserved = new Set(study.observations.filter(row => typeof row.voluntaryReturn === "boolean").map(row => row.participantAlias));
-  const completionObserved = study.observations.filter(row => typeof row.completedImportReviewSave === "boolean" && typeof row.assistanceRequired === "boolean");
+  const completionObserved = [...firstUse.values()].filter(row => typeof row.completedImportReviewSave === "boolean" && typeof row.assistanceRequired === "boolean");
   const phones = new Set(originals.map(row => row.capturePhoneModel)), gyms = new Set(originals.map(row => row.gymAlias));
   const enoughEndpoints = output.start.confirmedReferences >= 20 && output.finish.confirmedReferences >= 20;
   return {
@@ -209,7 +229,10 @@ export function evaluateValidationStudy(study, labels) {
       acceptedEndpoints: originals.filter(clip => clip.datasetSplit === "held-out" && clip.cohort === "rejection").reduce((n, clip) => n + EVENTS.filter(event => runs.get(clip.primaryRunId)?.events[event]?.status === "accepted").length, 0) },
     workflow: { participants: participants.size, observations: study.observations.length, correctionSeconds: { measured: corrections.length, unmeasured: study.observations.length - corrections.length, median: median(corrections), p95: quantile(corrections, .95) },
       unassistedCompletion: proportion(completionObserved.filter(row => row.completedImportReviewSave && !row.assistanceRequired).length, completionObserved.length),
-      voluntaryReturn: proportion(returned.size, returnObserved.size), trainingDecisionsRecorded: study.observations.filter(row => nonempty(row.trainingDecision)).length },
+      unassistedCompletionLowerBound: proportion(completionObserved.filter(row => row.completedImportReviewSave && !row.assistanceRequired).length, participants.size),
+      completionOutcomeUnmeasuredParticipants: participants.size - completionObserved.length,
+      voluntaryReturn: proportion(returned.size, returnObserved.size), followUpNotObservedParticipants: participants.size - returnObserved.size,
+      trainingDecisionsRecorded: study.observations.filter(row => nonempty(row.trainingDecision)).length },
     readiness: { targetAttemptCountMet: originals.length >= 30, atLeastThreePhones: phones.size >= 3, atLeastTwoGyms: gyms.size >= 2,
       endpointAutomaticCoverageTargetMet: output.start.automaticCoverage.fraction !== null && output.start.automaticCoverage.fraction >= .5 && output.finish.automaticCoverage.fraction >= .5,
       allAutomaticEndpointsVerified: output.start.automaticallyAcceptedWithoutComparableReference === 0 && output.finish.automaticallyAcceptedWithoutComparableReference === 0,

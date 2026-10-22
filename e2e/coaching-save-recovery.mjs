@@ -105,9 +105,9 @@ async function importFixture(protocol, value, name) {
   const fixturePath = path.join(browser.temporaryRoot, `${name}.json`);
   await writeFile(fixturePath, JSON.stringify(value));
   const before = await readSessionLibraryJson(protocol.evaluate);
-  const reference = await protocol.send("Runtime.evaluate", { expression: "document.querySelector('#saved-attempts input[type=file]')" });
+  const reference = await protocol.send("Runtime.evaluate", { expression: "document.querySelector('#saved-attempts input[type=file][accept*=json]')" });
   assert(reference.result.objectId, "The session import input is missing.");
-  assert(await protocol.evaluate("!document.querySelector('#saved-attempts input[type=file]').disabled"), "Import must be available while hosted review waits.");
+  assert(await protocol.evaluate("!document.querySelector('#saved-attempts input[type=file][accept*=json]').disabled"), "Import must be available while hosted review waits.");
   await protocol.send("DOM.setFileInputFiles", { objectId: reference.result.objectId, files: [fixturePath] });
   await waitForSessionLibraryChange(protocol.evaluate, before);
 }

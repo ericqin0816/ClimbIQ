@@ -1,11 +1,13 @@
 import PracticeWalkthrough from "./components/PracticeWalkthrough";
 import { createPracticeSession, practiceIdForLineage, practiceRecordings, type PracticeId } from "./lib/practiceRecordings";
 import { resolveAppAssetUrl } from "./lib/appAssets";
-import { INITIAL_TIMESTAMPS, marker, getTimestamp, isDatasetExport, datasetToSavedSession, timestampsFromDataset, mergeTimestampDefaults, videoMetadataMatches, timestampsFitVideo, normalizedZonesEqual, decodeSavedSession, sanitizeSavedSession, isSavedAnalysisSession, createSessionId, todayDateString } from "./lib/sessionCodec";
+import {
+  INITIAL_TIMESTAMPS, marker, getTimestamp, isDatasetExport, datasetToSavedSession, mergeTimestampDefaults, videoMetadataMatches, timestampsFitVideo, normalizedZonesEqual, decodeSavedSession, sanitizeSavedSession, isSavedAnalysisSession, createSessionId, todayDateString
+} from "./lib/sessionCodec";
 import { ChangeEvent, CSSProperties, DragEvent, lazy, PointerEvent, Suspense, SyntheticEvent, useEffect, useMemo, useRef, useState } from "react";
 import { Capacitor } from "@capacitor/core";
 import { useLibraryController } from "./lib/useLibraryController";
-import { resolveAttemptLineageId, sanitizeAttemptLineageId } from "./lib/attemptIdentity";
+import { resolveAttemptLineageId } from "./lib/attemptIdentity";
 import { exportTextFile, exportResultMessage } from "./lib/exportFile";
 import { MobileWorkflow, NextStepCard } from "./components/MobileWorkflow";
 import RecordingGuide from "./components/RecordingGuide";
@@ -63,8 +65,8 @@ import { associateStartLanes, startLaneId, type AnalysisLaneCandidate, type Star
 import { prepareFinishLaneCandidates } from "./lib/finishLaneEvidence";
 import { assessAutomaticStartBodyAudit } from "./lib/startBodyAudit";
 import { deriveAutomaticStartBodyZone, resolveAnalysisBodyZone } from "./lib/startRegion";
-import { applyTimestampAcceptance, clearMarkerTimestamp, recalculateTimestampClimbs, sanitizeTimestampSequence, sanitizeAcceptanceMode, timestampAcceptanceAudit } from "./lib/timestampIntegrity";
-import { finishPrecisionNote, sanitizeObservationInterval, timingConfidence } from "./lib/timingEvidence";
+import { applyTimestampAcceptance, clearMarkerTimestamp, sanitizeTimestampSequence, timestampAcceptanceAudit } from "./lib/timestampIntegrity";
+import { finishPrecisionNote, timingConfidence } from "./lib/timingEvidence";
 import { captureFrame, captureVideoPixels, clamp, hasUsableVideoMetadata, roundTime, sampleFrameAt, sampleZoneOpponentColor, seekTo } from "./lib/videoFrameSampler";
 import { getVideoUiState } from "./lib/videoUiState";
 import {
@@ -239,6 +241,7 @@ function App() {
 
   const [frameDebug, setFrameDebug] = useState<FrameSamplingDebug | null>(null);
   const [frameTestRunning, setFrameTestRunning] = useState(false);
+  const [calibrationSampling, setCalibrationSampling] = useState(false);
   const [videoRestoreStatus, setVideoRestoreStatus] = useState("");
 
   const [startSearchStart, setStartSearchStart] = useState(0);
@@ -563,7 +566,7 @@ function App() {
       : calibrationReady && ["calibrated", "blocked", "manual"].includes(resolvedStartProfile)
       ? "Calibrated light transition"
       : "Generic color-distance detection";
-  const videoTaskRunning = frameTestRunning || startRunning || movementRunning || movementPreviewRunning || finishRunning || biomechanicsRunning || autoAnalysisRunning || secondPassRunning || finishReviewRunning;
+  const videoTaskRunning = calibrationSampling || frameTestRunning || startRunning || movementRunning || movementPreviewRunning || finishRunning || biomechanicsRunning || autoAnalysisRunning || secondPassRunning || finishReviewRunning;
   const videoReplacementBlocked = videoTaskRunning || librarySaving || importPending;
   const videoAnalysisRunning = videoReplacementBlocked || videoPreparationPending || pendingVideoAttachment !== null;
   const visibleTimestampReview = timestampReview && (!timestampReview.secondPassBasis || timestampReview.secondPassBasis === activeHold10SecondPass) ? timestampReview : null;
@@ -1444,13 +1447,20 @@ function App() {
       return;
     }
 
+    const context = analysisContextRef.current;
+    const source = video.src;
+    const current = () => context === analysisContextRef.current && videoRef.current === video && video.src === source;
+    setCalibrationSampling(true);
     let sample;
     try {
-      sample = await sampleZoneOpponentColor(video, video.currentTime, zone);
+      sample = await runWithVideoRestore(video, () => sampleZoneOpponentColor(video, video.currentTime, zone), "Calibration frame sampled.", "light calibration");
     } catch (error) {
-      setCalibrationStatus(error instanceof Error ? `Calibration sample failed: ${error.message}` : "Calibration sample failed.");
+      if (current()) setCalibrationStatus(error instanceof Error ? `Calibration sample failed: ${error.message}` : "Calibration sample failed.");
       return;
+    } finally {
+      setCalibrationSampling(false);
     }
+    if (!current()) return;
     pendingAutomaticContextRef.current = null;
     automaticLaneCandidatesRef.current = [];
     setStartLightCalibration((current) => {

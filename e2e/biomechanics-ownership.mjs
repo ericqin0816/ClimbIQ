@@ -189,7 +189,7 @@ try {
   await until("document.querySelector('[data-session-storage-state]')?.dataset.sessionStorageState === 'ready'", "library");
   await file(".upload-dropzone input[type=file]", path.join(browser.temporaryRoot, "red/sample.mp4"));
   await until("Boolean(document.querySelector('#upload .analyze-button:not(:disabled)'))", "red ready");
-  await file("#saved-attempts input[type=file]", sessionFile);
+  await file("#saved-attempts input[type=file][accept*=json]", sessionFile);
   await until("Boolean(document.querySelector('[data-video-attachment-choice]'))", "attach saved fixture");
   await click("Attach to this attempt");
   await until(`Boolean(document.querySelector('#upload .analyze-button:not(:disabled)')) &&

@@ -28,6 +28,20 @@ async function savePractice(page: Page, count: number) {
   await expect(page.locator(".attempt-library-list > button")).toHaveCount(count);
 }
 
+async function prepareReplay(page: Page) {
+  const sessions = [createPracticeSession("a"), createPracticeSession("b")];
+  for (const session of sessions) session.timestamps.find(marker => marker.id === "hold10")!.acceptanceMode = "frame-review";
+  await ready(page);
+  await page.locator('input[accept="application/json,.json"]').setInputFiles({ name: "reviewed-synthetic-fixture.json", mimeType: "application/json", buffer: Buffer.from(JSON.stringify(createSessionLibraryBackup(sessions))) });
+  await page.locator(".comparison-selectors select").nth(0).selectOption(sessions[0].id);
+  await page.locator(".comparison-selectors select").nth(1).selectOption(sessions[1].id);
+  await page.getByRole("button", { name: "Use baseline practice recording", exact: true }).click();
+  await page.getByRole("button", { name: "Use new attempt practice recording", exact: true }).click();
+  await page.locator(".comparison-recording-check input").nth(0).check();
+  await page.locator(".comparison-recording-check input").nth(1).check();
+  await expect(page.getByRole("button", { name: "Replay whole attempt", exact: true })).toBeEnabled();
+}
+
 test("practice import, contact review, save, comparison replay and reload", async ({ page }, testInfo) => {
   test.skip(process.platform === "win32" && testInfo.project.name.startsWith("webkit"), "Windows Playwright WebKit lacks a working video decoder here; macOS CI runs this media workflow without skips.");
   const errors: string[] = [];
@@ -114,6 +128,7 @@ test("saved JSON import, lineage safeguards, backup and stale-tab recovery witho
   await peer.locator(".attempt-library-list > button").first().click();
   await input(page).setInputFiles(payload([b]));
   await expect(page.locator(".attempt-library-list > button")).toHaveCount(2);
+  await expect(page.locator(".comparison-table")).not.toContainText("Reviewed Hold 10");
   await peer.getByRole("button", { name: "Save Session", exact: true }).click();
   await expect(peer.getByRole("button", { name: "Reload latest saved attempts", exact: true })).toBeVisible();
   await peer.getByRole("button", { name: "Reload latest saved attempts", exact: true }).click();
@@ -135,4 +150,74 @@ test("saved JSON import, lineage safeguards, backup and stale-tab recovery witho
   await page.reload(); await expect(page.locator(".attempt-library-list > button")).toHaveCount(3);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
   await page.screenshot({ path: testInfo.outputPath("saved-without-video.png") });
+});
+
+test("replay startup ignores stale play promises and pauses on backgrounding", async ({ page }, testInfo) => {
+  test.skip(process.platform === "win32" && testInfo.project.name.startsWith("webkit"), "Media regressions run on macOS WebKit CI.");
+  await prepareReplay(page);
+  await page.evaluate(() => {
+    const state = window as any;
+    state.heldPlays = []; state.holdPlays = true;
+    const play = HTMLMediaElement.prototype.play;
+    HTMLMediaElement.prototype.play = function () {
+      const held = state.holdPlays && this.closest(".comparison-players");
+      const result = play.call(this);
+      return held ? result.then(() => new Promise<void>(resolve => state.heldPlays.push(resolve))) : result;
+    };
+  });
+  const replay = page.getByRole("button", { name: "Replay whole attempt", exact: true });
+  await replay.click();
+  await expect.poll(() => page.evaluate(() => (window as any).heldPlays.length)).toBe(2);
+  await expect(replay).toBeDisabled();
+  await page.getByRole("button", { name: "Pause comparison", exact: true }).click();
+  await page.evaluate(() => { (window as any).holdPlays = false; });
+  await replay.click();
+  await expect.poll(() => page.locator(".comparison-players video").evaluateAll(videos => videos.every(video => !(video as HTMLVideoElement).paused))).toBe(true);
+  await page.evaluate(async () => { for (const release of (window as any).heldPlays.splice(0)) release(); await new Promise(requestAnimationFrame); });
+  expect(await page.locator(".comparison-players video").evaluateAll(videos => videos.every(video => !(video as HTMLVideoElement).paused))).toBe(true);
+  await page.evaluate(() => { Object.defineProperty(document, "hidden", { configurable: true, get: () => true }); document.dispatchEvent(new Event("visibilitychange")); });
+  await expect.poll(() => page.locator(".comparison-players video").evaluateAll(videos => videos.every(video => (video as HTMLVideoElement).paused))).toBe(true);
+  await page.evaluate(() => { delete (document as any).hidden; });
+});
+
+test("the shorter phase stops exactly at its reviewed endpoint while the other continues", async ({ page }, testInfo) => {
+  test.skip(process.platform === "win32" && testInfo.project.name.startsWith("webkit"), "Endpoint media regression runs on macOS WebKit CI.");
+  await prepareReplay(page);
+  await page.getByRole("button", { name: "Replay bottom phase", exact: true }).click();
+  await expect.poll(() => page.locator(".comparison-players video").evaluateAll(videos => !(videos[0] as HTMLVideoElement).paused && (videos[1] as HTMLVideoElement).paused), { intervals: [50] }).toBe(true);
+  const clocks = await page.locator(".comparison-players video").evaluateAll(videos => videos.map(video => (video as HTMLVideoElement).currentTime));
+  expect(clocks[1]).toBeCloseTo(3.3, 2);
+  expect(clocks[0]).toBeLessThan(3.8);
+});
+
+test("calibration owns its decoder task and blocks overlapping session changes", async ({ page }, testInfo) => {
+  test.skip(process.platform === "win32" && testInfo.project.name.startsWith("webkit"), "Calibration media ownership runs on macOS WebKit CI.");
+  const a = createPracticeSession("a"), b = createPracticeSession("b");
+  a.zones.startLight = { id: "startLight", label: "Synthetic start light", x1: .15, y1: .87, x2: .25, y2: .94 };
+  await ready(page);
+  await page.locator('input[accept="application/json,.json"]').setInputFiles({ name: "calibration-fixture.json", mimeType: "application/json", buffer: Buffer.from(JSON.stringify(createSessionLibraryBackup([a, b]))) });
+  await page.locator(".attempt-library-list > button").filter({ hasText: a.name }).click();
+  await page.getByLabel("Choose video", { exact: true }).setInputFiles(path.resolve("public/samples/climbiq-practice-a.mp4"));
+  await page.getByRole("button", { name: "Attach to this attempt", exact: true }).click();
+  await expect(page.locator(".video-meta-line")).toContainText("Ready");
+  const sample = page.locator("button").filter({ hasText: "Use current frame as green" });
+  await sample.evaluate(node => { for (let parent = node.parentElement; parent; parent = parent.parentElement) if (parent instanceof HTMLDetailsElement) parent.open = true; });
+  await page.evaluate(() => {
+    const state = window as any;
+    state.originalCalibrationVideoFrame = state.VideoFrame;
+    // Hold decoded-frame readback at a different timestamp until ownership is
+    // observed. No real video or detector output is fabricated by this fixture.
+    state.VideoFrame = class { timestamp = 10_000_000; duration = 33_333; close() {} };
+  });
+  await sample.click();
+  await expect(page.locator(".attempt-library-list > button").first()).toBeDisabled();
+  await expect(page.getByLabel("Replace video", { exact: true })).toBeDisabled();
+  await page.evaluate(() => {
+    const state = window as any;
+    if (state.originalCalibrationVideoFrame) state.VideoFrame = state.originalCalibrationVideoFrame;
+    else delete state.VideoFrame;
+  });
+  await expect(sample).toBeEnabled();
+  await expect(page.locator(".attempt-library-list > button").first()).toBeEnabled();
+  await expect(page.locator(".upload-error")).toHaveCount(0);
 });

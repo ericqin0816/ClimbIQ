@@ -21,8 +21,8 @@ function fixture() {
 describe("independent validation report", () => {
   it("reports endpoint error, false acceptances, coverage, and correction time separately", () => {
     const { study, labels } = fixture();
-    study.observations = [{ participantAlias: "p1", captureSessionId: "s1", correctionSeconds: 0, completedImportReviewSave: true, assistanceRequired: false, voluntaryReturn: null, trainingDecision: "Replay bottom phase" },
-      { participantAlias: "p1", captureSessionId: "s2", correctionSeconds: null, voluntaryReturn: true }];
+    study.observations = [{ participantAlias: "p1", captureSessionId: "s1", taskRole: "first-use", observedAt: "2026-10-02T00:00:00Z", correctionSeconds: 0, completedImportReviewSave: true, assistanceRequired: false, voluntaryReturn: null, trainingDecision: "Replay bottom phase" },
+      { participantAlias: "p1", captureSessionId: "s2", taskRole: "follow-up", observedAt: "2026-10-03T00:00:00Z", correctionSeconds: null, voluntaryReturn: true }];
     const report = evaluateValidationStudy(study, labels);
     expect(report.endpoints.start.verifiedAutomaticError.absoluteMedianSeconds).toBeCloseTo(.15);
     expect(report.endpoints.start.falseAcceptances).toMatchObject({ numerator: 1, denominator: 1, fraction: 1 });
@@ -35,8 +35,8 @@ describe("independent validation report", () => {
     expect(report.readiness.zeroKnownHeldOutEndpointFalseAcceptances).toBeNull();
   });
   it("cannot score predictions using one reviewer, self-labels, or a different event definition", () => {
-    for (const change of [labels => labels.splice(1, 1), labels => labels[1]["labelReview.independentOfDetector"] = false,
-      labels => labels[2].adjudicationReference = "start-one"]) {
+    for (const change of [labels => labels[1]["labelReview.independentOfDetector"] = false,
+      labels => labels.splice(2, 1)]) {
       const { study, labels } = fixture(); change(labels);
       const report = evaluateValidationStudy(study, labels);
       expect(report.endpoints.start.verifiedAutomaticError.count).toBe(0);
@@ -44,6 +44,36 @@ describe("independent validation report", () => {
     }
     const { study, labels } = fixture(); study.predictions[0].events.start.evidenceSource = "body-movement";
     expect(evaluateValidationStudy(study, labels).endpoints.start.mismatchedDefinitions).toBe(1);
+  });
+  it("rejects ambiguous adjudications and duplicate recording hashes in either casing", () => {
+    for (const change of [labels => labels.splice(1, 1), labels => labels[2].adjudicationReference = "start-one",
+      labels => labels[2].adjudicationReference += ";nonexistent", labels => labels.push({ ...labels[0], labelId: "third", "labelReview.reviewerId": "three" })]) {
+      const { study, labels } = fixture(); change(labels);
+      expect(() => evaluateValidationStudy(study, labels)).toThrow();
+    }
+    const { study, labels } = fixture();
+    study.clips.push({ ...study.clips[0], clipId: "c2", attemptId: "a2", sourceSha256: sha.toUpperCase() });
+    expect(() => evaluateValidationStudy(study, labels)).toThrow(/Repeated independent/);
+  });
+  it("weights first-use completion by participants and counts return only at a later session", () => {
+    const { study, labels } = fixture();
+    const first = { participantAlias: "p1", captureSessionId: "s1", taskRole: "first-use", observedAt: "2026-10-02T00:00:00Z", completedImportReviewSave: true, assistanceRequired: false };
+    study.observations = [first, { ...first, participantAlias: "p2", completedImportReviewSave: false },
+      ...Array.from({ length: 5 }, (_, i) => ({ ...first, captureSessionId: `later-${i}`, taskRole: "follow-up", observedAt: "2026-10-03T00:00:00Z", voluntaryReturn: true }))];
+    const report = evaluateValidationStudy(study, labels);
+    expect(report.workflow.unassistedCompletion).toMatchObject({ numerator: 1, denominator: 2, fraction: .5 });
+    expect(report.workflow.voluntaryReturn).toMatchObject({ numerator: 1, denominator: 1 });
+    expect(report.workflow.followUpNotObservedParticipants).toBe(1);
+    study.observations = [{ ...first, completedImportReviewSave: null, assistanceRequired: null }];
+    const unknown = evaluateValidationStudy(study, labels).workflow;
+    expect(unknown.unassistedCompletion.fraction).toBeNull();
+    expect(unknown.unassistedCompletionLowerBound).toMatchObject({ numerator: 0, denominator: 1, fraction: 0 });
+    expect(unknown.completionOutcomeUnmeasuredParticipants).toBe(1);
+    for (const invalid of [[{ ...first, voluntaryReturn: true }], [{ ...first, taskRole: "follow-up", voluntaryReturn: true }],
+      [first, { ...first, taskRole: "follow-up", voluntaryReturn: true }], [first, { ...first, captureSessionId: "later", taskRole: "follow-up", observedAt: "2026-10-01", voluntaryReturn: true }]]) {
+      study.observations = invalid;
+      expect(() => evaluateValidationStudy(study, labels)).toThrow();
+    }
   });
   it("keeps missing runs and unobservable events in the automatic coverage denominator", () => {
     const { study, labels } = fixture(); study.predictions = [];

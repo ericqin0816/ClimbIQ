@@ -1,3 +1,4 @@
+import { compareAttempts } from "./attemptComparison";
 import { describe, expect, it } from "vitest";
 import { comparisonPlaybackRange, comparisonPlaybackTime } from "./comparisonPlayback";
 import { createPracticeSession } from "./practiceRecordings";
@@ -27,5 +28,6 @@ describe("comparison replay", () => {
     expect(a.id).not.toBe(copy.id);
     expect(a.attemptLineageId).toBe(copy.attemptLineageId);
     expect(a.timestamps.every(marker => marker.acceptanceMode !== "frame-review")).toBe(true);
+    expect(compareAttempts(a, createPracticeSession("b")).rows.filter(row => row.id.endsWith("-phase")).every(row => row.outcome === "unavailable")).toBe(true);
   });
 });

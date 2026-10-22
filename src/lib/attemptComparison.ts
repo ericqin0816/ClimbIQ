@@ -114,7 +114,7 @@ export function summarizeAttemptTiming(session: SavedAnalysisSession): { metrics
     ));
   }
 
-  if (start && hold10 && finish &&
+  if (start && hold10 && hold10.acceptanceMode === "frame-review" && finish &&
       hold10.rawTime! > start.rawTime! && hold10.rawTime! < finish.rawTime!) {
     const phaseConfidence = minimumConfidence(start.confidence, hold10.confidence, finish.confidence);
     metrics.push(

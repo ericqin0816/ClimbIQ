@@ -94,7 +94,7 @@ try {
     throw new Error(`Timed out waiting for ${label}: ${JSON.stringify(status)}`);
   };
   const libraryReady = () => until("document.querySelector('[data-session-storage-state]')?.dataset.sessionStorageState === 'ready'", "saved library to be ready");
-  const fileInput = "document.querySelector('#saved-attempts input[type=file]')";
+  const fileInput = "document.querySelector('#saved-attempts input[type=file][accept*=json]')";
   const importFixture = async filename => {
     await until(`Boolean(${fileInput} && !${fileInput}.disabled)`, "import control enabled");
     const input = await send("Runtime.evaluate", { expression: fileInput });

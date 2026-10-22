@@ -75,11 +75,20 @@ The physical event must match the adjudicated definition before its error is
 scored. Missing runs remain in the coverage denominator. Reruns cannot replace
 the predeclared primary run after viewing their errors.
 
-Each `observations` entry has `participantAlias`, `captureSessionId`,
+Each `observations` entry has `participantAlias`, `captureSessionId`, `taskRole`
+(`first-use` or `follow-up`), `observedAt` (ISO date),
 `correctionSeconds`, `completedImportReviewSave`, `assistanceRequired`,
 `trainingDecision`, and `voluntaryReturn`. Use booleans or `null` for unknown
 outcomes. Correction seconds include only time actually measured. Record return
 observations at a later session; enthusiasm or intent is not a return visit.
+Each participant has exactly one first-use record. A follow-up requires that
+record, a different session ID, and a later date. Leave `voluntaryReturn` null
+on first use. Initial unassisted completion counts each participant once and
+uses only measured first-use task outcomes; repeated successful tasks cannot
+inflate it. Unknown first-use outcomes remain visible as unmeasured. A separate,
+explicitly named lower bound includes all enrolled participants. Return
+rates use participants with an observed follow-up outcome and separately show
+those with no follow-up observation.
 
 Run:
 

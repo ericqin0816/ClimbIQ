@@ -274,7 +274,7 @@ function makeSession(
     marker("firstMovement", "First Movement", times.movement, confidence),
     marker("committedLaunch", "Committed Launch", undefined, "None"),
     marker("firstHold", "First Hold", undefined, "None"),
-    marker("hold10", "Hold 10", times.hold10, confidence),
+    { ...marker("hold10", "Hold 10", times.hold10, confidence), acceptanceMode: "frame-review" },
     marker("finishPad", "Finish Pad", times.finish, confidence),
   ];
   return {

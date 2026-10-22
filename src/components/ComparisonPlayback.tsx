@@ -17,6 +17,7 @@ export default function ComparisonPlayback({ baseline, candidate }: { baseline: 
   const requests = useRef<Partial<Record<Side, AbortController>>>({});
   const operation = useRef(0);
   const playbackActive = useRef(false);
+  const completedSides = useRef(new Set<Side>());
   const frame = useRef<number | null>(null);
   const [urls, setUrls] = useState<Partial<Record<Side, string>>>({});
   const [confirmed, setConfirmed] = useState<Partial<Record<Side, boolean>>>({});
@@ -49,6 +50,17 @@ export default function ComparisonPlayback({ baseline, candidate }: { baseline: 
       players.current[side]?.pause();
       sources.current[side]?.dispose();
     }
+  }, []);
+
+  useEffect(() => {
+    const onVisibility = () => { if (document.hidden) pause(); };
+    const onPageHide = () => pause();
+    document.addEventListener("visibilitychange", onVisibility);
+    window.addEventListener("pagehide", onPageHide);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisibility);
+      window.removeEventListener("pagehide", onPageHide);
+    };
   }, []);
 
   async function attach(side: Side, file?: File) {
@@ -92,6 +104,7 @@ export default function ComparisonPlayback({ baseline, candidate }: { baseline: 
 
   async function position(nextPhase: ComparisonPhase, time: number, play: boolean) {
     pause();
+    completedSides.current.clear();
     const token = operation.current;
     const pair = { baseline: comparisonPlaybackRange(baseline, nextPhase), candidate: comparisonPlaybackRange(candidate, nextPhase) };
     if (SIDES.some(side => loading[side]) || !SIDES.every(side => confirmed[side] && ready[side] && pair[side])) return;
@@ -102,10 +115,12 @@ export default function ComparisonPlayback({ baseline, candidate }: { baseline: 
       await Promise.all(SIDES.map(side => seekTo(players.current[side]!, comparisonPlaybackTime(pair[side]!, time))));
       if (operation.current !== token) return;
       setElapsed(time);
-      setSeeking(false);
-      if (!play) return;
+      if (!play) { setSeeking(false); return; }
       await Promise.all(SIDES.map(side => players.current[side]!.play()));
-      if (operation.current !== token) { for (const side of SIDES) players.current[side]?.pause(); return; }
+      // Pause/replacement already cancelled this owner. A late play promise must
+      // never pause a newer replay using these players.
+      if (operation.current !== token) return;
+      setSeeking(false);
       playbackActive.current = true;
       setPlaying(true);
       const started = performance.now() - time * 1000;
@@ -117,8 +132,13 @@ export default function ComparisonPlayback({ baseline, candidate }: { baseline: 
         for (const side of SIDES) {
           const video = players.current[side]!;
           const target = comparisonPlaybackTime(pair[side]!, seconds);
-          if (Math.abs(video.currentTime - target) > 0.12) video.currentTime = target;
-          if (seconds >= pair[side]!.end - pair[side]!.start) video.pause();
+          if (seconds >= pair[side]!.end - pair[side]!.start) {
+            if (!completedSides.current.has(side)) {
+              completedSides.current.add(side);
+              video.pause();
+              video.currentTime = pair[side]!.end;
+            }
+          } else if (Math.abs(video.currentTime - target) > 0.12) video.currentTime = target;
         }
         if (seconds < end) frame.current = requestAnimationFrame(tick);
         else {
@@ -148,7 +168,7 @@ export default function ComparisonPlayback({ baseline, candidate }: { baseline: 
       {urls[side] && <>
         <video key={urls[side]} ref={node => { if (node) players.current[side] = node; else delete players.current[side]; }} src={urls[side]} muted playsInline preload="auto"
           onLoadedData={event => { if (event.currentTarget.src === sources.current[side]?.objectUrl && event.currentTarget.readyState >= 2) setReady(value => ({ ...value, [side]: true })); }}
-          onWaiting={event => { if (event.currentTarget.src === sources.current[side]?.objectUrl && playbackActive.current) { pause(); setMessage("Playback buffered. Replay this section when the recordings are ready."); } }}
+          onWaiting={event => { if (event.currentTarget.src === sources.current[side]?.objectUrl && playbackActive.current && !completedSides.current.has(side)) { pause(); setMessage("Playback buffered. Replay this section when the recordings are ready."); } }}
           onError={event => { if (event.currentTarget.src !== sources.current[side]?.objectUrl) return; pause(); setReady(value => ({ ...value, [side]: false })); setMessage("This attached recording could not be decoded. Choose its original file again."); }} />
         <label className="comparison-recording-check"><input type="checkbox" checked={confirmed[side] === true} onChange={event => { pause(); setConfirmed(value => ({ ...value, [side]: event.target.checked })); }} />This is the original recording for {sessions[side].name}</label>
       </>}
