@@ -194,13 +194,52 @@ test("replay startup ignores stale play promises and pauses on backgrounding", a
 test("the shorter phase stops exactly at its reviewed endpoint while the other continues", async ({ page }, testInfo) => {
   test.skip(process.platform === "win32" && testInfo.project.name.startsWith("webkit"), "Endpoint media regression runs on macOS WebKit CI.");
   await prepareReplay(page);
+  // WebKit CI trace RPCs can take ~335ms each, nearly the entire 500ms
+  // interval between these endpoints. Observe actual native media in-page and
+  // retain the transition so a delayed remote poll cannot miss it.
+  await page.evaluate(() => {
+    const probe = { matched: false, active: true, firstStoppedBaselineTime: null as number | null, samples: [] as Array<{
+      elapsedMs: number; baselineTime: number; candidateTime: number;
+      baselinePaused: boolean; candidatePaused: boolean; baselineSeeking: boolean; candidateSeeking: boolean;
+      baselineReady: number; candidateReady: number; hidden: boolean; event: string;
+    }> };
+    (window as any).__phaseEndpointProbe = probe;
+    const started = performance.now();
+    const record = (event: string) => {
+      if (!probe.active || probe.samples.length >= 1200) return;
+      const [baseline, candidate] = Array.from(document.querySelectorAll<HTMLVideoElement>(".comparison-players video"));
+      if (baseline && candidate) {
+        probe.samples.push({ elapsedMs: performance.now() - started,
+          baselineTime: baseline.currentTime, candidateTime: candidate.currentTime,
+          baselinePaused: baseline.paused, candidatePaused: candidate.paused, baselineSeeking: baseline.seeking, candidateSeeking: candidate.seeking,
+          baselineReady: baseline.readyState, candidateReady: candidate.readyState, hidden: document.hidden, event });
+        if (!baseline.paused && candidate.paused && Math.abs(candidate.currentTime - 3.3) < .005 && baseline.currentTime < 3.8) {
+          probe.firstStoppedBaselineTime ??= baseline.currentTime;
+          // Require actual forward clock movement while the shorter side stays
+          // at its endpoint, not just a momentary unpaused flag.
+          probe.matched ||= baseline.currentTime > probe.firstStoppedBaselineTime + .02;
+        }
+      }
+    };
+    const sample = () => {
+      record("animation-frame");
+      if (!probe.matched && performance.now() - started < 8000 && probe.samples.length < 1200) requestAnimationFrame(sample);
+    };
+    for (const video of document.querySelectorAll<HTMLVideoElement>(".comparison-players video")) {
+      for (const event of ["pause", "seeked", "playing", "error"]) video.addEventListener(event, () => record(event));
+    }
+    requestAnimationFrame(sample);
+  });
   await page.getByRole("button", { name: "Replay bottom phase", exact: true }).click();
-  // Capture clocks and playback state together. A second browser round trip can
-  // arrive after the remaining half-second section has also finished.
+  await expect.poll(() => page.evaluate(() => {
+    const probe = (window as any).__phaseEndpointProbe;
+    return { matched: probe.matched, firstStoppedBaselineTime: probe.firstStoppedBaselineTime, lastSamples: probe.samples.slice(-12) };
+  })).toMatchObject({ matched: true });
   await expect.poll(() => page.locator(".comparison-players video").evaluateAll(videos => {
     const [baseline, candidate] = videos as HTMLVideoElement[];
-    return !baseline.paused && candidate.paused && Math.abs(candidate.currentTime - 3.3) < .005 && baseline.currentTime < 3.8;
-  }), { intervals: [50] }).toBe(true);
+    return baseline.paused && candidate.paused && Math.abs(candidate.currentTime - 3.3) < .005 && Math.abs(baseline.currentTime - 3.8) < .005;
+  })).toBe(true);
+  await page.evaluate(() => { (window as any).__phaseEndpointProbe.active = false; });
 });
 
 test("calibration owns its decoder task and blocks overlapping session changes", async ({ page }, testInfo) => {

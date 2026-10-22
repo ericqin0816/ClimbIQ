@@ -145,6 +145,19 @@ project assessment remains conditional on the final hosted WebKit rerun; the
 local Windows skips cannot supply that evidence. No reviewer reported a score
 for independent real-climber accuracy or native readiness.
 
+The first Round 3 [hosted run](https://github.com/ericqin0816/ClimbIQ/actions/runs/39873514879)
+passed verification, Chromium, both WebKit focus regressions, and 33 of 34 WebKit
+cases. One desktop endpoint test missed its transient playback-state predicate.
+The trace showed individual remote evaluations taking about 335–833 ms against
+a 500 ms observation window, followed by normal completed playback. That trace
+supports an observation problem but does not prove the intermediate video clocks.
+The test now arms a bounded in-page animation-frame/media-event probe before
+replay, retains the exact shorter-side endpoint state, requires the other clock
+to advance while that endpoint remains paused, and checks both final endpoints.
+It keeps the same 5 ms endpoint tolerance and actual native playback; no retries,
+playback stubs, or clock overrides were added. Failure reports retain clock,
+paused, seeking, ready-state, and visibility samples.
+
 ## Evidence limits
 
 The product rubric assesses the implemented experience. Overall product readiness
