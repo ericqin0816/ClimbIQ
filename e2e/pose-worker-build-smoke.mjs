@@ -1,12 +1,10 @@
-import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { preview } from "vite";
 import { createProtocolClient } from "./cdp-client.mjs";
-import { closeTestBrowser } from "./browser-lifecycle.mjs";
+import { startTestBrowser } from "./test-browser.mjs";
 
 // Strict production-worker plumbing check. The frames are synthetic blank
 // canvases; an array response proves execution, never pose/timing accuracy.
@@ -69,7 +67,7 @@ const modelBytes = await readFile(buildPath(modelPath));
 const wasmPaths = ["/mediapipe/wasm/vision_wasm_module_internal.js", "/mediapipe/wasm/vision_wasm_module_internal.wasm"];
 const wasmAssets = await Promise.all(wasmPaths.map(async publicPath => ({ publicPath, bytes: await readFile(buildPath(publicPath)) })));
 
-let previewServer, chrome, socket, send, temporaryRoot, spawnError;
+let previewServer, browserProcess, socket, send;
 const delay = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds));
 try {
   let appUrl = options.url;
@@ -95,21 +93,8 @@ try {
     }
   }
 
-  temporaryRoot = await mkdtemp(path.join(tmpdir(), "climbiq-worker-smoke-"));
-  const profile = path.join(temporaryRoot, "profile");
-  const chromePath = process.env.CLIMBIQ_CHROME ?? (process.platform === "win32" ? "C:/Program Files/Google/Chrome/Application/chrome.exe" : process.platform === "darwin" ? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" : "/usr/bin/google-chrome");
-  chrome = spawn(chromePath, ["--headless=new", "--no-first-run", "--no-default-browser-check", "--remote-debugging-port=0", `--user-data-dir=${profile}`, "about:blank"], { stdio: "ignore", windowsHide: true });
-  chrome.once("error", error => { spawnError = error; });
-  let port;
-  for (let index = 0; index < 100; index++) {
-    if (spawnError) throw spawnError;
-    try {
-      const candidate = Number((await readFile(path.join(profile, "DevToolsActivePort"), "utf8")).split(/\r?\n/)[0]);
-      if (Number.isInteger(candidate) && candidate > 0 && (await fetch(`http://127.0.0.1:${candidate}/json/version`)).ok) { port = candidate; break; }
-    } catch { /* owned browser is still starting */ }
-    await delay(100);
-  }
-  if (!port) throw new Error("Could not discover the owned browser's ephemeral debugger port.");
+  browserProcess = await startTestBrowser({ label: "worker-smoke", startupMs: 20_000, port: 0 });
+  const { port } = browserProcess;
   const target = await (await fetch(`http://127.0.0.1:${port}/json/new?${encodeURIComponent(appUrl)}`, { method: "PUT" })).json();
   socket = new WebSocket(target.webSocketDebuggerUrl);
   await new Promise((resolve, reject) => { socket.addEventListener("open", resolve, { once: true }); socket.addEventListener("error", reject, { once: true }); });
@@ -174,12 +159,6 @@ try {
   await writeFile(reportPath, JSON.stringify(report, null, 2) + "\n", { flag: "wx" });
   console.log(JSON.stringify(report, null, 2));
 } finally {
-  if (chrome && !spawnError) await closeTestBrowser(chrome, send);
-  socket?.close();
-  await previewServer?.close();
-  if (temporaryRoot) {
-    const cleanupPath = path.resolve(temporaryRoot);
-    if (path.dirname(cleanupPath) !== path.resolve(tmpdir()) || !path.basename(cleanupPath).startsWith("climbiq-worker-smoke-")) throw new Error("Refusing to remove a directory outside this test's temporary root.");
-    await rm(cleanupPath, { recursive: true, force: true, maxRetries: 3 }).catch(error => console.warn(`Could not remove owned temporary browser profile: ${error.code}`));
-  }
+  try { await browserProcess?.close(send); }
+  finally { socket?.close(); await previewServer?.close(); }
 }
