@@ -35,3 +35,8 @@
   .attempt-library-list .attempt-library-value > strong { font-size: 1.05rem; }
   .attempt-library-list .attempt-library-value > small { max-width: 90px; line-height: 1.5; }
 }
+
+.recent-attempts { display: grid; gap: .4rem; margin: 1rem 0; }
+.recent-attempts small { color: #667085; }
+.recent-attempts > div { display: flex; gap: .5rem; overflow-x: auto; padding: .3rem 0; }
+.recent-attempts button { display: grid; gap: .3rem; text-align: left; min-width: 150px; max-width: 220px; white-space: normal; }

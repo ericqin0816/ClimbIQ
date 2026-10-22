@@ -93,7 +93,7 @@ export function buildCoachingEvidence(current:SavedAnalysisSession,goal:Coaching
     "timing-review":[...start,...finish],"hold10-review":link("hold10","Inspect current Hold 10 marker"),tracking:[],
   };
   return {packet,catalog:buildCoachingCatalog(packet),links,currentName:current.name,baselineName:baseline?.name,
-    sourceFingerprint:coachingEvidenceFingerprint(current,baseline),sectionReview:buildSectionReview(current,baseline)};
+    sourceFingerprint:coachingEvidenceFingerprint(current,baseline),sectionReview:buildSectionReview(current,baseline,options)};
 }
 export interface CoachingEvidence {
   packet: CoachingPacket;

@@ -1,0 +1,28 @@
+{
+  "version": 1,
+  "synthetic": true,
+  "license": "CC0-1.0",
+  "fps": 30,
+  "width": 240,
+  "height": 426,
+  "duration": 8,
+  "referenceMethod": "Authored animation frame transitions; no independent human annotation or accuracy claim.",
+  "attempts": [
+    {
+      "id": "a",
+      "start": 1,
+      "hold10": 3.8,
+      "finish": 6.6,
+      "file": "climbiq-practice-a.mp4",
+      "sha256": "55b42fe533b4802f56d15abae0901390345fffd533895ef664d8d07e347e52ba"
+    },
+    {
+      "id": "b",
+      "start": 1,
+      "hold10": 3.3,
+      "finish": 6.2,
+      "file": "climbiq-practice-b.mp4",
+      "sha256": "25fc5adb3fbe69fdc168c6862f016c78292702c01d53e3727ad5ac673076eac9"
+    }
+  ]
+}

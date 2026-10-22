@@ -1,0 +1,6 @@
+.practice-walkthrough { padding: 1rem; margin: 1rem 0; border: 1px solid #cbd7d8; border-radius: .7rem; background: #f3f8f7; }
+.practice-walkthrough p, .practice-walkthrough small { color: #526268; font-size: .85rem; line-height: 1.6; }
+.practice-walkthrough ol { padding-left: 1.25rem; }
+.practice-walkthrough li { margin: .8rem 0; line-height: 1.6; }
+.practice-walkthrough .button-row { flex-wrap: wrap; margin-top: .4rem; }
+.practice-walkthrough button { min-height: 44px; white-space: normal; }

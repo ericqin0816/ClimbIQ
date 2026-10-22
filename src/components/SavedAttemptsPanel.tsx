@@ -1,3 +1,4 @@
+import { resolveAttemptLineageId } from "../lib/attemptIdentity";
 import { useMemo, useRef, useState } from "react";
 import type { SavedAnalysisSession } from "../types";
 import { buildSavedAttemptRows, searchSavedAttempts, type SavedAttemptFilter, type SavedAttemptSort } from "../lib/savedAttemptSearch";
@@ -19,6 +20,14 @@ export default function SavedAttemptsPanel({ sessions, activeSessionId, onLoad, 
   const [visibleCount, setVisibleCount] = useState(8);
   const rows = useMemo(() => buildSavedAttemptRows(sessions), [sessions]);
   const matches = useMemo(() => searchSavedAttempts(rows, query, filter, sort), [rows, query, filter, sort]);
+  const recent = useMemo(() => {
+    const seen = new Set<string>();
+    return [...rows].sort((a, b) => b.session.updatedAt.localeCompare(a.session.updatedAt)).filter(row => {
+      const lineage = resolveAttemptLineageId(row.session);
+      if (seen.has(lineage)) return false;
+      seen.add(lineage); return true;
+    }).slice(0, 5);
+  }, [rows]);
   const timedCount = rows.filter(row => !row.needsReview).length;
   const active = sessions.find(session => session.id === activeSessionId);
 
@@ -33,6 +42,12 @@ export default function SavedAttemptsPanel({ sessions, activeSessionId, onLoad, 
     <div className="attempt-library-heading">
       <p><strong>{sessions.length}</strong> saved {sessions.length === 1 ? "attempt" : "attempts"}<span>{timedCount} with usable timing</span></p>
       {active && <a href="#results">View open attempt <span aria-hidden="true">↗</span></a>}
+    </div>
+    <div className="recent-attempts" aria-label="Recent attempt history">
+      <strong>Recent attempts</strong><small>Latest saved analysis per attempt. Marker corrections do not create a new climb.</small>
+      <div>{recent.map(({ session, totalSeconds }) => <button key={session.id} type="button" disabled={disabled} onClick={() => onLoad(session.id)}>
+        <span>{session.name}</span><strong>{totalSeconds === null ? "Review timing" : totalSeconds.toFixed(3) + "s"}</strong>
+      </button>)}</div>
     </div>
     <div className="attempt-library-tools">
       <label className="attempt-library-search">Find an attempt

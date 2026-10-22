@@ -47,7 +47,7 @@ function sections(session: SavedAnalysisSession): CoachingSection[] {
 }
 
 /** Local review cues only. Raw video cursors never enter the hosted AI packet. */
-export function buildSectionReview(current: SavedAnalysisSession, baseline?: SavedAnalysisSession) {
+export function buildSectionReview(current: SavedAnalysisSession, baseline?: SavedAnalysisSession, options: { distinctAttemptsConfirmed?: boolean } = {}) {
   const available = sections(current);
   const limits = "Section duration identifies where to look, not why it happened. It does not establish a technique fault or prescribe a drill.";
   if (baseline) {
@@ -56,7 +56,7 @@ export function buildSectionReview(current: SavedAnalysisSession, baseline?: Sav
     // Choose one partition; never add overlapping phase and wall-third differences.
     const phases = common.filter(s => s.id === "bottom-phase" || s.id === "top-phase");
     const selected = phases.length === 2 ? phases : common.filter(s => s.id.endsWith("-third"));
-    const comparison = compareAttempts(baseline, current);
+    const comparison = compareAttempts(baseline, current, options);
     const items = selected.flatMap(section => {
       const row = comparison.rows.find(r => r.id === section.id);
       if (!row || !["gained", "lost"].includes(row.outcome) || row.deltaSeconds === undefined || !row.baseline) return [];

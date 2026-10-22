@@ -6,9 +6,10 @@ Video analysis for speed climbing, running in your browser.
 
 [![CI](https://github.com/ericqin0816/ClimbIQ/actions/workflows/ci.yml/badge.svg)](https://github.com/ericqin0816/ClimbIQ/actions/workflows/ci.yml)
 
-Load a race recording to inspect its timing and the climber's estimated motion.
-Each result stays linked to the video so you can check the relevant frame,
-correct a marker, or compare two saved attempts.
+Compare two attempts and see which section changed. Check timing against the
+recording, save the attempt, then compare totals and reviewed phases. Attach the
+original recordings for synchronized section replay, or try the included CC0
+synthetic practice recordings to learn the workflow.
 
 The video stays on your device. ClimbIQ has no video-upload backend or account
 requirement. It is an experimental analysis tool, not a replacement for a race
@@ -19,17 +20,22 @@ summary. NVIDIA NIM can prioritize approved review points when a private server
 workspace is configured. That opt-in sends numeric evidence, never the video;
 hosted AI is disabled by default.
 
-## iPhone beta branch
+## iPhone beta source
 
-The `codex/ios-app` branch adds an iPhone app using Capacitor, with the analysis
-assets bundled locally, native saved-attempt storage, and the iOS share sheet.
-A branch keeps this work separate until it is reviewed and merged; it does not
-publish an app. Follow the [Mac/Xcode and TestFlight handoff](docs/ios-beta.md).
+The repository includes an experimental iPhone app using Capacitor, with the
+analysis assets bundled locally, native saved-attempt storage, and the iOS share
+sheet. Source and web verification do not establish native readiness. Follow
+the [Mac/Xcode and TestFlight handoff](docs/ios-beta.md).
 Native signing and real-iPhone testing are still required. The
 [beta evaluation plan](docs/beta-validation.md) includes an empty label worksheet
 and proposed readiness gates; it contains no new accuracy measurements.
 
 ## Try a recording
+
+For a short walkthrough, choose **Open practice A**, inspect its reference timing,
+review Hold 10, and save it. Repeat with practice B, then compare and replay the
+saved sections. These geometric animations have authored reference transitions;
+they are not real-climber recordings or independent accuracy labels.
 
 1. Open the app and choose a local MOV or MP4 that your browser can decode.
 2. Use one unedited attempt with a fixed camera and the complete lane visible.
@@ -47,6 +53,11 @@ without the video. Keep original recordings separately for frame review. When an
 app cannot establish that a selected file belongs to an open attempt, choose
 **Attach to this attempt** only for the original recording, or start a new attempt.
 Matching filenames alone do not establish that they are the same climb.
+
+Comparison replay requires an explicit recording association on each side.
+Playback uses equal elapsed time from each section's entry and stops each attempt
+at its own endpoint. Recent history groups annotation copies by attempt identity;
+correcting a marker cannot turn one climb into two performances.
 
 ## What it measures
 
@@ -87,6 +98,10 @@ not a general error bound or independent validation of either endpoint.
 General timing accuracy has not been established. The next evaluation needs
 independently reviewed start, Hold 10, and finish labels across more cameras and
 gyms. [Read the benchmark methodology and known limitations](REAL_VIDEO_BENCHMARK.md).
+The [independent study workflow](docs/independent-study.md) now includes a private
+manifest, a blinded label worksheet, and reporting for endpoint error, false
+acceptances, automatic coverage, correction time, and voluntary return. The
+study still needs real participants and independent labels.
 
 ## Run locally
 
@@ -101,7 +116,14 @@ npm run dev
 
 ```bash
 npm run check       # Typecheck, unit tests, production build
+npm run test:workflow # Build, then test import/review/save/compare in browsers
 ```
+
+Install the test browsers once with `npx playwright install chromium webkit`.
+Production workflow CI runs Chromium on Linux and WebKit on macOS. The Windows
+Playwright WebKit build in the implementation environment rejects video media;
+local WebKit checks cover saved JSON workflows, while macOS CI runs the media
+workflows. Phone viewport emulation is not actual iPhone testing.
 
 Real-video tests need a running dev server, Chrome, and local recordings.
 Private videos are deliberately excluded from Git. See the

@@ -1,6 +1,10 @@
+import PracticeWalkthrough from "./components/PracticeWalkthrough";
+import { createPracticeSession, practiceIdForLineage, practiceRecordings, type PracticeId } from "./lib/practiceRecordings";
+import { resolveAppAssetUrl } from "./lib/appAssets";
+import { INITIAL_TIMESTAMPS, marker, getTimestamp, isDatasetExport, datasetToSavedSession, timestampsFromDataset, mergeTimestampDefaults, videoMetadataMatches, timestampsFitVideo, normalizedZonesEqual, decodeSavedSession, sanitizeSavedSession, isSavedAnalysisSession, createSessionId, todayDateString } from "./lib/sessionCodec";
 import { ChangeEvent, CSSProperties, DragEvent, lazy, PointerEvent, Suspense, SyntheticEvent, useEffect, useMemo, useRef, useState } from "react";
 import { Capacitor } from "@capacitor/core";
-import { useSavedAttempts } from "./lib/useSavedAttempts";
+import { useLibraryController } from "./lib/useLibraryController";
 import { resolveAttemptLineageId, sanitizeAttemptLineageId } from "./lib/attemptIdentity";
 import { exportTextFile, exportResultMessage } from "./lib/exportFile";
 import { MobileWorkflow, NextStepCard } from "./components/MobileWorkflow";
@@ -8,7 +12,9 @@ import RecordingGuide from "./components/RecordingGuide";
 import SavedAttemptsPanel from "./components/SavedAttemptsPanel";
 import AnalysisActivity from "./components/AnalysisActivity";
 import VideoAttachmentChoice from "./components/VideoAttachmentChoice";
-import { prepareVideo, type PreparedVideo } from "./lib/preparedVideo";
+import type { PreparedVideo } from "./lib/preparedVideo";
+import { VideoSessionController } from "./lib/videoSessionController";
+import { AnalysisRunController } from "./lib/analysisRunController";
 import "./components/SessionWorkflow.css";
 import TimestampReviewPanel from "./components/TimestampReviewPanel";
 import type { FinishReviewScan } from "./lib/finishReview";
@@ -98,16 +104,8 @@ const ZONES: Array<{ id: ZoneId; label: string; tone: string }> = [
   { id: "hold10", label: "Hold 10 Zone", tone: "#facc15" },
 ];
 
-const INITIAL_TIMESTAMPS: TimestampMarker[] = [
-  marker("startSignal", "Start Signal"),
-  marker("firstMovement", "Earliest Visible Motion"),
-  marker("committedLaunch", "Committed Launch"),
-  marker("firstHold", "First Hold"),
-  marker("hold10", "Hold 10"),
-  marker("finishPad", "Finish Pad"),
-];
 
-const APP_VERSION = "0.29.0";
+const APP_VERSION = "0.30.0";
 const NATIVE_APP = Capacitor.isNativePlatform();
 const AttemptComparisonPanel = lazy(() => import("./components/AttemptComparisonPanel"));
 const CoachingReviewPanel = lazy(() => import("./components/CoachingReviewPanel"));
@@ -205,14 +203,14 @@ function App() {
   const zoneStageRef = useRef<HTMLDivElement | null>(null);
   const previousObjectUrl = useRef<string | null>(null);
   const videoFileRef = useRef<File | null>(null);
-  const videoPreparationAbortRef = useRef<AbortController | null>(null);
+  const [videoSession] = useState(() => new VideoSessionController());
   const pendingVideoAttachmentRef = useRef<PendingVideoAttachment | null>(null);
   const recordingLineagesRef = useRef(new Set<string>());
   const obsidianDirectoryHandle = useRef<any>(null);
-  const videoTaskQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const [analysisRuns] = useState(() => new AnalysisRunController());
   const pendingSessionVideoMetadataRef = useRef<VideoMetadata | null>(null);
   const pendingVideoFileNameRef = useRef<string | null>(null);
-  const autoAnalysisAbortRef = useRef<AbortController | null>(null);
+
   const pendingAutomaticContextRef = useRef<PendingAutomaticAnalysisContext | null>(null);
   const automaticLaneCandidatesRef = useRef<AnalysisLaneCandidate[]>([]);
   const videoDragDepthRef = useRef(0);
@@ -254,6 +252,7 @@ function App() {
   const [startSignalOffset, setStartSignalOffset] = useState(0);
   const [startResult, setStartResult] = useState<StartSignalDetectionResult | null>(null);
   const [suggestedStartRawTime, setSuggestedStartRawTime] = useState<number | null>(null);
+  const [startReviewNeeded, setStartReviewNeeded] = useState(false);
   const [startRunning, setStartRunning] = useState(false);
 
   const [movementSensitivity, setMovementSensitivity] = useState<Sensitivity>("medium");
@@ -279,7 +278,7 @@ function App() {
   const [attemptType, setAttemptType] = useState("Training");
   const [sessionNotes, setSessionNotes] = useState("");
   const { sessions: savedSessions, ready: libraryReady, busy: librarySaving, error: libraryError,
-    conflicted: libraryConflict, notice: libraryNotice, updateSessions, reload: reloadLibrary } = useSavedAttempts(decodeSavedSession);
+    conflicted: libraryConflict, notice: libraryNotice, updateSessions, reload: reloadLibrary } = useLibraryController(decodeSavedSession);
   const [exportBusy, setExportBusy] = useState(false);
   const exportingRef = useRef(false);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
@@ -322,10 +321,11 @@ function App() {
       if (disposed) return;
       const listener = await NativeApp.addListener("appStateChange", ({ isActive }) => {
         if (isActive) return;
-        autoAnalysisAbortRef.current?.abort();
+        analysisRuns.automatic?.abort();
         secondPassAbortRef.current?.abort();
         finishReviewAbortRef.current?.abort();
-        videoPreparationAbortRef.current?.abort();
+        videoSession.cancelPreparation();
+        setVideoPreparationPending(false);
       });
       if (disposed) await listener.remove();
       else removeListener = () => listener.remove();
@@ -335,12 +335,11 @@ function App() {
 
   useEffect(() => {
     return () => {
-      autoAnalysisAbortRef.current?.abort();
+      analysisRuns.automatic?.abort();
       secondPassAbortRef.current?.abort();
       finishReviewAbortRef.current?.abort();
-      videoPreparationAbortRef.current?.abort();
-      videoPreparationAbortRef.current = null;
-      pendingVideoAttachmentRef.current?.prepared.dispose();
+      videoSession.cancelPreparation();
+        pendingVideoAttachmentRef.current?.prepared.dispose();
       pendingVideoAttachmentRef.current = null;
       if (reviewSeekRequestRef.current !== null) window.cancelAnimationFrame(reviewSeekRequestRef.current);
       if (previousObjectUrl.current) {
@@ -600,6 +599,7 @@ function App() {
     setFrameDebug(null);
     setStartResult(null);
     setSuggestedStartRawTime(null);
+    setStartReviewNeeded(false);
     setMovementResult(null);
     setFinishResult(null);
     setFinishStatus("");
@@ -701,15 +701,13 @@ function App() {
   }
 
   function cancelVideoPreparation() {
-    videoPreparationAbortRef.current?.abort();
-    videoPreparationAbortRef.current = null;
+    videoSession.cancelPreparation();
     setVideoPreparationPending(false);
     setSessionStatus(`Opening cancelled.${metadata ? " Your current analysis is unchanged." : ""}`);
   }
 
   async function selectVideoFile(file: File) {
-    videoPreparationAbortRef.current?.abort();
-    videoPreparationAbortRef.current = null;
+    videoSession.cancelPreparation();
     clearVideoAttachment(true);
     setVideoPreparationPending(false);
     const validationError = validateVideoFile(file);
@@ -720,18 +718,13 @@ function App() {
     }
 
     setVideoLoadError("");
-    const controller = new AbortController();
-    videoPreparationAbortRef.current = controller;
+    const controller = videoSession.beginPreparation();
     setVideoPreparationPending(true);
     const context = analysisContextRef.current;
     // Neither the current decoder nor the accepted analysis changes until the
     // candidate has supplied a real decoded frame. A failed replacement is inert.
     try {
-      const prepared = await prepareVideo(file, { signal: controller.signal });
-      if (controller.signal.aborted || videoPreparationAbortRef.current !== controller || context !== analysisContextRef.current) {
-        prepared.dispose();
-        return;
-      }
+      const prepared = await videoSession.prepare(file, controller, () => context === analysisContextRef.current);
       const lineage = attemptLineageId ?? activeSessionId;
       const hasExistingAnalysis = activeSessionId !== null || timestamps.some(marker => marker.rawTime !== null) ||
         Boolean(biomechanics.result) || Object.keys(zones).length > 0;
@@ -745,13 +738,12 @@ function App() {
         adoptPreparedVideo(prepared, false);
       }
     } catch (error) {
-      if (videoPreparationAbortRef.current !== controller || controller.signal.aborted) return;
+      if (!videoSession.isCurrent(controller)) return;
       const message = error instanceof Error ? error.message : "This recording could not be opened.";
       setVideoLoadError(message);
       setSessionStatus(`${message}${metadata ? " Your current analysis is unchanged." : ""}`);
     } finally {
-      if (videoPreparationAbortRef.current === controller) {
-        videoPreparationAbortRef.current = null;
+      if (videoSession.finishPreparation(controller)) {
         setVideoPreparationPending(false);
       }
     }
@@ -781,6 +773,7 @@ function App() {
     setFrameDebug(null);
     setStartResult(null);
     setSuggestedStartRawTime(null);
+    setStartReviewNeeded(false);
     setMovementResult(null);
     setFinishResult(null);
     setFinishStatus("");
@@ -807,6 +800,40 @@ function App() {
     }
     clearVideoAttachment(false);
     adoptPreparedVideo(candidate.prepared, attach, candidate.knownLineages);
+  }
+
+  async function openPractice(id: PracticeId) {
+    if (videoAnalysisRunning) return;
+    clearVideoAttachment(true);
+    const ticket = videoSession.beginPreparation();
+    const context = analysisContextRef.current;
+    setVideoPreparationPending(true);
+    setVideoLoadError("");
+    try {
+      const reference = practiceRecordings.find(item => item.id === id)!;
+      const url = resolveAppAssetUrl("samples/" + reference.file, import.meta.env.BASE_URL, location.href);
+      const response = await fetch(url, { signal: ticket.signal });
+      if (!response.ok) throw new Error("The practice recording could not be loaded. Try again.");
+      const file = new File([await response.blob()], reference.file, { type: "video/mp4" });
+      const prepared = await videoSession.prepare(file, ticket, () => analysisContextRef.current === context);
+      const session = createPracticeSession(id);
+      adoptPreparedVideo(prepared, false);
+      setDraftSessionId(session.id);
+      setAttemptLineageId(session.attemptLineageId!);
+      recordingLineagesRef.current = new Set([session.attemptLineageId!]);
+      setSessionName(session.name);
+      setClimberName(session.climberName);
+      setAttemptLocation(session.location);
+      setAttemptType(session.attemptType);
+      setAttemptDate(session.date);
+      setSessionNotes(session.notes);
+      setTimestamps(session.timestamps);
+      setSessionStatus("Synthetic practice opened. Inspect the reference timing, review Hold 10, then save this attempt.");
+    } catch (error) {
+      if (videoSession.isCurrent(ticket)) setVideoLoadError(error instanceof Error ? error.message : "Could not open the practice recording.");
+    } finally {
+      if (videoSession.finishPreparation(ticket)) setVideoPreparationPending(false);
+    }
   }
 
   function handleMetadataLoaded(event: SyntheticEvent<HTMLVideoElement>) {
@@ -1034,50 +1061,11 @@ function App() {
     completeMessage: string,
     taskName = "video analysis",
   ): Promise<T> {
-    const previousTask = videoTaskQueueRef.current;
     cancelPendingReviewSeek();
-    let releaseTask!: () => void;
-    const currentTask = new Promise<void>((resolve) => {
-      releaseTask = resolve;
+    return analysisRuns.run({ video, work, completeMessage, taskName,
+      isCurrent: () => video === videoRef.current && video.src === previousObjectUrl.current,
+      onStatus: setVideoRestoreStatus, onTime: setCurrentTime,
     });
-    videoTaskQueueRef.current = previousTask.catch(() => undefined).then(() => currentTask);
-    await previousTask.catch(() => undefined);
-
-    const previousTime = video.currentTime;
-    const previousPaused = video.paused;
-    setVideoRestoreStatus("");
-
-    if (!previousPaused) {
-      video.pause();
-    }
-
-    let workSucceeded = false;
-    try {
-      const output = await work();
-      workSucceeded = true;
-      return output;
-    } finally {
-      try {
-        await seekTo(video, previousTime);
-        setCurrentTime(video.currentTime);
-        if (previousPaused) {
-          video.pause();
-        } else {
-          await video.play();
-        }
-        setVideoRestoreStatus(
-          workSucceeded
-            ? completeMessage
-            : `Video restored after ${taskName.replaceAll("-", " ")} stopped.`,
-        );
-      } catch (error) {
-        setVideoRestoreStatus(
-          error instanceof Error ? `Video restore failed: ${error.message}` : "Video restore failed.",
-        );
-      } finally {
-        releaseTask();
-      }
-    }
   }
 
   function runNamedVideoTask<T>(taskName: string, work: () => Promise<T>, completeMessage: string): Promise<T> {
@@ -1334,6 +1322,7 @@ function App() {
           if (!decision.found || decision.rawTime === undefined || !automaticStart) {
             pendingAutomaticContextRef.current = null;
             setStartResult(null);
+            setStartReviewNeeded(true);
             setAutoAnalysisStatus("Start could not be confirmed. Review the video, then open the marker editor to set the exact frame.");
             return;
           }
@@ -1380,6 +1369,7 @@ function App() {
             );
             commitAcceptedStartContext({ analysisLaneCandidates, discoveredStartLane });
             setSuggestedStartRawTime(null);
+    setStartReviewNeeded(false);
             setAutoAnalysisStatus(`Start Signal accepted at ${acceptedStart.toFixed(3)}s. ${decision.reason}`);
           } else {
             pendingAutomaticContextRef.current = {
@@ -1918,6 +1908,7 @@ function App() {
       setRouteAlignment(routeAlignment);
       setStartResult(startResult);
       setSuggestedStartRawTime(suggestedStartRawTime);
+      setStartReviewNeeded(startReviewNeeded);
       setMovementResult(movementResult);
       setMovementPreviewFrames(movementPreviewFrames);
       setFinishResult(finishResult);
@@ -1932,12 +1923,13 @@ function App() {
     let startReplacementCommitted = false;
     closeTimestampReview();
     const abortController = new AbortController();
-    autoAnalysisAbortRef.current = abortController;
+    analysisRuns.automatic = abortController;
     setAutoAnalysisRunning(true);
     setAutoAnalysisStatus("Finding the start signal…");
     setStartEvidenceStatus("");
     setStartResult(null);
     setSuggestedStartRawTime(null);
+    setStartReviewNeeded(false);
     setMovementResult(null);
     setFinishResult(null);
     setFinishStatus("");
@@ -1968,6 +1960,7 @@ function App() {
           if (!decision.found || decision.rawTime === undefined || !automaticStart) {
             restorePreviousAnalysis();
             setStartEvidenceStatus(`${decision.reason} Audio: ${audioReason}`);
+            setStartReviewNeeded(true);
             setAutoAnalysisStatus(`Start could not be confirmed. Review the video, then open the marker editor to set the exact frame.${hadPreviousAnalysis ? " Your previous analysis was kept." : ""}`);
             return;
           }
@@ -2073,7 +2066,7 @@ function App() {
         setAutoAnalysisStatus(`${error instanceof Error ? `Quick Analyze stopped: ${error.message}` : "Quick Analyze stopped."}${!startReplacementCommitted && hadPreviousAnalysis ? " The previous analysis was restored." : ""}`);
       }
     } finally {
-      autoAnalysisAbortRef.current = null;
+      analysisRuns.automatic = null;
       setAutoAnalysisRunning(false);
       setBiomechanicsRunning(false);
     }
@@ -2349,7 +2342,7 @@ function App() {
     setSessionStatus(reason);
     setMetadata(current => current ? { ...current, metadataLoaded: false } : null);
     setReviewFrameReady(false);
-    autoAnalysisAbortRef.current?.abort();
+    analysisRuns.automatic?.abort();
     secondPassAbortRef.current?.abort();
     finishReviewAbortRef.current?.abort();
   }
@@ -2599,13 +2592,14 @@ function App() {
     });
     commitAcceptedStartContext(pendingContext);
     setSuggestedStartRawTime(null);
+    setStartReviewNeeded(false);
     setActiveAnalysisScope(pendingContext.analysisScope ?? "full");
     if (!video) {
       setAutoAnalysisStatus(`Start accepted at ${acceptedStart.toFixed(3)}s.`);
       return;
     }
     const abortController = new AbortController();
-    autoAnalysisAbortRef.current = abortController;
+    analysisRuns.automatic = abortController;
     setAutoAnalysisRunning(true);
     setAutoAnalysisStatus(`Start accepted at ${acceptedStart.toFixed(3)}s. Continuing lane-specific analysis…`);
     try {
@@ -2629,7 +2623,7 @@ function App() {
       }
     } finally {
       pendingAutomaticContextRef.current = null;
-      autoAnalysisAbortRef.current = null;
+      analysisRuns.automatic = null;
       setAutoAnalysisRunning(false);
       setBiomechanicsRunning(false);
     }
@@ -2646,6 +2640,7 @@ function App() {
       pendingAutomaticContextRef.current = null;
       clearFinishDependents(false);
       setSuggestedStartRawTime(null);
+    setStartReviewNeeded(false);
       setMovementResult(null);
       setRouteAlignment(null);
       setBiomechanics((current) => current.result ? { ...current, result: undefined } : current);
@@ -2704,6 +2699,7 @@ function App() {
     automaticLaneCandidatesRef.current = [];
     setStartResult(null);
     setSuggestedStartRawTime(null);
+    setStartReviewNeeded(false);
     setMovementResult(null);
     setMovementPreviewFrames({});
     setStartEvidenceStatus("");
@@ -2778,6 +2774,7 @@ function App() {
       automaticLaneCandidatesRef.current = [];
       setStartResult(null);
       setSuggestedStartRawTime(null);
+    setStartReviewNeeded(false);
       setMovementResult(null);
       setFinishResult(null);
       setFinishStatus("");
@@ -3308,6 +3305,7 @@ function App() {
     pendingAutomaticContextRef.current = null;
     setStartResult(null);
     setSuggestedStartRawTime(null);
+    setStartReviewNeeded(false);
     setMovementResult(null);
     setFinishResult(null);
     setFinishStatus("");
@@ -3607,9 +3605,9 @@ function App() {
         <section className="hero" aria-labelledby="hero-title">
           <div className="hero-content">
             <p className="eyebrow">Speed climbing video analysis</p>
-            <h1 id="hero-title">Analyze a speed-climbing run from video.</h1>
+            <h1 id="hero-title">Compare two attempts. See which section changed.</h1>
             <p className="hero-copy">
-              Find the start, finish, first movement, center of mass, and route splits from one recording. No wearables or uploads required.
+              Check the timing, save your runs, and replay the section to work on next. Your recordings stay on your device.
             </p>
             <div className="hero-actions">
               <a className="button-link primary hero-primary" href="#upload">Analyze a climb</a>
@@ -3631,14 +3629,18 @@ function App() {
       )}
 
       {hasSelectedVideo && <NextStepCard
-        stage={!hasLoadedVideo ? "loading" : videoTaskRunning ? "analyzing" : calculatedClimbTime !== null ? "results" : startSignalRaw !== null ? "review-finish" : suggestedStartRawTime !== null ? "review-start" : "ready"}
+        stage={!hasLoadedVideo ? "loading" : videoTaskRunning ? "analyzing" : suggestedStartRawTime !== null || startReviewNeeded ? "review-start" : calculatedClimbTime !== null ? "results" : startSignalRaw !== null ? "review-finish" : "ready"}
         status={autoAnalysisStatus || undefined}
-        onCancel={autoAnalysisRunning ? () => autoAnalysisAbortRef.current?.abort() : undefined}
-        onReview={startSignalRaw !== null ? openGuidedFinishReview : suggestedStartRawTime !== null ? () => reviewTimestamp({
+        onAnalyze={() => { void runAutomaticAnalysis(); }}
+        onCancel={autoAnalysisRunning ? () => analysisRuns.automatic?.abort() : undefined}
+        onReview={suggestedStartRawTime !== null ? () => reviewTimestamp({
           label: "Quick Analyze start", suggestedRawTime: Math.max(0, roundTime(suggestedStartRawTime + startSignalOffset)),
           confidence: startResult?.confidence ?? "Medium", acceptLabel: "Accept start",
           onAccept: (rawTime, frameTimeNote) => { void acceptSuggestedStart(rawTime, frameTimeNote); },
-        }) : undefined}
+        }) : startReviewNeeded ? () => reviewTimestamp({
+          label: "Start signal", suggestedRawTime: currentTime, confidence: "Medium", acceptLabel: "Accept start",
+          onAccept: (rawTime, frameTimeNote) => acceptTimestamp("startSignal", rawTime, "Manual", "High", { frameReviewed: true, note: frameTimeNote }),
+        }) : startSignalRaw !== null ? openGuidedFinishReview : undefined}
       />}
 
       <section className="layout-grid">
@@ -3679,6 +3681,22 @@ function App() {
             </p>
           )}
           <RecordingGuide />
+          {(!hasOpenAttempt || practiceIdForLineage(attemptLineageId)) && <PracticeWalkthrough
+            active={practiceIdForLineage(attemptLineageId)} disabled={videoAnalysisRunning || !libraryReady}
+            onOpen={id => { void openPractice(id); }}
+            onInspect={event => {
+              const reference = practiceRecordings.find(item => item.id === practiceIdForLineage(attemptLineageId));
+              if (reference) jumpTo(reference[event]);
+            }}
+            onReviewHold={() => {
+              const reference = practiceRecordings.find(item => item.id === practiceIdForLineage(attemptLineageId));
+              if (reference) reviewTimestamp({ label: "Practice Hold 10 contact", suggestedRawTime: reference.hold10,
+                confidence: "High", acceptLabel: "Accept Hold 10",
+                onAccept: (time, note) => acceptTimestamp("hold10", time, "Manual", "High", { frameReviewed: true, note }),
+              });
+            }}
+            onSave={() => { void saveCurrentSession(); }}
+          />}
           {hasLoadedVideo && metadata && (
             <div className="video-meta-line" aria-label="Loaded video details">
               <span><i /> Ready</span>
@@ -3717,7 +3735,7 @@ function App() {
                 {autoAnalysisRunning ? "Analyzing climb…" : hasLoadedVideo ? analysisScope === "timing-only" ? "Find start & finish" : "Run full analysis" : hasSelectedVideo ? "Loading video…" : "Upload a video to begin"}
               </button>
               {autoAnalysisRunning && (
-                <button onClick={() => autoAnalysisAbortRef.current?.abort()}>Cancel</button>
+                <button onClick={() => analysisRuns.automatic?.abort()}>Cancel</button>
               )}
               {!autoAnalysisRunning && suggestedStartRawTime !== null && (
                 <button
@@ -4223,6 +4241,7 @@ function App() {
             onReject={() => {
               setStartResult(null);
               setSuggestedStartRawTime(null);
+    setStartReviewNeeded(false);
             }}
             emptyText="Start Signal not detected."
             defaultCandidateSource="Start light detection"
@@ -4798,7 +4817,7 @@ function App() {
 
       </section>
       <MobileWorkflow hasVideo={hasLoadedVideo} hasResults={hasOpenAttempt && calculatedClimbTime !== null} analysisRunning={videoAnalysisRunning} savedCount={savedSessions.length} />
-      <AnalysisActivity active={autoAnalysisRunning} status={autoAnalysisStatus} onCancel={() => autoAnalysisAbortRef.current?.abort()} />
+      <AnalysisActivity active={autoAnalysisRunning} status={autoAnalysisStatus} onCancel={() => analysisRuns.automatic?.abort()} />
     </main>
   );
 }
@@ -5485,21 +5504,6 @@ function MotionSparkline({
   );
 }
 
-function marker(id: TimestampMarker["id"], label: string): TimestampMarker {
-  return {
-    id,
-    label,
-    rawTime: null,
-    climbTime: null,
-    source: "Not set",
-    confidence: "None",
-  };
-}
-
-function getTimestamp(timestamps: TimestampMarker[], id: TimestampMarker["id"]) {
-  return timestamps.find((item) => item.id === id) ?? marker(id, id);
-}
-
 function buildAudioStartResult(audio: AudioStartResult): StartSignalDetectionResult {
   const rawTime = audio.rawTime ?? 0;
   return {
@@ -5687,178 +5691,6 @@ async function writeFileToDirectory(directoryHandle: any, fileName: string, cont
   await writable.close();
 }
 
-function isDatasetExport(value: unknown): value is any {
-  if (!value || typeof value !== "object") {
-    return false;
-  }
-  const candidate = value as Record<string, unknown>;
-  return typeof candidate.appVersion === "string" && Boolean(candidate.session) && Boolean(candidate.acceptedTimestamps);
-}
-
-function datasetToSavedSession(dataset: any): SavedAnalysisSession {
-  const session = dataset.session ?? {};
-  const video = dataset.video ?? {};
-  const zonesFromDataset = dataset.zones ?? {};
-  const settings = dataset.settings ?? {};
-  const sanitizedSettings = sanitizeAnalysisSessionSettings({
-    ...settings,
-    officialTotalTime: video.officialTotalTime !== null && video.officialTotalTime !== undefined
-      ? String(video.officialTotalTime)
-      : settings.officialTotalTime,
-  });
-  const timestamps = timestampsFromDataset(dataset.acceptedTimestamps ?? [], Number(video.duration) || undefined);
-
-  return {
-    id: session.sessionId || createSessionId(),
-    attemptLineageId: sanitizeAttemptLineageId(session.attemptLineageId),
-    version: 1,
-    name: session.sessionName || "Imported ClimbIQ session",
-    climberName: session.climberName || "",
-    date: session.date || todayDateString(),
-    location: session.location || session.gym || "",
-    attemptType: session.attemptType || "Training",
-    notes: session.notes || dataset.athleteNotes || "",
-    createdAt: dataset.exportTimestamp || new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-    videoFileName: video.fileName || "",
-    videoMetadata: video.fileName
-      ? {
-          fileName: video.fileName,
-          duration: Number(video.duration) || 0,
-          videoWidth: Number(video.videoWidth) || 0,
-          videoHeight: Number(video.videoHeight) || 0,
-          metadataLoaded: false,
-        }
-      : null,
-    zones: sanitizeZoneMap({
-      startLight: zonesFromDataset.startLightZone ?? undefined,
-      startBody: zonesFromDataset.startBodyZone ?? undefined,
-      hold10: zonesFromDataset.hold10Zone ?? undefined,
-      finishLight: zonesFromDataset.finishLightZone ?? undefined,
-      finishPad: zonesFromDataset.finishPadZone ?? undefined,
-    }),
-    startLightCalibration: sanitizeStartLightCalibration({
-      beforeStartRGB: dataset.calibration?.beforeStartRGB ?? undefined,
-      afterStartRGB: dataset.calibration?.afterStartRGB ?? undefined,
-      calibrationFrameBeforeTime: dataset.calibration?.calibrationFrameBeforeTime ?? undefined,
-      calibrationFrameAfterTime: dataset.calibration?.calibrationFrameAfterTime ?? undefined,
-      colorDelta: dataset.calibration?.colorDelta ?? undefined,
-    }, Number(video.duration) || undefined),
-    settings: sanitizedSettings,
-    timestamps,
-    splitCalculations: dataset.splitCalculations ?? {},
-    biomechanics: sanitizeBiomechanicsSession(dataset.biomechanics),
-  };
-}
-
-function timestampsFromDataset(values: any[], durationSeconds?: number): TimestampMarker[] {
-  const next = INITIAL_TIMESTAMPS.map((item) => ({ ...item }));
-  for (const value of values) {
-    const markerId = value.markerId as TimestampMarker["id"];
-    const existing = next.find((item) => item.id === markerId);
-    if (!existing) {
-      continue;
-    }
-    existing.rawTime = typeof value.acceptedRawTime === "number" ? value.acceptedRawTime : null;
-    existing.climbTime = typeof value.climbTime === "number" ? value.climbTime : null;
-    existing.detectedRawTime = typeof value.detectedRawTime === "number" ? value.detectedRawTime : null;
-    existing.offsetApplied = typeof value.offsetApplied === "number" ? value.offsetApplied : 0;
-    existing.source = value.source ?? "Not set";
-    existing.confidence = value.confidence ?? "None";
-    existing.note = value.note ?? "";
-    existing.acceptanceMode = sanitizeAcceptanceMode(value.acceptanceMode);
-    existing.observationIntervalSeconds = sanitizeObservationInterval(value.observationIntervalSeconds);
-  }
-  return sanitizeTimestampSequence(next, durationSeconds);
-}
-
-function mergeTimestampDefaults(values: TimestampMarker[]) {
-  return INITIAL_TIMESTAMPS.map((defaultMarker) => {
-    const imported = values.find((item) => item?.id === defaultMarker.id);
-    return {
-      ...defaultMarker,
-      ...imported,
-      id: defaultMarker.id,
-      label: defaultMarker.label,
-    };
-  });
-}
-
-function videoMetadataMatches(actual: VideoMetadata, expected: VideoMetadata): boolean {
-  if (actual.fileName !== expected.fileName) {
-    return false;
-  }
-  const dimensionsMatch = !expected.videoWidth || !expected.videoHeight ||
-    (actual.videoWidth === expected.videoWidth && actual.videoHeight === expected.videoHeight);
-  const durationTolerance = Math.max(0.1, Math.abs(expected.duration) * 0.005);
-  const durationMatches = !expected.duration || Math.abs(actual.duration - expected.duration) <= durationTolerance;
-  return dimensionsMatch && durationMatches;
-}
-
-function timestampsFitVideo(markers: TimestampMarker[], duration: number): boolean {
-  return Number.isFinite(duration) && duration > 0 && markers.every(marker => marker.rawTime === null ||
-    typeof marker.rawTime === "number" && Number.isFinite(marker.rawTime) && marker.rawTime >= 0 && marker.rawTime <= duration);
-}
-
-function normalizedZonesEqual(left?: NormalizedZone, right?: NormalizedZone): boolean {
-  if (!left || !right) {
-    return left === right;
-  }
-  return left.id === right.id &&
-    Math.abs(left.x1 - right.x1) < 1e-6 &&
-    Math.abs(left.y1 - right.y1) < 1e-6 &&
-    Math.abs(left.x2 - right.x2) < 1e-6 &&
-    Math.abs(left.y2 - right.y2) < 1e-6;
-}
-
-function decodeSavedSession(value: unknown): SavedAnalysisSession | null {
-  return isSavedAnalysisSession(value) ? sanitizeSavedSession(value) : null;
-}
-
-function sanitizeSavedSession(session: SavedAnalysisSession): SavedAnalysisSession {
-  const videoMetadata = sanitizeVideoMetadata(session.videoMetadata);
-  return {
-    ...session,
-    attemptLineageId: sanitizeAttemptLineageId(session.attemptLineageId),
-    videoMetadata,
-    zones: sanitizeZoneMap(session.zones),
-    startLightCalibration: sanitizeStartLightCalibration(
-      session.startLightCalibration,
-      videoMetadata?.duration,
-    ),
-    settings: sanitizeAnalysisSessionSettings(session.settings),
-    timestamps: sanitizeTimestampSequence(
-      mergeTimestampDefaults(session.timestamps),
-      videoMetadata?.duration,
-    ),
-    biomechanics: sanitizeBiomechanicsSession(session.biomechanics),
-  };
-}
-
-function isSavedAnalysisSession(value: unknown): value is SavedAnalysisSession {
-  if (!value || typeof value !== "object") {
-    return false;
-  }
-
-  const candidate = value as Partial<SavedAnalysisSession>;
-  return (
-    candidate.version === 1 &&
-    typeof candidate.id === "string" &&
-    candidate.id.length > 0 &&
-    typeof candidate.name === "string" &&
-    typeof candidate.createdAt === "string" &&
-    typeof candidate.updatedAt === "string" &&
-    Boolean(candidate.settings) &&
-    Array.isArray(candidate.timestamps)
-  );
-}
-
-function createSessionId() {
-  return typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
-    ? crypto.randomUUID()
-    : `session-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-}
-
 function slugify(value: string) {
   return value
     .trim()
@@ -5868,8 +5700,6 @@ function slugify(value: string) {
     || "climbiq-session";
 }
 
-function todayDateString() {
-  return new Date().toISOString().slice(0, 10);
-}
+
 
 export default App;

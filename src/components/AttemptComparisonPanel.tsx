@@ -1,3 +1,4 @@
+import ComparisonPlayback from "./ComparisonPlayback";
 import { memo, useMemo, useState } from "react";
 import type { SavedAnalysisSession } from "../types";
 import { compareAttempts, hasComparableTiming, type AttemptComparisonRow } from "../lib/attemptComparison";
@@ -52,7 +53,7 @@ export default memo(function AttemptComparisonPanel({ sessions }: { sessions: Sa
   }
 
   return (
-    <details className="comparison-details">
+    <details className="comparison-details" open>
       <summary>
         <span>
           <strong>Compare saved attempts</strong>
@@ -64,7 +65,7 @@ export default memo(function AttemptComparisonPanel({ sessions }: { sessions: Sa
         <div className="comparison-selectors">
           <label>
             Baseline attempt
-            <select value={baselineId} onChange={(event) => chooseBaseline(event.target.value)}>
+            <select aria-label="Baseline attempt" value={baselineId} onChange={(event) => chooseBaseline(event.target.value)}>
               {eligibleSessions.map((session) => (
                 <option key={session.id} value={session.id}>
                   {session.name}{session.date ? ` · ${session.date}` : ""}
@@ -75,7 +76,7 @@ export default memo(function AttemptComparisonPanel({ sessions }: { sessions: Sa
           <span className="comparison-arrow" aria-hidden="true">→</span>
           <label>
             New attempt
-            <select value={candidateId} onChange={(event) => chooseCandidate(event.target.value)}>
+            <select aria-label="New attempt" value={candidateId} onChange={(event) => chooseCandidate(event.target.value)}>
               {eligibleSessions.map((session) => (
                 <option key={session.id} value={session.id}>
                   {session.name}{session.date ? ` · ${session.date}` : ""}
@@ -103,6 +104,8 @@ export default memo(function AttemptComparisonPanel({ sessions }: { sessions: Sa
           </div>
           {visibleRows.map((row) => <ComparisonRow key={row.id} row={row} />)}
         </div>
+
+        <ComparisonPlayback key={identityKey} baseline={sessionById.get(baselineId)!} candidate={sessionById.get(candidateId)!} />
 
         <div className="comparison-quality">
           <EvidenceQuality label="Baseline" session={comparison.baseline} />

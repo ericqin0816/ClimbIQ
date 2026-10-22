@@ -1,0 +1,13 @@
+ClimbIQ synthetic practice recordings and reference data
+SPDX-License-Identifier: CC0-1.0
+
+The ClimbIQ contributors dedicate these original geometric animations,
+their generator, and their authored reference data to the public domain
+under CC0 1.0 Universal: https://creativecommons.org/publicdomain/zero/1.0/
+
+No third-party recordings, fonts, music, or human likenesses are included.
+These assets may be redistributed and modified, including in automated tests.
+
+These are synthetic workflow examples. Their authored frame transitions are
+not independently reviewed real-world labels and do not establish detector
+accuracy, human performance, or behavior on an iPhone.

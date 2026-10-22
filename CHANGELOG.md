@@ -3,7 +3,27 @@
 User-facing changes and their limits. Detailed experiments and regression
 observations are recorded in [benchmarks](benchmarks).
 
-## Unreleased — iPhone beta foundation
+## 0.30.0 — 2026-10-22
+
+- Integrated the saved-library concurrency, staged replacement-video decoding,
+  explicit attachment, attempt identity, timing-only mode, recording guide, and
+  Saved-screen work with current main's coaching improvements.
+- Added original CC0 practice recordings and a guided inspect → review → save →
+  compare walkthrough. Their authored references are synthetic, not independent
+  real-climber labels. Hold 10 phases require an explicit frame review.
+- Added section replay with two explicitly attached originals, elapsed-time
+  synchronization, per-attempt stopping, and grouped recent-attempt history.
+  A pending Start correction now takes priority over an older open result.
+- Extracted decoder preparation, analysis queue/restoration, library state, and
+  session decoding from App. Late work cannot restore a replacement recording.
+- Added blinded study reporting with hash/build matching, grouped splits,
+  two-reviewer adjudication, and separate error, false acceptance, coverage,
+  correction effort, and return-use counts. No new participants were observed.
+- Updated Vite to 7.3.7, source-map-js to 1.2.2, and Vitest to 4.1.12. Added
+  production workflow checks in Chromium and macOS WebKit, including phone
+  viewports. Native compilation and actual iPhone checks remain outstanding.
+
+## Earlier iPhone beta foundation
 
 - Manual center-of-mass and calibration controls now honor video preparation,
   attachment, review, and library-save activity. Their own analysis still supports
