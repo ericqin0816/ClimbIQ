@@ -1,6 +1,9 @@
 import type { FrameSample, NormalizedZone, RGB, ZonePixelRect } from "../types";
 
 const SEEK_EPSILON_SECONDS = 0.004;
+// One private crop surface per decoder. No frames, URLs or sampling decisions
+// are retained, and the surface becomes collectible with its video element.
+const zoneSurfaces = new WeakMap<HTMLVideoElement, { canvas: HTMLCanvasElement; context: CanvasRenderingContext2D }>();
 
 export function waitForMetadata(video: HTMLVideoElement): Promise<void> {
   if (hasUsableVideoMetadata(video)) {
@@ -422,13 +425,19 @@ export function captureZoneImageData(
   pixelBounds: "extent" | "cover" = "extent",
 ): { imageData: ImageData; pixelZone: ZonePixelRect } {
   const pixelZone = normalizedZoneToPixelRect(zone, video.videoWidth, video.videoHeight, pixelBounds);
-  const canvas = document.createElement("canvas");
-  canvas.width = pixelZone.width;
-  canvas.height = pixelZone.height;
-  const context = canvas.getContext("2d", { willReadFrequently: true });
-  if (!context) {
-    throw new Error("Canvas 2D context is unavailable.");
+  let surface = zoneSurfaces.get(video);
+  if (!surface) {
+    const canvas = document.createElement("canvas");
+    const context = canvas.getContext("2d", { willReadFrequently: true });
+    if (!context) throw new Error("Canvas 2D context is unavailable.");
+    surface = { canvas, context };
+    zoneSurfaces.set(video, surface);
   }
+  const { canvas, context } = surface;
+  if (canvas.width !== pixelZone.width) canvas.width = pixelZone.width;
+  if (canvas.height !== pixelZone.height) canvas.height = pixelZone.height;
+  // A transparent source must never composite over the previous observation.
+  context.clearRect(0, 0, pixelZone.width, pixelZone.height);
   context.drawImage(
     video,
     pixelZone.x,

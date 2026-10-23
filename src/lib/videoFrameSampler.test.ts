@@ -6,6 +6,7 @@ import {
   hasUsableVideoMetadata,
   captureFrame,
   captureVideoPixels,
+  captureZoneImageData,
   seekTo,
   sampleFramesInRange,
   normalizedZoneToPixelRect,
@@ -43,7 +44,7 @@ describe("normalized sampling rectangles", () => {
   });
   it("passes the requested crop policy through the actual color-sampling path", async () => {
     const image = { width: 1, height: 1, data: new Uint8ClampedArray([34, 142, 48, 255]) } as ImageData;
-    const context = { drawImage: vi.fn(), getImageData: vi.fn(() => image) };
+    const context = { clearRect: vi.fn(), drawImage: vi.fn(), getImageData: vi.fn(() => image) };
     vi.stubGlobal("document", { createElement: () => ({ width: 0, height: 0, getContext: () => context }) });
     const video = { videoWidth: 20, videoHeight: 20, duration: 5, currentTime: 1, readyState: 2, seeking: false } as HTMLVideoElement;
     const precise = await sampleZoneAverageColor(video, 1, zone, "cover");
@@ -51,6 +52,33 @@ describe("normalized sampling rectangles", () => {
     expect(precise.averageRgb).toEqual({ r: 34, g: 142, b: 48 });
     await sampleZoneAverageColor(video, 1, zone);
     expect(context.drawImage).toHaveBeenLastCalledWith(video, 12, 3, 2, 2, 0, 0, 2, 2);
+  });
+});
+
+describe("bounded crop surfaces", () => {
+  it("reuses only a video's private surface, resizes exact crops, and clears before every draw", () => {
+    const events: string[] = [];
+    const canvases: Array<{ width: number; height: number }> = [];
+    const createElement = vi.fn(() => {
+      const canvas = { width: 0, height: 0, getContext: () => ({
+        clearRect: () => events.push("clear"), drawImage: () => events.push("draw"),
+        getImageData: () => ({ data: new Uint8ClampedArray([1, 2, 3, 255]), width: canvas.width, height: canvas.height }),
+      }) };
+      canvases.push(canvas); return canvas;
+    });
+    vi.stubGlobal("document", { createElement });
+    const video = { videoWidth: 100, videoHeight: 100 } as HTMLVideoElement;
+    const zone = { id: "startLight" as const, label: "Crop", x1: 0, y1: 0, x2: .1, y2: .2 };
+    const first = captureZoneImageData(video, zone);
+    const second = captureZoneImageData(video, zone);
+    expect(createElement).toHaveBeenCalledTimes(1);
+    expect(second.imageData).not.toBe(first.imageData);
+    expect(canvases[0]).toMatchObject({ width: 10, height: 20 });
+    captureZoneImageData(video, { ...zone, x2: .3, y2: .4 });
+    expect(canvases[0]).toMatchObject({ width: 30, height: 40 });
+    captureZoneImageData({ videoWidth: 100, videoHeight: 100 } as HTMLVideoElement, zone);
+    expect(createElement).toHaveBeenCalledTimes(2);
+    expect(events).toEqual(["clear", "draw", "clear", "draw", "clear", "draw", "clear", "draw"]);
   });
 });
 

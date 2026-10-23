@@ -32,6 +32,7 @@ describe("upper finish discovery-to-refinement pipeline", () => {
       createElement: () => {
         let sourceX = 0; let sourceY = 0;
         return { width: 0, height: 0, getContext: () => ({
+          clearRect() {},
           drawImage: (_video: HTMLVideoElement, ...args: number[]) => {
             // Both production capture forms are exercised: full discovery
             // frames and the native-resolution crop used by temporal sampling.

@@ -49,11 +49,11 @@ Scores remain separate:
 
 | Cycle | Focus | Status / evidence |
 | --- | --- | --- |
-| 1 | Repeated audio spectral calculations | Exact same-PCM parity on three real files; analyzer CPU improvement measured; cumulative production check pending |
-| 2 | Repeated upper-Finish scan invariants | Exact full-result parity on 24 actual-pixel configurations; helper CPU improvement measured; cumulative production check pending |
-| 3 | ROI sampling allocation and pixel parity | Hypothesis under test |
-| 4 | Start review-cursor evidence | Planned, evidence first |
-| 5 | Upper-Finish cue quality | False-looking neutral-wall proposal under investigation; no automatic error asserted |
+| 1 | Repeated audio spectral calculations | Exact same-PCM parity on three real files; cumulative production outputs preserved |
+| 2 | Repeated upper-Finish scan invariants | Exact full-result parity on 24 actual-pixel configurations; cumulative production outputs preserved |
+| 3 | ROI sampling allocation and pixel parity | 18 native ROI pairs and four transparency/resizing controls byte-identical; repeated canvas allocation removed |
+| 4 | Start review-cursor evidence | Artifact ranking corrected; exact audio priority and automatic safety independently checked |
+| 5 | Upper-Finish cue quality | Conservative confidence cap under independent review; original candidate ranking retained |
 | 6 | Further measured detector bottleneck | Planned after profiling |
 | 7 | Start temporal/identity robustness | Planned after independent review |
 | 8 | Finish source-frame robustness | Planned after independent review |
@@ -82,11 +82,49 @@ distance median once per patch. Thresholds, candidate selection, confidence and
 Finish acceptance gates are unchanged. Full discovery objects matched for three
 real frame sets × four lane hints × with/without expected-Finish context.
 
-Same-process interleaved helper medians after warm-up were 29.94→25.99 ms,
-50.98→44.42 ms and 41.65→35.00 ms (13–16%, only about 4–7 ms per call). Fifty-nine
+Same-process interleaved helper medians after warm-up were 29.636→25.772 ms,
+50.950→44.299 ms and 41.631→34.983 ms (13–16%, only about 4–7 ms per call). These
+use the conventional average of the two central samples. Fifty-nine
 focused Finish/pipeline tests passed. An earlier all-transitions-rejected shortcut
 was rejected because these actual recordings had eligible transitions; it offered
 no demonstrated benefit. Faster helper arithmetic is not greater event accuracy.
+
+The clean cumulative Cycle 2 production build returned the same accepted/review
+outcomes and two accepted endpoints across the fixed four clips. Terminal times
+were 4.876 / 13.223 / 12.201 / 13.164 seconds; median 12.683 seconds versus the
+13.139-second baseline. The resulting provisional speed grade is 5.255/10,
+coverage 2.5/10, known-case guards 10/10, evidence strength 5.5/10. A single pass
+does not establish a repeatable per-change workflow speedup. The full check
+passed 972 tests, types, production build and server checks.
+
+## Cycle 3: bounded ROI capture surface
+
+Each video decoder now reuses one private crop canvas, with exact resizing and a
+clear before every draw. ImageData remains a fresh snapshot. Weak ownership
+allows the surface to be collected with the video; no frame or URL is cached.
+Eighteen actual native ROI pairs on two files were byte-identical. Four controls
+also preserved transparent frames, resizing and cross-video isolation. Warm
+24-readback loops allocated zero new canvases versus 24 previously. Isolated
+readback improvement was modest and variable (about 4.2% median paired reduction
+in the first run); this earns no separate whole-workflow speed credit.
+
+The reproducible driver is [sampling-performance.mjs](../e2e/sampling-performance.mjs).
+Eighteen focused tests passed, and an independent agent found no actionable
+defect. Coverage and known-case acceptance behavior are unchanged.
+
+## Cycle 4: rejected Start evidence cannot choose the review event
+
+A rejected camera-cut cue previously dominated an Edinburgh review cursor.
+Eligible evidence now determines an alternative review event; switching events
+always remains review-only. An original eligible High protocol-audio cluster
+retains priority, including when several exact-audio clusters are supplied.
+The example cursor moved 5.433→6.467 seconds; neither is a verified true Start.
+
+Fifty-eight focused tests passed. A 20,000-case differential audit found zero
+new automatic acceptances, zero lost accepted exact-audio events, and all 5,005
+artifact-free inputs unchanged. Sixty-eight artifact-driven switches lost
+automatic status intentionally. This improves correction guidance, not measured
+endpoint accuracy or automatic coverage.
 
 Local detailed evidence currently lives under ignored `test-results/detector-ten/`,
 `test-results/detection-cycles/`, and `test-results/finish-cycles/`.
