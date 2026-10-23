@@ -1,0 +1,49 @@
+{
+  "version": 1,
+  "synthetic": true,
+  "workflowOnly": true,
+  "license": "CC0-1.0",
+  "width": 160,
+  "height": 284,
+  "fps": 30,
+  "duration": 8,
+  "sha256": "dae0d4c046617fd6a7673e7409aa915357c99ab2d02d6c6bdc1e1ca9b98c2c00",
+  "authoredStart": 2.4,
+  "authoredLaunch": 2.7,
+  "tones": [
+    {
+      "onset": 0.4,
+      "frequency": 550
+    },
+    {
+      "onset": 1.4,
+      "frequency": 550
+    },
+    {
+      "onset": 2.4,
+      "frequency": 1100
+    }
+  ],
+  "variant": "stereo-final-tone-cancellation",
+  "audioChannels": 2,
+  "channelPhases": {
+    "preparation": [
+      1,
+      1
+    ],
+    "final": [
+      1,
+      -1
+    ]
+  },
+  "reproduction": "CLIMBIQ_FFMPEG=<ffmpeg> node scripts/generate-dual-lane-fixture.mjs --stereo-cancellation",
+  "authoredVariant": "Same original geometry and 0.3-second launch delay. Start moved to 2.4 seconds, preparations to 0.4/1.4, and launch to 2.7 to exercise the unchanged one-second official countdown protocol.",
+  "referenceMethod": "Original geometric animation and synthesized audio. Authored clocks are workflow controls, not independent human labels or real-climber accuracy evidence.",
+  "decodedSourcePTS": {
+    "frames": 240,
+    "first": 0,
+    "last": 7.966667,
+    "checkedAgainstAuthoredGrid": true,
+    "maxToleranceSeconds": 0.00001
+  }
+}

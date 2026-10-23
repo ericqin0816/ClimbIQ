@@ -179,3 +179,53 @@ no recruited human study, calibrated electronic timing accuracy, population
 false-acceptance rate, actual iPhone field validation, or demonstrated training
 benefit. The [independent-study workflow](independent-study.md) provides the
 collection and adjudication process.
+
+## Follow-up: recorded-beep localization recovery
+
+The ten-round results above are archived unchanged. After the reported detection
+regression, a separate targeted investigation found that arithmetic stereo
+mixing obscures the final countdown tone in `IMG_9075`. Both original channels
+pass the existing strict countdown detector at 8.590 and 8.620 seconds, while
+the mix produces a Medium review candidate at 7.230 seconds. The measured
+cancellation is local to the final-tone frequency band; the entire recording
+is not phase-inverted.
+
+The recovery retains the mixed detector and all its numeric thresholds. It
+applies only when an inconclusive stereo mix has two complete High original-channel
+protocols with compatible pitches and observed supports. It keeps the earliest
+original clock and one audio evidence item. The export retains both observations
+and the original mixed result. Nominal feature windows and their envelope are
+explicitly not event-accuracy bounds. High audio also cannot promote a weak
+color patch into a verified light region or Finish sensor.
+
+Two prediction-blind AI observers independently inspected the decoded source
+audio before seeing either predictions or each other's labels. Their frozen
+onset brackets have union 8.580–8.625 seconds. The new 8.590-second review cursor
+has signed disagreement −35 to +10 ms with that bracket; the old 7.230-second
+cursor has disagreement −1395 to −1350 ms. The investigator already knew the
+candidate clocks and selected this development recording. These observations
+are not recruited human labels, electronic timing accuracy, calibrated A/V
+alignment, or an unbiased held-out evaluation.
+
+Fresh native whole-app runs on clean builds `f86f5ae` and `320733c` preserve all
+six source hashes and every accepted timestamp: **4/12 endpoints and 1/6 complete
+pairs before and after**, with no page or policy errors. The recorded-beep
+localization improves, but the app still requires review on this source. There
+is no verified athlete region, so fallback body motion cannot authorize Start;
+the scene-continuity check also rejects the proposed timestamp. Its displayed
+reason masks the separate body-audit failure. Neither gate was weakened to
+increase acceptance counts. The exact scene comparison frames remain
+unadjudicated, so a foreground obstruction is not treated as proven continuity.
+
+The regression suite includes a new original CC0 encoded stereo fixture whose
+final tone cancels in the mix. Native Chromium recovers one audio item at an
+original channel clock and leaves Finish unset. All 54 Chromium desktop/phone
+production workflows pass, along with typecheck, build, coaching smoke checks,
+and 1,147 unit tests across 108 files; five known expected failures remain.
+macOS WebKit receives the same native-codec test in GitHub CI. Phone viewports
+are not actual iPhone validation. The detailed
+[recovery summary](../benchmarks/stereo-start-recovery-2026-10-23.json) preserves
+the unchanged automatic denominator, source hashes, reference intervals,
+reviewer assessments and raw sidecar evidence hashes. Private footage and PCM
+remain outside Git. No model weights were trained and no general accuracy or
+processing-speed improvement is established by these development runs.

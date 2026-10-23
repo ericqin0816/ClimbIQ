@@ -8,20 +8,31 @@ import path from "node:path";
 // Original CC0 geometry/audio. An authored workflow fixture, never evidence of
 // real climber identity, physical contact, or detector accuracy. Not user practice.
 const encoder = process.env.CLIMBIQ_FFMPEG ?? "ffmpeg";
-const width = 160, height = 284, fps = 30, duration = 8, start = 1.4, launch = 1.7;
+const stereoCancellation = process.argv.includes("--stereo-cancellation");
+const stem = stereoCancellation ? "dual-lane-stereo-cancellation" : "dual-lane";
+const width = 160, height = 284, fps = 30, duration = 8;
+// The stereo variant needs the unchanged official protocol's one-second gaps.
+// The original mono fixture and all its default output clocks remain unchanged.
+const start = stereoCancellation ? 2.4 : 1.4, launch = stereoCancellation ? 2.7 : 1.7;
+const tones = stereoCancellation ? [[.4, 550], [1.4, 550], [start, 1100]] : [[.4, 550], [.9, 550], [start, 1100]];
+const channels = stereoCancellation ? 2 : 1;
 const out = path.resolve("e2e/fixtures"), temp = await mkdtemp(path.join(tmpdir(), "climbiq-dual-lane-"));
 await mkdir(out, { recursive: true });
-const audio = path.join(temp, "tones.wav"), file = path.join(out, "dual-lane.mp4");
-const rate = 24000, pcm = Buffer.alloc(duration * rate * 2), header = Buffer.alloc(44);
-for (const [onset, frequency] of [[.4, 550], [.9, 550], [start, 1100]]) {
+const audio = path.join(temp, "tones.wav"), file = path.join(out, `${stem}.mp4`);
+const rate = 24000, pcm = Buffer.alloc(duration * rate * 2 * channels), header = Buffer.alloc(44);
+for (const [onset, frequency] of tones) {
   for (let sample = 0; sample < rate * .14; sample++) {
     const t = sample / rate, envelope = Math.min(1, t / .005, (.14 - t) / .005);
-    pcm.writeInt16LE(Math.round(15000 * envelope * Math.sin(2 * Math.PI * frequency * t)), (Math.round(onset * rate) + sample) * 2);
+    const value = Math.round(15000 * envelope * Math.sin(2 * Math.PI * frequency * t));
+    for (let channel = 0; channel < channels; channel++) {
+      const sign = stereoCancellation && frequency === 1100 && channel === 1 ? -1 : 1;
+      pcm.writeInt16LE(sign * value, ((Math.round(onset * rate) + sample) * channels + channel) * 2);
+    }
   }
 }
 header.write("RIFF"); header.writeUInt32LE(36 + pcm.length, 4); header.write("WAVEfmt ", 8);
-header.writeUInt32LE(16, 16); header.writeUInt16LE(1, 20); header.writeUInt16LE(1, 22);
-header.writeUInt32LE(rate, 24); header.writeUInt32LE(rate * 2, 28); header.writeUInt16LE(2, 32);
+header.writeUInt32LE(16, 16); header.writeUInt16LE(1, 20); header.writeUInt16LE(channels, 22);
+header.writeUInt32LE(rate, 24); header.writeUInt32LE(rate * 2 * channels, 28); header.writeUInt16LE(2 * channels, 32);
 header.writeUInt16LE(16, 34); header.write("data", 36); header.writeUInt32LE(pcm.length, 40);
 await writeFile(audio, Buffer.concat([header, pcm]));
 const args = ["-hide_banner", "-loglevel", "error", "-y", "-f", "rawvideo", "-pixel_format", "rgb24",
@@ -62,8 +73,12 @@ if (probeCode !== 0 || points.length !== fps * duration || points.some((pts, ind
   throw new Error("Encoded fixture did not preserve the authored source PTS grid.");
 const metadata = { version: 1, synthetic: true, workflowOnly: true, license: "CC0-1.0", width, height, fps, duration,
   sha256: createHash("sha256").update(await readFile(file)).digest("hex"), authoredStart: start, authoredLaunch: launch,
-  tones: [{ onset: .4, frequency: 550 }, { onset: .9, frequency: 550 }, { onset: start, frequency: 1100 }],
+  tones: tones.map(([onset, frequency]) => ({ onset, frequency })),
+  ...(stereoCancellation ? { variant: "stereo-final-tone-cancellation", audioChannels: channels,
+    channelPhases: { preparation: [1, 1], final: [1, -1] },
+    reproduction: "CLIMBIQ_FFMPEG=<ffmpeg> node scripts/generate-dual-lane-fixture.mjs --stereo-cancellation",
+    authoredVariant: "Same original geometry and 0.3-second launch delay. Start moved to 2.4 seconds, preparations to 0.4/1.4, and launch to 2.7 to exercise the unchanged one-second official countdown protocol." } : {}),
   referenceMethod: "Original geometric animation and synthesized audio. Authored clocks are workflow controls, not independent human labels or real-climber accuracy evidence.",
   decodedSourcePTS: { frames: points.length, first: points[0], last: points.at(-1), checkedAgainstAuthoredGrid: true, maxToleranceSeconds: .00001 } };
-await writeFile(path.join(out, "dual-lane.reference.json"), JSON.stringify(metadata, null, 2) + "\n");
+await writeFile(path.join(out, `${stem}.reference.json`), JSON.stringify(metadata, null, 2) + "\n");
 console.log(JSON.stringify({ file, bytes: (await readFile(file)).length, sha256: metadata.sha256, frames: points.length }));

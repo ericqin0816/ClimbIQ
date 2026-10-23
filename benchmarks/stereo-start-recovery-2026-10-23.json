@@ -1,0 +1,426 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-10-23",
+  "isModelWeightTraining": false,
+  "purpose": "Targeted recorded-cue localization recovery; the prior iteration did not establish an accuracy improvement.",
+  "baselineBuild": {
+    "schemaVersion": 1,
+    "appVersion": "0.30.0",
+    "commitSha": "f86f5aec9a25961eafcb41627855d02c71a36019",
+    "workingTreeDirty": false
+  },
+  "candidateRuntimeBuild": {
+    "schemaVersion": 1,
+    "appVersion": "0.30.0",
+    "commitSha": "320733c41871597b3aa7a4c6dfcb0c52cd7b60b0",
+    "workingTreeDirty": false
+  },
+  "browser": "156.0.8078.47",
+  "cohort": {
+    "distinctExistingPhoneRecordings": 6,
+    "split": "development",
+    "newHeldOutAttempts": 0,
+    "searchWindowSeconds": [
+      0,
+      12
+    ],
+    "passesPerBuildPerRecording": 1
+  },
+  "changes": [
+    "Preserve unchanged mixed-audio detector and thresholds. An inconclusive two-channel mix may use two complete High original-channel protocols with compatible pitches and observed supports.",
+    "Retain one audio evidence item and an original channel clock; never average clocks or call channel agreement independent evidence. Retain original mixed-result diagnostics.",
+    "High audio timing cannot promote a Low color patch into a lane-light identity or Finish sensor."
+  ],
+  "sourceMechanism": {
+    "target": "IMG_9075",
+    "wholeWindowStereoCorrelation": 0.9359781177161196,
+    "interpretation": "Frequency-local destructive interference in the final-tone band, not global stereo inversion.",
+    "final1100HzMixPowerRelativeToUncorrelatedExpectation": 0.665,
+    "preparationBandAlignment": [
+      0.69,
+      0.688
+    ],
+    "finalBandAlignment": -0.335,
+    "metricsRounded": true
+  },
+  "reviewLocalization": {
+    "event": "Recorded approximately1100Hz final acoustic tone after two approximately550Hz preparation tones in the first12 seconds.",
+    "timeAxis": "Original browser-decoded8000Hz PCM, window origin0. No calibrated electronic trigger, sound propagation correction or independently validated A/V origin.",
+    "sourceId": "IMG_9075",
+    "sourceSha256": "12a1189c069d832b6bcb1f38176786a7abd0cbb88da234bc9c0d1e53881602e5",
+    "beforeSeconds": 7.23,
+    "afterSeconds": 8.59,
+    "observerA": {
+      "artifact": "stereo-observer-a-frozen.json",
+      "sha256": "3d04b14637be9cc0eb8d61c1686aebf0927eaa99404d48df27b9a8e98149627f",
+      "onsetBracketSeconds": [
+        8.585,
+        8.625
+      ]
+    },
+    "observerB": {
+      "artifact": "stereo-observer-b-frozen.json",
+      "sha256": "9a43f0c07198a2ae25c3ab6d93930d73a886f6f45fc8941643acac5e6e92e201",
+      "onsetBracketSeconds": [
+        8.58,
+        8.62
+      ]
+    },
+    "independentFrozenAIObserverUnionSeconds": [
+      8.58,
+      8.625
+    ],
+    "beforeSignedDifferenceIntervalSeconds": [
+      -1.395,
+      -1.35
+    ],
+    "afterSignedDifferenceIntervalSeconds": [
+      -0.035,
+      0.01
+    ],
+    "comparisonPolicySeconds": 0.1,
+    "policyIsElectronicAccuracyGuarantee": false,
+    "wholeDifferenceIntervalWithinPolicyBefore": false,
+    "wholeDifferenceIntervalWithinPolicyAfter": true,
+    "observersSawPredictionsBeforeFreeze": false,
+    "observersSawEachOthersLabelsBeforeFreeze": false,
+    "rootAlreadyKnewPredictionsAndSelectedTarget": true,
+    "isRecruitedHumanStudy": false,
+    "isAutomaticallyAccepted": false,
+    "remainingAutomaticBlockers": [
+      "No eligible light lane or selected athlete body region; fallback motion is capped Low and cannot authorize automatic Start.",
+      "Existing scene-continuity audit reports a cut or reframe; scene reason masks the separate body-audit failure. Exact source comparison pair was not adjudicated."
+    ],
+    "interpretation": "Verified recorded acoustic cue localization on a targeted development source. No calibrated electronic trigger, A/V origin, sound-travel correction, representative accuracy or unbiased generalization claim."
+  },
+  "automaticCoverage": {
+    "endpointSlots": 12,
+    "beforeAcceptedEndpoints": 4,
+    "afterAcceptedEndpoints": 4,
+    "attempts": 6,
+    "beforeCompletePairs": 1,
+    "afterCompletePairs": 1,
+    "allAcceptedClocksUnchanged": true,
+    "demonstratedAutomaticCoverageGain": false,
+    "isAccuracyEstimate": false
+  },
+  "nativeWorkflow": {
+    "allSixCompletedBeforeAndAfter": true,
+    "allSourceHashesUnchanged": true,
+    "pageErrorsBefore": [],
+    "pageErrorsAfter": [],
+    "policyViolationsBefore": [],
+    "policyViolationsAfter": []
+  },
+  "cases": [
+    {
+      "id": "12.24",
+      "sourceSha256": "b981cc57f8d3d4fe9c57e4e6414f23457ad8bc7eb7cbec5a95c969707d21b333",
+      "sourceHashUnchanged": true,
+      "beforeAutomaticEndpoints": 1,
+      "afterAutomaticEndpoints": 1,
+      "beforeAccepted": [
+        {
+          "marker": "startSignal",
+          "time": 9.4,
+          "confidence": "High",
+          "mode": "automatic"
+        }
+      ],
+      "afterAccepted": [
+        {
+          "marker": "startSignal",
+          "time": 9.4,
+          "confidence": "High",
+          "mode": "automatic"
+        }
+      ],
+      "acceptedClocksUnchanged": true
+    },
+    {
+      "id": "IMG_8903",
+      "sourceSha256": "eb7bbcb91565cee5b7242f69f085442d260e85ef12cd399fbd21eb60c37ef08c",
+      "sourceHashUnchanged": true,
+      "beforeAutomaticEndpoints": 1,
+      "afterAutomaticEndpoints": 1,
+      "beforeAccepted": [
+        {
+          "marker": "startSignal",
+          "time": 4.29,
+          "confidence": "High",
+          "mode": "automatic"
+        }
+      ],
+      "afterAccepted": [
+        {
+          "marker": "startSignal",
+          "time": 4.29,
+          "confidence": "High",
+          "mode": "automatic"
+        }
+      ],
+      "acceptedClocksUnchanged": true
+    },
+    {
+      "id": "IMG_9075",
+      "sourceSha256": "12a1189c069d832b6bcb1f38176786a7abd0cbb88da234bc9c0d1e53881602e5",
+      "sourceHashUnchanged": true,
+      "beforeAutomaticEndpoints": 0,
+      "afterAutomaticEndpoints": 0,
+      "beforeAccepted": [],
+      "afterAccepted": [],
+      "acceptedClocksUnchanged": true
+    },
+    {
+      "id": "IMG_9076",
+      "sourceSha256": "4b9c8ce7367b0c64970a8df5a0474e385e3e27c7d3eb28f8977bd0b3186f3e8a",
+      "sourceHashUnchanged": true,
+      "beforeAutomaticEndpoints": 0,
+      "afterAutomaticEndpoints": 0,
+      "beforeAccepted": [],
+      "afterAccepted": [],
+      "acceptedClocksUnchanged": true
+    },
+    {
+      "id": "IMG_9077",
+      "sourceSha256": "e6fdd0a8db01396342d8ba5a95474d8b4e3f17459f83d9da30dbfeb9c3b571e1",
+      "sourceHashUnchanged": true,
+      "beforeAutomaticEndpoints": 0,
+      "afterAutomaticEndpoints": 0,
+      "beforeAccepted": [],
+      "afterAccepted": [],
+      "acceptedClocksUnchanged": true
+    },
+    {
+      "id": "IMG_9199",
+      "sourceSha256": "c906a632d57519e75a8ea95da28a1059a613b7bdb0d63781681b6c71ece8ec26",
+      "sourceHashUnchanged": true,
+      "beforeAutomaticEndpoints": 2,
+      "afterAutomaticEndpoints": 2,
+      "beforeAccepted": [
+        {
+          "marker": "startSignal",
+          "time": 7.068,
+          "confidence": "High",
+          "mode": "automatic"
+        },
+        {
+          "marker": "finishPad",
+          "time": 17.472,
+          "confidence": "High",
+          "mode": "automatic"
+        }
+      ],
+      "afterAccepted": [
+        {
+          "marker": "startSignal",
+          "time": 7.068,
+          "confidence": "High",
+          "mode": "automatic"
+        },
+        {
+          "marker": "finishPad",
+          "time": 17.472,
+          "confidence": "High",
+          "mode": "automatic"
+        }
+      ],
+      "acceptedClocksUnchanged": true
+    }
+  ],
+  "unchangedDetectorChannelObservations": [
+    {
+      "id": "IMG_9075",
+      "outcomes": [
+        {
+          "kind": "current-mix",
+          "rawTime": 7.23,
+          "confidence": "Medium"
+        },
+        {
+          "kind": "channel-0",
+          "rawTime": 8.59,
+          "confidence": "High"
+        },
+        {
+          "kind": "channel-1",
+          "rawTime": 8.62,
+          "confidence": "High"
+        }
+      ]
+    },
+    {
+      "id": "IMG_9076",
+      "outcomes": [
+        {
+          "kind": "current-mix",
+          "rawTime": 2.79,
+          "confidence": "Medium"
+        },
+        {
+          "kind": "channel-0",
+          "rawTime": 10.54,
+          "confidence": "Medium"
+        },
+        {
+          "kind": "channel-1",
+          "rawTime": 2.86,
+          "confidence": "High"
+        }
+      ]
+    },
+    {
+      "id": "IMG_9077",
+      "outcomes": [
+        {
+          "kind": "current-mix",
+          "rawTime": 5.25,
+          "confidence": "Medium"
+        },
+        {
+          "kind": "channel-0",
+          "rawTime": 10.38,
+          "confidence": "Medium"
+        },
+        {
+          "kind": "channel-1",
+          "rawTime": 10.76,
+          "confidence": "Medium"
+        }
+      ]
+    },
+    {
+      "id": "12.24",
+      "outcomes": [
+        {
+          "kind": "current-mix",
+          "rawTime": 9.4,
+          "confidence": "High"
+        },
+        {
+          "kind": "channel-0",
+          "rawTime": 9.41,
+          "confidence": "High"
+        },
+        {
+          "kind": "channel-1",
+          "rawTime": 9.42,
+          "confidence": "High"
+        }
+      ]
+    },
+    {
+      "id": "IMG_8903",
+      "outcomes": [
+        {
+          "kind": "current-mix",
+          "rawTime": 4.29,
+          "confidence": "High"
+        },
+        {
+          "kind": "channel-0",
+          "rawTime": 9,
+          "confidence": "Medium"
+        },
+        {
+          "kind": "channel-1",
+          "rawTime": 4.29,
+          "confidence": "High"
+        }
+      ]
+    },
+    {
+      "id": "IMG_9199",
+      "outcomes": [
+        {
+          "kind": "current-mix",
+          "rawTime": 4.12,
+          "confidence": "Medium"
+        },
+        {
+          "kind": "channel-0",
+          "rawTime": 4.18,
+          "confidence": "Medium"
+        },
+        {
+          "kind": "channel-1",
+          "rawTime": 10.48,
+          "confidence": "Medium"
+        }
+      ]
+    }
+  ],
+  "nativeCodecControl": {
+    "fixture": "e2e/fixtures/dual-lane-stereo-cancellation.mp4",
+    "sha256": "dae0d4c046617fd6a7673e7409aa915357c99ab2d02d6c6bdc1e1ca9b98c2c00",
+    "license": "CC0-1.0",
+    "isSynthetic": true,
+    "isWorkflowOnly": true,
+    "authoredFinalToneOnsetSeconds": 2.4,
+    "decodedChannels": 2,
+    "mixedConfidence": "None",
+    "originalChannelClocksSeconds": [
+      2.38,
+      2.38
+    ],
+    "selectedClockSeconds": 2.38,
+    "acceptedStartSeconds": 2.38,
+    "audioEvidenceItems": 1,
+    "finishAccepted": false,
+    "chromiumFocusedTestPassed": true,
+    "interpretation": "AAC/native-decoder regression control; authored timing is not a physical accuracy label."
+  },
+  "performance": {
+    "repeatedWholeAppLatencyStudy": false,
+    "demonstratedSpeedGain": false,
+    "fastPath": "Mono, more than two channels and already High mixed audio retain the mixed result without channel fallback."
+  },
+  "independentReview": [
+    {
+      "reviewer": "reliability",
+      "codeCorrectnessOutOf10": 8.8,
+      "evidenceOfAutomaticImprovementOutOf10": 2.0,
+      "interpretation": "No new automatically accepted endpoint."
+    },
+    {
+      "reviewer": "validation",
+      "codeQualityOutOf10": 8.6,
+      "overallDetectionEvidenceOutOf10": 6.0,
+      "interpretation": "Existing evidence-strength rubric; not an accuracy percentage or the automatic-improvement rubric."
+    }
+  ],
+  "verification": {
+    "unitTestFilesPassed": 108,
+    "unitTestsPassed": 1147,
+    "explicitExpectedFailures": 5,
+    "typecheckBuildAndCoachingSmokePassed": true,
+    "fullChromiumProduction": {
+      "passed": 54,
+      "projects": [
+        "chromium",
+        "chromium-phone"
+      ]
+    },
+    "exactPushCI": "pending"
+  },
+  "artifactHashes": {
+    "stereo-recovery-baseline-f86.json": "460c3832f3f9ccb88ebd21b71f19f78fa6a135d1c5ffe939090cdee1b508070c",
+    "stereo-recovery-candidate-320733c.json": "1c389ba44bd02fac0b3d2358dcf14f06870cb809c4c7b7ac58a4ef253e736ebc",
+    "stereo-recovery-six-phone-ab-summary.json": "bfaa5c4a08a3f4709bf3898b5351f8f45697211f863c7e92b5457bbd484b2dd7",
+    "six-phone-stereo-native-f86.json": "9ee1a28d6ba27b9649b35818c8e62b93e2edfb117d3948829d1c86ec0547baa1",
+    "stereo-final-band-audit-f86.json": "13159a3721471a44d48992f22c6789b52b1dd2c5bd3aa732aa0ff069df8d54c5",
+    "stereo-source-reference-frozen.json": "1c21f3c974fdf0b5c83786635ede3b38ff5743c286eff9c215d7a1faa65ef965",
+    "stereo-observer-a-frozen.json": "3d04b14637be9cc0eb8d61c1686aebf0927eaa99404d48df27b9a8e98149627f",
+    "stereo-observer-b-frozen.json": "9a43f0c07198a2ae25c3ab6d93930d73a886f6f45fc8941643acac5e6e92e201",
+    "high-audio-low-visual-association-red-green.json": "3581f6c5d50e679cd50aacfbb767840d11527d637d6d4cfe368ea89c68fdaa0e"
+  },
+  "limits": [
+    "All six phone sources are previously inspected development recordings.",
+    "Two AI audio observers do not replace prediction-blind human endpoint labels.",
+    "No new automatic endpoint was recovered in the six-phone whole-app runs.",
+    "Automatic athlete localization and scene continuity still limit this case.",
+    "Source/PCM hashes and decoder-origin metadata are in sidecar evidence, not the standalone runtime export.",
+    "Actual iPhone hardware and general detection accuracy remain unverified.",
+    "Private footage, decoded PCM and source frames remain outside Git."
+  ]
+}

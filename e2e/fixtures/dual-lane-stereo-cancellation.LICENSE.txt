@@ -1,0 +1,14 @@
+CC0 1.0 Universal (CC0 1.0) Public Domain Dedication
+https://creativecommons.org/publicdomain/zero/1.0/
+
+The original geometric animation and synthesized stereo tones in
+dual-lane-stereo-cancellation.mp4, its reproducible generator, and authored
+reference metadata are dedicated to the public domain under CC0 1.0.
+
+The two preparation tones are in phase; the final tone has opposite phase
+in the two encoded channels. This is an authored native-codec workflow
+fixture. It depicts no real person and provides no independent human
+annotation, physical event timing label, or detector accuracy evidence.
+
+Regenerate with CLIMBIQ_FFMPEG pointing to an FFmpeg encoder:
+node scripts/generate-dual-lane-fixture.mjs --stereo-cancellation
