@@ -371,15 +371,19 @@ export function findVerifiedGreenDeparture(
 ): VerifiedGreenDeparture | undefined {
   const minAfterAdvantage = Math.max(0.35, calibration.colorDelta * 0.06);
   const blueDistanceLimit = calibration.colorDelta * 0.72;
+  const chromaticDeparture = requireChromaticDeparture ? createChromaticDeparturePredicate(calibration) : undefined;
+  const confirmsBlue = (sample: StartSignalDebug["samples"][number]) =>
+    isBlueConfirmation(sample, minAfterAdvantage, blueDistanceLimit) &&
+    (!chromaticDeparture || chromaticDeparture(sample.averageRgb));
   for (let index = 0; index < samples.length; index++) {
     const sample = samples[index];
-    if (!isBlueConfirmation(sample,minAfterAdvantage,blueDistanceLimit)) continue;
-    const count = countBlueConfirmationFrames(samples,index,minAfterAdvantage,blueDistanceLimit);
+    if (!confirmsBlue(sample)) continue;
+    const count = countBlueConfirmationFrames(samples, index, confirmsBlue);
     const last = samples[index+count-1];
     const duration = last.timestampMethod === "video-frame" ? last.sourceFrameDurationSeconds : undefined;
     const coverage = last.time-sample.time + (duration !== undefined && Number.isFinite(duration) && duration>0 ? duration : 0);
     if (count >= requiredBlueFrames && (minimumBlueDurationSeconds <= 0 || coverage + 1e-6 >= minimumBlueDurationSeconds)) {
-      const verified = findDepartureBeforeBlueRun(samples, calibration, index, count, requireChromaticDeparture);
+      const verified = findDepartureBeforeBlueRun(samples, calibration, index, count, chromaticDeparture);
       if (verified) return verified;
     }
     // A window can begin in a previous blue state before the sensor arms green.
@@ -390,12 +394,29 @@ export function findVerifiedGreenDeparture(
   return undefined;
 }
 
+function createChromaticDeparturePredicate(calibration: RequiredCalibration): (rgb: RGB) => boolean {
+  // RGB-distance similarity alone can call a bright brown patch "blue". Use
+  // the same hue evidence for verification and onset, so a non-blue part of
+  // the run cannot prevent a later genuine chromatic departure being reviewed.
+  // Signed opponent change rejects additive gray; its normalized counterpart
+  // rejects simple exposure scaling. Keep the existing departure thresholds.
+  const opponent = (rgb: RGB) => (rgb.b - rgb.g) / Math.max(1, rgb.r + rgb.g + rgb.b);
+  const beforeOpponent = opponent(calibration.beforeStartRGB);
+  const opponentSpan = opponent(calibration.afterStartRGB) - beforeOpponent;
+  const minimumOpponentShift = Math.max(0.006, opponentSpan * 0.035);
+  const rawOpponent = (rgb: RGB) => rgb.b - rgb.g;
+  const beforeRawOpponent = rawOpponent(calibration.beforeStartRGB);
+  const minimumRawShift = Math.max(0.75, (rawOpponent(calibration.afterStartRGB) - beforeRawOpponent) * 0.035);
+  return rgb => opponentSpan > 0 && opponent(rgb) - beforeOpponent >= minimumOpponentShift &&
+    rawOpponent(rgb) - beforeRawOpponent >= minimumRawShift;
+}
+
 function findDepartureBeforeBlueRun(
   samples: StartSignalDebug["samples"],
   calibration: RequiredCalibration,
   confirmationIndex: number,
   confirmationFrames: number,
-  requireChromaticDeparture: boolean,
+  chromaticDeparture?: (rgb: RGB) => boolean,
 ): VerifiedGreenDeparture | undefined {
   const beforeLikeDistances = samples
     .slice(0, confirmationIndex)
@@ -416,21 +437,9 @@ function findDepartureBeforeBlueRun(
     calibration.colorDelta * 0.035,
     baselineDistance + Math.max(0.45, baselineDeviation * 4),
   );
-  // A shadow can increase RGB distance for several frames before the real
-  // light changes. Require movement toward blue in chromaticity as well:
-  // combine signed opponent change (rejects additive gray shifts) with its
-  // brightness-normalized counterpart (rejects simple exposure scaling).
-  const opponent = (rgb: RGB) => (rgb.b - rgb.g) / Math.max(1, rgb.r + rgb.g + rgb.b);
-  const beforeOpponent = opponent(calibration.beforeStartRGB);
-  const opponentSpan = opponent(calibration.afterStartRGB) - beforeOpponent;
-  if (requireChromaticDeparture && opponentSpan <= 0) return undefined;
-  const minimumOpponentShift = Math.max(0.006, opponentSpan * 0.035);
-  const rawOpponent = (rgb: RGB) => rgb.b - rgb.g;
-  const minimumRawShift = Math.max(0.75, (rawOpponent(calibration.afterStartRGB) - rawOpponent(calibration.beforeStartRGB)) * 0.035);
   const hasDeparted = (sample: StartSignalDebug["samples"][number]) =>
     (sample.distanceToBefore ?? 0) >= departureThreshold &&
-    (!requireChromaticDeparture || (opponent(sample.averageRgb) - beforeOpponent >= minimumOpponentShift &&
-      rawOpponent(sample.averageRgb) - rawOpponent(calibration.beforeStartRGB) >= minimumRawShift));
+    (!chromaticDeparture || chromaticDeparture(sample.averageRgb));
 
   for (let index = 2; index <= confirmationIndex; index += 1) {
     const previousStable = [samples[index - 2], samples[index - 1]].every((sample) =>
@@ -505,7 +514,7 @@ function detectCalibratedTransition({
         requiredFrames,
         boundaryRisk,
       }),
-      reason: `First sustained departure from calibrated green; blue was verified ${verified.confirmationFrames} frame${verified.confirmationFrames === 1 ? "" : "s"} later.`,
+      reason: `First sustained departure from calibrated green; confirmed by ${verified.confirmationFrames} consecutive blue-like frame${verified.confirmationFrames === 1 ? "" : "s"}.`,
       score: roundMetric(Math.max(minAfterAdvantage, confirmationAdvantage)),
       kind: "Verified green departure",
       method: "Calibrated green departure with blue verification",
@@ -646,12 +655,11 @@ function greenBlueOpponent(rgb: RGB): number {
 function countBlueConfirmationFrames(
   samples: StartSignalDebug["samples"],
   startIndex: number,
-  minAfterAdvantage: number,
-  blueDistanceLimit: number,
+  confirmsBlue: (sample: StartSignalDebug["samples"][number]) => boolean,
 ): number {
   let count = 0;
   for (let index = startIndex; index < samples.length; index += 1) {
-    if (isBlueConfirmation(samples[index], minAfterAdvantage, blueDistanceLimit)) {
+    if (confirmsBlue(samples[index])) {
       count += 1;
     } else {
       break;

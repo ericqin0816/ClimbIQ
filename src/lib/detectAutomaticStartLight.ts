@@ -193,7 +193,7 @@ async function detectStartLightPass({
       calibration: lane.calibration,
       fps: 30,
       colorSamplingMode: "opponent",
-      requireChromaticDeparture: detailPass,
+      requireChromaticDeparture: true,
       signal,
     });
     checkCancelled(signal);
