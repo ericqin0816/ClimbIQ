@@ -303,6 +303,33 @@ test("native replay lag is corrected with both players paused before seeking and
   })).toBe(true);
 });
 
+test("a rejected final native seek remains paused rather than claiming replay finished", async ({ page }, testInfo) => {
+  test.skip(process.platform === "win32" && testInfo.project.name.startsWith("webkit"), "Native endpoint ownership runs on macOS WebKit CI.");
+  await prepareReplay(page);
+  await page.evaluate(() => {
+    const baseline = document.querySelector<HTMLVideoElement>(".comparison-players video")!;
+    const descriptor = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, "currentTime")!;
+    const probe = { endpointRejected: false };
+    (window as any).__rejectedEndpointProbe = probe;
+    Object.defineProperty(HTMLMediaElement.prototype, "currentTime", { ...descriptor, set(this: HTMLMediaElement, value: number) {
+      if (this === baseline && Math.abs(value - 3.8) < .000001) {
+        probe.endpointRejected = true;
+        // A controlled DOM seek rejection at the final preparation boundary.
+        // Until that boundary playback, frames and native clocks are real.
+        throw new Error("Controlled final endpoint seek rejection");
+      }
+      descriptor.set!.call(this, value);
+    } });
+  });
+  await page.getByRole("button", { name: "Replay bottom phase", exact: true }).click();
+  await expect(page.locator("#comparison-replay [role=alert]")).toHaveText("Controlled final endpoint seek rejection");
+  expect(await page.evaluate(() => (window as any).__rejectedEndpointProbe.endpointRejected)).toBe(true);
+  await expect(page.locator(".comparison-playback-status")).toContainText("Paused");
+  await expect(page.locator(".comparison-playback-status")).not.toContainText("Finished");
+  await expect.poll(() => page.locator(".comparison-players video").evaluateAll(videos =>
+    videos.every(video => (video as HTMLVideoElement).paused))).toBe(true);
+});
+
 test("recovered waiting notices preserve replay and current unready data requires explicit replay", async ({ page }, testInfo) => {
   test.skip(process.platform === "win32" && testInfo.project.name.startsWith("webkit"), "Media readiness regression runs on macOS WebKit CI.");
   await prepareReplay(page);

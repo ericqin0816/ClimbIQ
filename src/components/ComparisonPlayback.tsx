@@ -27,6 +27,7 @@ export default function ComparisonPlayback({ baseline, candidate, preferredPhase
   const [message, setMessage] = useState("");
   const [playing, setPlaying] = useState(false);
   const [seeking, setSeeking] = useState(false);
+  const [finished, setFinished] = useState(false);
   const [phase, setPhase] = useState<ComparisonPhase>("total");
   const [elapsed, setElapsed] = useState(0);
   const ranges = { baseline: comparisonPlaybackRange(baseline, phase), candidate: comparisonPlaybackRange(candidate, phase) };
@@ -38,7 +39,7 @@ export default function ComparisonPlayback({ baseline, candidate, preferredPhase
   const practicePairReady = canReplay && SIDES.every(side => verifiedPractice[side]);
   const canReplayPreferred = canReplay && preferredPhase && comparisonPlaybackRange(baseline, preferredPhase) && comparisonPlaybackRange(candidate, preferredPhase);
   const phaseLabel = phase === "bottom" ? "Bottom: start → Hold 10" : phase === "top" ? "Top: Hold 10 → finish" : "Whole attempt";
-  const playbackStatus = seeking ? "Preparing frame" : playing ? "Playing" : maximum > 0 && elapsed >= maximum ? "Finished" : elapsed > 0 ? "Paused" : "Ready";
+  const playbackStatus = seeking ? "Preparing frame" : playing ? "Playing" : finished ? "Finished" : elapsed > 0 ? "Paused" : "Ready";
 
   function pause() {
     playbackActive.current = false;
@@ -48,6 +49,7 @@ export default function ComparisonPlayback({ baseline, candidate, preferredPhase
     for (const side of SIDES) players.current[side]?.pause();
     setPlaying(false);
     setSeeking(false);
+    setFinished(false);
   }
 
   useEffect(() => () => {
@@ -149,7 +151,12 @@ export default function ComparisonPlayback({ baseline, candidate, preferredPhase
       await Promise.all(SIDES.map(side => seekTo(pairPlayers[side]!, comparisonPlaybackTime(pair[side]!, positionTime), { exact: true })));
       if (!current()) return;
       setElapsed(positionTime);
-      if (!play || completedSides.current.size === SIDES.length) { setSeeking(false); return; }
+      if (!play || completedSides.current.size === SIDES.length) {
+        setSeeking(false);
+        // Elapsed wall time alone cannot establish a decoded endpoint.
+        setFinished(positionTime >= end);
+        return;
+      }
       await Promise.all(SIDES.filter(side => !completedSides.current.has(side)).map(side => pairPlayers[side]!.play()));
       // Pause/replacement already cancelled this owner. A late play promise must
       // never pause a newer replay using these players.
