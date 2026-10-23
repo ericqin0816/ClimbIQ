@@ -6,6 +6,23 @@ const HOP_SECONDS = 0.01;
 const MAX_STRONG_PREPARATION_PITCH_ERROR = 0.04;
 const MIN_STRONG_PREPARATION_FRAMES = 6;
 
+interface SpectralBasis {
+  size: number;
+  minBin: number;
+  maxBin: number;
+  window: Float64Array;
+  windowSum: number;
+  cosine: Float64Array;
+  sine: Float64Array;
+}
+
+// Every 10 ms hop normally uses the same 160-sample transform. Retain one
+// bounded basis, rather than repeating its trigonometry for every audio frame.
+// Unusually large transforms keep the direct calculation without allocating a
+// large table. No input samples or detector decisions are retained here.
+const MAX_SPECTRAL_BASIS_CELLS = 131_072;
+let cachedSpectralBasis: SpectralBasis | undefined;
+
 export interface AudioToneSegment {
   startTime: number;
   endTime: number;
@@ -790,21 +807,13 @@ function estimateSpectralBand(
   if (bandMaxBin < bandMinBin) {
     return { prominenceDb: 0, concentration: 0 };
   }
+  const basis = spectralBasis(size, fullMinBin, fullMaxBin);
   const powers: number[] = [];
   let bestBandBin = bandMinBin;
   let bestBandPower = 0;
   let totalPower = 0;
   for (let bin = fullMinBin; bin <= fullMaxBin; bin += 1) {
-    let real = 0;
-    let imaginary = 0;
-    for (let index = 0; index < size; index += 1) {
-      const window = 0.5 - 0.5 * Math.cos(2 * Math.PI * index / Math.max(1, size - 1));
-      const angle = 2 * Math.PI * bin * index / size;
-      const value = frame[index] * window;
-      real += value * Math.cos(angle);
-      imaginary -= value * Math.sin(angle);
-    }
-    const power = real * real + imaginary * imaginary;
+    const power = spectralPower(frame, bin, basis);
     powers.push(power);
     totalPower += power;
     if (bin >= bandMinBin && bin <= bandMaxBin && power > bestBandPower) {
@@ -984,24 +993,16 @@ function estimateSpectralPeak(
   if (maxBin <= minBin) {
     return { prominenceDb: 0, concentration: 0, amplitude: 0 };
   }
+  const basis = spectralBasis(size, minBin, maxBin);
   const powers = new Float64Array(maxBin + 2);
   let bestBin = minBin;
   let bestPower = 0;
-  let windowSum = 0;
-  for (let index = 0; index < size; index += 1) {
+  let windowSum = basis?.windowSum ?? 0;
+  if (!basis) for (let index = 0; index < size; index += 1) {
     windowSum += 0.5 - 0.5 * Math.cos(2 * Math.PI * index / Math.max(1, size - 1));
   }
   for (let bin = minBin; bin <= maxBin; bin += 1) {
-    let real = 0;
-    let imaginary = 0;
-    for (let index = 0; index < size; index += 1) {
-      const window = 0.5 - 0.5 * Math.cos(2 * Math.PI * index / Math.max(1, size - 1));
-      const angle = 2 * Math.PI * bin * index / size;
-      const value = frame[index] * window;
-      real += value * Math.cos(angle);
-      imaginary -= value * Math.sin(angle);
-    }
-    const power = real * real + imaginary * imaginary;
+    const power = spectralPower(frame, bin, basis);
     powers[bin] = power;
     if (power > bestPower) {
       bestPower = power;
@@ -1027,6 +1028,55 @@ function estimateSpectralPeak(
     concentration: bestPower / totalPower,
     amplitude: 2 * Math.sqrt(bestPower) / Math.max(1e-6, windowSum),
   };
+}
+
+function spectralBasis(size: number, minBin: number, maxBin: number): SpectralBasis | undefined {
+  if (cachedSpectralBasis?.size === size && cachedSpectralBasis.minBin === minBin && cachedSpectralBasis.maxBin === maxBin) {
+    return cachedSpectralBasis;
+  }
+  const cells = size * (maxBin - minBin + 1);
+  if (!Number.isSafeInteger(cells) || cells <= 0 || cells > MAX_SPECTRAL_BASIS_CELLS || size > 4_096) return undefined;
+  const window = new Float64Array(size);
+  let windowSum = 0;
+  for (let index = 0; index < size; index += 1) {
+    window[index] = 0.5 - 0.5 * Math.cos(2 * Math.PI * index / Math.max(1, size - 1));
+    windowSum += window[index];
+  }
+  const cosine = new Float64Array(cells);
+  const sine = new Float64Array(cells);
+  for (let bin = minBin; bin <= maxBin; bin += 1) {
+    const offset = (bin - minBin) * size;
+    for (let index = 0; index < size; index += 1) {
+      const angle = 2 * Math.PI * bin * index / size;
+      cosine[offset + index] = Math.cos(angle);
+      sine[offset + index] = Math.sin(angle);
+    }
+  }
+  cachedSpectralBasis = { size, minBin, maxBin, window, windowSum, cosine, sine };
+  return cachedSpectralBasis;
+}
+
+function spectralPower(frame: Float32Array, bin: number, basis?: SpectralBasis): number {
+  let real = 0;
+  let imaginary = 0;
+  const size = frame.length;
+  if (basis) {
+    const offset = (bin - basis.minBin) * size;
+    for (let index = 0; index < size; index += 1) {
+      const value = frame[index] * basis.window[index];
+      real += value * basis.cosine[offset + index];
+      imaginary -= value * basis.sine[offset + index];
+    }
+  } else {
+    for (let index = 0; index < size; index += 1) {
+      const window = 0.5 - 0.5 * Math.cos(2 * Math.PI * index / Math.max(1, size - 1));
+      const angle = 2 * Math.PI * bin * index / size;
+      const value = frame[index] * window;
+      real += value * Math.cos(angle);
+      imaginary -= value * Math.sin(angle);
+    }
+  }
+  return real * real + imaginary * imaginary;
 }
 
 function rootMeanSquare(samples: Float32Array): number {
