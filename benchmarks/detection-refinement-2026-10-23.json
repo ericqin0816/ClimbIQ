@@ -5,7 +5,7 @@
   "baselineCommit": "3db861ee97902b2ccee279750d5cbbe479d9a2c7",
   "freshPredictorEvaluationCommit": "b65414ebf1cb41a7156ae44b7b1b59353794c5ae",
   "nativeClosingRuntimeCommit": "8102b51f6466979b2e63f10159e69c210f00db5f",
-  "laterChanges": "The publisher qualifies later copy/documentation changes separately. They do not retroactively change the original predictor or native-report build identities.",
+  "laterChanges": "Subsequent interface copy, documentation, and delivery-test timing corrections are qualified separately. No runtime detector or replay logic changed after the recorded native UI build.",
   "fixedDetectionAxes": {
     "automaticCoverage": "10 × automatically accepted original endpoints / predeclared original endpoint opportunities. Acceptance is not correctness; missing or not-run endpoints remain in the denominator. Cohorts stay separate.",
     "referenceCompatibleAutomaticCoverage": "N/A without frozen observations of the same physical event and verified lane. Do not use bracket centers as exact electronic labels.",
@@ -1703,5 +1703,35 @@
     "Public availability is not redistribution permission. Downloaded media remains outside Git.",
     "No absolute local paths, signed media URLs, private pixel/landmark arrays or PCM payloads are published here.",
     "This derivative supplies artifact hashes and selected observations, not a replayable raw evidence bundle."
-  ]
+  ],
+  "deliveryFollowup": {
+    "firstPushedCommit": "f182abdc5fd2e7baaa92392cdba7e11df44ba111",
+    "initialRunUrl": "https://github.com/ericqin0816/ClimbIQ/actions/runs/40011894861",
+    "initialOutcomes": {
+      "verification": "passed",
+      "chromiumProduction": {
+        "passed": 52,
+        "failed": 0
+      },
+      "macWebKitProduction": {
+        "passed": 49,
+        "failed": 3
+      }
+    },
+    "preservedArtifact": {
+      "artifactName": "ci-f182abd-webkit.zip",
+      "sha256": "f3ff09f289c92a42cb61e312f693f2330f5c50f4745903c198e22307532cb917",
+      "githubArtifactId": 12527136763
+    },
+    "recoveryTraceFinding": "Both failures reached the 12-second final-action assertion while native analysis was still running. The test now waits for bounded analysis completion and preserves all exact ambiguity, source, cancellation and reviewed-Finish assertions.",
+    "replayTraceFinding": "The remote assertion sampled an owned synchronization pause after stale promise settlement. The test observes settlement directly and separately requires actual media progress and background pausing.",
+    "runtimeChanged": false,
+    "qualification": "The closing commit must pass the complete Chromium and macOS WebKit suites. These test-only corrections do not replace any frozen predictor outputs, score denominator or independent timing label.",
+    "targetedChromiumVerification": {
+      "recoveryCasesPassed": 4,
+      "staleReplayCasesPassed": 6,
+      "replayRepeatsPerViewport": 3,
+      "scope": "Desktop and phone Chromium; full macOS verification is a separate required closing-CI gate."
+    }
+  }
 }

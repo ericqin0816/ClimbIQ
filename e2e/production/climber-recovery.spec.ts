@@ -20,13 +20,19 @@ test.beforeEach(({}, testInfo) => {
 });
 
 test("opposing authored lanes offer frame-safe climber setup with cancellation and manual Finish fallback", async ({ page }) => {
+  test.setTimeout(90_000);
   // Original encoded geometry/audio exercises the shipped pipeline. This is
   // workflow behavior, never real-climber identity or detector accuracy truth.
   await ready(page);
   await page.getByLabel("Choose video", { exact: true }).setInputFiles(path.resolve("e2e/fixtures/dual-lane.mp4"));
   await expect(page.locator(".video-meta-line")).toContainText("Ready");
   await page.getByLabel("Analysis scope", { exact: true }).selectOption("timing-only");
-  await page.locator(".analyze-button").click();
+  const analyze = page.locator(".analyze-button");
+  await analyze.click();
+  // Native frame-seek analysis can exceed the ordinary control timeout on
+  // WebKit. Wait for completion, then require the same exact ambiguity result.
+  await expect(analyze).toBeDisabled();
+  await expect(analyze).toBeEnabled({ timeout: 60_000 });
   const select = page.getByRole("button", { name: "Select climber", exact: true });
   await expect(select).toBeVisible();
   await expect(page.locator('[aria-label="Your next step"]')).toContainText("Start is accepted");

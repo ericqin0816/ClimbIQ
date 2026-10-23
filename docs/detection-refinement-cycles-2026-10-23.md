@@ -8,8 +8,8 @@ review/test decisions, not ten independent field studies or model-weight trainin
 
 Baseline: `3db861ee97902b2ccee279750d5cbbe479d9a2c7`.
 The fresh-source predictor was frozen at `b65414e`; final native UI verification
-used clean `8102b51`. Subsequent changes only clarify interface copy and publish
-this report. The [machine-readable summary](../benchmarks/detection-refinement-2026-10-23.json)
+used clean `8102b51`. Subsequent changes clarify interface copy, publish this
+report, and correct timing assumptions in delivery tests. The [machine-readable summary](../benchmarks/detection-refinement-2026-10-23.json)
 retains build identities, source hashes, artifact hashes, rubrics, and denominators.
 Raw reports and private/downloaded footage remain outside Git.
 
@@ -156,6 +156,20 @@ workflows pass. The original dual-lane fixture is CC0 geometric animation/audio;
 it tests workflow, not field accuracy. The exact pushed commit is checked by
 [GitHub CI](https://github.com/ericqin0816/ClimbIQ/actions/workflows/ci.yml), including
 Chromium and macOS WebKit media workflows. Phone viewports are not actual iPhones.
+
+The first pushed commit, `f182abd`, passed verification and all 52 Chromium CI
+workflows. Its macOS suite passed 49 and failed three. Both new recovery failures
+asserted the final action after 12 seconds while the trace still showed analysis
+running. The test now waits for bounded analysis completion before requiring the
+same exact lane-review result and remaining checks. The replay failure observed
+a legitimate owned synchronization pause between remote assertions; its test
+now checks stale-promise settlement directly and separately requires real
+playback progress and background pausing. These follow-ups change tests, not
+runtime detector or replay gates. The [initial failed CI run](https://github.com/ericqin0816/ClimbIQ/actions/runs/40011894861)
+and its downloaded traces are retained. Targeted Chromium checks pass four
+recovery cases and six repeated stale-replay cases; the closing commit receives
+the full CI suite again. The original native reports and fresh-source denominators remain
+unchanged.
 
 The next useful detection work needs 30–50 supported, distinct attempts with two
 prediction-blind human reviewers, whole-session/climber holdouts, and matching

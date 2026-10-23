@@ -171,12 +171,23 @@ test("replay startup ignores stale play promises and pauses on backgrounding", a
   await prepareReplay(page);
   await page.evaluate(() => {
     const state = window as any;
-    state.heldPlays = []; state.holdPlays = true;
+    state.heldPlays = []; state.heldPlayReturns = []; state.holdPlays = true;
+    state.settlingStalePlays = false; state.staleSettlementPauses = [];
     const play = HTMLMediaElement.prototype.play;
+    const pause = HTMLMediaElement.prototype.pause;
     HTMLMediaElement.prototype.play = function () {
       const held = state.holdPlays && this.closest(".comparison-players");
       const result = play.call(this);
-      return held ? result.then(() => new Promise<void>(resolve => state.heldPlays.push(resolve))) : result;
+      if (!held) return result;
+      const returned = result.then(() => new Promise<void>(resolve => state.heldPlays.push(resolve)));
+      state.heldPlayReturns.push(returned);
+      return returned;
+    };
+    HTMLMediaElement.prototype.pause = function () {
+      if (state.settlingStalePlays && this.closest(".comparison-players")) {
+        state.staleSettlementPauses.push({ time: this.currentTime, stack: new Error().stack });
+      }
+      pause.call(this);
     };
   });
   const replay = page.getByRole("button", { name: "Replay whole attempt", exact: true });
@@ -185,10 +196,77 @@ test("replay startup ignores stale play promises and pauses on backgrounding", a
   await expect(replay).toBeDisabled();
   await page.getByRole("button", { name: "Pause comparison", exact: true }).click();
   await page.evaluate(() => { (window as any).holdPlays = false; });
+  await page.evaluate(() => {
+    const state = window as any;
+    const videos = Array.from(document.querySelectorAll<HTMLVideoElement>(".comparison-players video"));
+    const button = Array.from(document.querySelectorAll<HTMLButtonElement>("#comparison-replay button"))
+      .find(item => item.textContent === "Replay whole attempt");
+    if (!button || videos.length !== 2) throw new Error("The real comparison pair is unavailable.");
+    const probe = { matched: false, active: true, releaseStarted: false, releasedCount: 0,
+      firstPlayingTimes: null as number[] | null, afterReleaseTimes: null as number[] | null,
+      beforeSettlement: null as unknown, afterSettlement: null as unknown, pauseCalls: [] as unknown[],
+      samples: [] as unknown[], error: "" };
+    state.__stalePlayProbe = probe;
+    const snapshot = () => ({ status: document.querySelector(".comparison-playback-status")?.textContent?.trim(),
+      hidden: document.hidden, videos: videos.map(video => ({ time: video.currentTime, paused: video.paused,
+        seeking: video.seeking, ready: video.readyState, error: video.error?.code ?? null })) });
+    button.addEventListener("click", () => {
+      const started = performance.now();
+      const observe = async () => {
+        if (!probe.active) return;
+        const playing = /· Playing$/.test(snapshot().status ?? "");
+        const ready = videos.every(video => !video.paused && !video.seeking && video.readyState >= 3);
+        if (!probe.releaseStarted && playing && ready) {
+          probe.firstPlayingTimes ??= videos.map(video => video.currentTime);
+          if (videos.every((video, index) => video.currentTime > probe.firstPlayingTimes![index] + .08)) {
+            probe.releaseStarted = true;
+            probe.beforeSettlement = snapshot();
+            const releases = state.heldPlays.splice(0) as Array<() => void>;
+            const returned = state.heldPlayReturns.splice(0) as Array<Promise<void>>;
+            probe.releasedCount = releases.length;
+            state.settlingStalePlays = true;
+            try {
+              for (const release of releases) release();
+              // The original position() registered its Promise.all first. Await
+              // those same returned chains so its stale continuation runs before
+              // this microtask checkpoint, without yielding to another rAF tick.
+              await Promise.all(returned);
+              await Promise.resolve();
+              probe.afterSettlement = snapshot();
+              probe.pauseCalls = state.staleSettlementPauses.slice();
+              if (releases.length !== 2 || returned.length !== 2 || probe.pauseCalls.length ||
+                  videos.some(video => video.paused || video.seeking)) {
+                probe.error = "Settling the cancelled play owner interrupted the current native replay.";
+              }
+              probe.afterReleaseTimes = videos.map(video => video.currentTime);
+            } catch (error) { probe.error = String(error); }
+            finally { state.settlingStalePlays = false; }
+          }
+        } else if (probe.afterReleaseTimes && playing && ready) {
+          probe.matched = videos.every((video, index) => video.currentTime > probe.afterReleaseTimes![index] + .08);
+        }
+        if (probe.samples.length < 600) probe.samples.push({ elapsedMs: performance.now() - started, ...snapshot() });
+        if (!probe.matched && !probe.error && performance.now() - started < 8000) requestAnimationFrame(() => { void observe(); });
+        else {
+          probe.active = false;
+          if (!probe.matched && !probe.error) probe.error = "The current pair did not demonstrate native progress around stale play settlement.";
+        }
+      };
+      requestAnimationFrame(() => { void observe(); });
+    }, { once: true });
+  });
   await replay.click();
-  await expect.poll(() => page.locator(".comparison-players video").evaluateAll(videos => videos.every(video => !(video as HTMLVideoElement).paused))).toBe(true);
-  await page.evaluate(async () => { for (const release of (window as any).heldPlays.splice(0)) release(); await new Promise(requestAnimationFrame); });
-  expect(await page.locator(".comparison-players video").evaluateAll(videos => videos.every(video => !(video as HTMLVideoElement).paused))).toBe(true);
+  // Owned drift correction deliberately pauses both players while preparing a
+  // frame. The hosted trace hit that legitimate state at elapsed0.137s during
+  // the old separate RPC assertion. Retain the actual stale-settlement result
+  // in-page, then require both native clocks to continue without another click.
+  await expect.poll(() => page.evaluate(() => {
+    const probe = (window as any).__stalePlayProbe;
+    return { matched: probe.matched, error: probe.error, releasedCount: probe.releasedCount,
+      pauseCalls: probe.pauseCalls, beforeSettlement: probe.beforeSettlement, afterSettlement: probe.afterSettlement,
+      lastSamples: probe.samples.slice(-12) };
+  })).toMatchObject({ matched: true, error: "", releasedCount: 2, pauseCalls: [],
+    afterSettlement: { videos: [{ paused: false, seeking: false }, { paused: false, seeking: false }] } });
   await page.evaluate(() => { Object.defineProperty(document, "hidden", { configurable: true, get: () => true }); document.dispatchEvent(new Event("visibilitychange")); });
   await expect.poll(() => page.locator(".comparison-players video").evaluateAll(videos => videos.every(video => (video as HTMLVideoElement).paused))).toBe(true);
   await page.evaluate(() => { delete (document as any).hidden; });
