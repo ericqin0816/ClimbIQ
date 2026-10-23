@@ -26,6 +26,30 @@ describe("video session ownership", () => {
 
 describe("analysis run ownership", () => {
   const player = () => ({ src: "blob:first", currentTime: 4, paused: true, pause: vi.fn(), play: vi.fn(async () => {}) }) as unknown as HTMLVideoElement;
+  it.each([false, true])("publishes restored playing state after work fails=%s", async fails => {
+    const video = { src: "blob:playing", currentTime: 4, paused: false,
+      pause() { this.paused = true; }, async play() { this.paused = false; } };
+    const published: { time: number; paused: boolean }[] = [];
+    const controller = new AnalysisRunController(async (_video, time) => { video.currentTime = time; });
+    const pending = controller.run({ video: video as unknown as HTMLVideoElement, isCurrent: () => true,
+      work: async () => { expect(video.paused).toBe(true); video.currentTime = 9; if (fails) throw new Error("stop"); return 42; },
+      onTime: time => published.push({ time, paused: video.paused }), onStatus: vi.fn(), completeMessage: "Done", taskName: "test" });
+    if (fails) await expect(pending).rejects.toThrow("stop");
+    else expect(await pending).toBe(42);
+    expect(published).toEqual([{ time: 4, paused: false }]);
+  });
+
+  it("publishes the restored paused cursor when resuming playback is denied", async () => {
+    const video = { src: "blob:playing", currentTime: 4, paused: false,
+      pause() { this.paused = true; }, async play() { throw new Error("play denied"); } };
+    const onTime = vi.fn(), onStatus = vi.fn();
+    const controller = new AnalysisRunController(async (_video, time) => { video.currentTime = time; });
+    await controller.run({ video: video as unknown as HTMLVideoElement, isCurrent: () => true,
+      work: async () => { video.currentTime = 9; }, onTime, onStatus, completeMessage: "Done", taskName: "test" });
+    expect(onTime).toHaveBeenCalledExactlyOnceWith(4);
+    expect(video.paused).toBe(true);
+    expect(onStatus).toHaveBeenLastCalledWith("Video restore failed: play denied");
+  });
   it("serializes tasks, restores playback after failure, and permits the next task", async () => {
     const video = player(), seek = vi.fn(async () => {});
     const controller = new AnalysisRunController(seek);

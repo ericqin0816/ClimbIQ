@@ -37,9 +37,14 @@ export class AnalysisRunController {
           try {
             await this.seek(video, previousTime);
             if (current()) {
-              task.onTime(video.currentTime);
-              if (previousPaused) video.pause();
-              else await video.play();
+              try {
+                if (previousPaused) video.pause();
+                else await video.play();
+              } finally {
+                // Readiness must describe restored playback, including a
+                // rejected play request, rather than the analysis pause.
+                if (current()) task.onTime(video.currentTime);
+              }
               if (current()) task.onStatus(succeeded ? task.completeMessage
                 : `Video restored after ${task.taskName.replaceAll("-", " ")} stopped.`);
             }
