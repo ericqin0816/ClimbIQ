@@ -66,7 +66,8 @@ import {
 } from "./lib/routeAlignment";
 import { fuseStartEvidence, requireContinuousStartScene, type FusedStartDecision, type StartEvidence } from "./lib/startSignalFusion";
 import { associateStartLanes, startLaneId, type AnalysisLaneCandidate, type StartLaneEvidence } from "./lib/startLaneEvidence";
-import { assessFinishLaneIdentity, clearAutomaticLaneBiomechanics, clearAutomaticLaneDependentMarkers } from "./lib/finishLaneIdentity";
+import { assessFinishLaneIdentity, clearAutomaticLaneBiomechanics, clearAutomaticLaneDependentMarkers, finishLaneEvidenceAfterScan } from "./lib/finishLaneIdentity";
+import { canContinueSuggestedLaneRun, clearAthleteDependentMarkers, hasFreshLaneRunContext, laneRunContextKey } from "./lib/athleteLaneContext";
 import { assessAutomaticStartBodyAudit } from "./lib/startBodyAudit";
 import { deriveAutomaticStartBodyZone, resolveAnalysisBodyZone } from "./lib/startRegion";
 import { applyTimestampAcceptance, clearMarkerTimestamp, sanitizeTimestampSequence } from "./lib/timestampIntegrity";
@@ -167,6 +168,7 @@ interface FusedStartEvidenceOutcome {
   analysisLightCalibration?: StartLightCalibration;
   analysisLaneCandidates?: AnalysisLaneCandidate[];
   discoveredStartLane?: DiscoveredStartLane;
+  laneEvidenceRunKey: string | null;
 }
 
 interface PendingAutomaticAnalysisContext {
@@ -176,6 +178,7 @@ interface PendingAutomaticAnalysisContext {
   analysisLightCalibration?: StartLightCalibration;
   analysisLaneCandidates?: AnalysisLaneCandidate[];
   discoveredStartLane?: DiscoveredStartLane;
+  laneEvidenceRunKey?: string | null;
 }
 
 interface AutomaticFinishOutcome {
@@ -226,6 +229,7 @@ function App() {
 
   const pendingAutomaticContextRef = useRef<PendingAutomaticAnalysisContext | null>(null);
   const automaticLaneCandidatesRef = useRef<AnalysisLaneCandidate[]>([]);
+  const automaticLaneRunContextRef = useRef<string | null>(null);
   const videoDragDepthRef = useRef(0);
   const analysisContextRef = useRef(0);
   const importPendingRef = useRef(false);
@@ -616,6 +620,7 @@ function App() {
     cancelPendingReviewSeek();
     pendingAutomaticContextRef.current = null;
     automaticLaneCandidatesRef.current = [];
+    automaticLaneRunContextRef.current = null;
     setFrameDebug(null);
     setStartResult(null);
     setSuggestedStartRawTime(null);
@@ -771,6 +776,11 @@ function App() {
   }
 
   function adoptPreparedVideo(prepared: PreparedVideo, preserveAnalysis: boolean, knownLineages: string[] = []) {
+    // Even a matching filename/lineage cannot rebind transient evidence to a
+    // newly adopted native source. Failed/cancelled preparation never gets here.
+    pendingAutomaticContextRef.current = null;
+    automaticLaneCandidatesRef.current = [];
+    automaticLaneRunContextRef.current = null;
     cancelPendingReviewSeek();
     closeTimestampReview();
     setAutomaticFinishReview(null);
@@ -1302,10 +1312,13 @@ function App() {
     const height = Math.abs(draftZone.y2 - draftZone.y1);
     if (width > 0.005 && height > 0.005) {
       pendingAutomaticContextRef.current = null;
+      const nextZone = normalizeZone(draftZone);
       if (draftZone.id === "startLight") {
         invalidateStartLightDependents("Start-light region changed. Its colors will be learned again on the next analysis.");
+      } else if (draftZone.id === "startBody" && !normalizedZonesEqual(zones.startBody, nextZone)) {
+        invalidateAthleteSelection("Climber selection changed. Start was kept; movement, Hold 10, Finish, and tracking need a new review or analysis.");
       }
-      setZones((current) => ({ ...current, [draftZone.id]: normalizeZone(draftZone) }));
+      setZones((current) => ({ ...current, [draftZone.id]: nextZone }));
     }
     setDraftZone(null);
     setDragStart(null);
@@ -1368,6 +1381,7 @@ function App() {
             analysisLightCalibration,
             analysisLaneCandidates,
             discoveredStartLane,
+            laneEvidenceRunKey,
           } = await gatherFusedStartEvidence(
             video,
             undefined,
@@ -1403,6 +1417,7 @@ function App() {
                 analysisLightCalibration,
                 analysisLaneCandidates,
                 discoveredStartLane,
+                laneEvidenceRunKey,
               };
               setSuggestedStartRawTime(decision.rawTime);
               reviewSeekTarget = decision.rawTime;
@@ -1422,7 +1437,7 @@ function App() {
                 observationIntervalSeconds: automaticStart.observationIntervalSeconds,
               },
             );
-            commitAcceptedStartContext({ analysisLaneCandidates, discoveredStartLane });
+            commitAcceptedStartContext({ analysisLaneCandidates, discoveredStartLane }, acceptedStart);
             setSuggestedStartRawTime(null);
     setStartReviewNeeded(false);
             setAutoAnalysisStatus(`Start Signal accepted at ${acceptedStart.toFixed(3)}s. ${decision.reason}`);
@@ -1434,6 +1449,7 @@ function App() {
               analysisLightCalibration,
               analysisLaneCandidates,
               discoveredStartLane,
+              laneEvidenceRunKey,
             };
             setSuggestedStartRawTime(decision.rawTime);
             reviewSeekTarget = decision.rawTime;
@@ -1515,6 +1531,7 @@ function App() {
     if (!current()) return;
     pendingAutomaticContextRef.current = null;
     automaticLaneCandidatesRef.current = [];
+    automaticLaneRunContextRef.current = null;
     setStartLightCalibration((current) => {
       const next: StartLightCalibration = {
         ...current,
@@ -1613,6 +1630,7 @@ function App() {
     signal: AbortSignal | undefined,
     onStatus: (message: string) => void,
   ): Promise<FusedStartEvidenceOutcome> {
+    const laneEvidenceSource = video.src;
     const searchWindow = resolveStartSearchWindow({ startSearchStart, startSearchEnd }, video.duration);
     const searchStart = searchWindow.start;
     // Honor an absolute search end so timing resets and later races cannot
@@ -1769,6 +1787,7 @@ function App() {
         automaticStart: null,
         audioReason: audioStart.reason,
         analysisBodyZone: trustedBodyZone,
+        laneEvidenceRunKey: null,
       };
     }
 
@@ -1865,12 +1884,20 @@ function App() {
       analysisLightCalibration,
       analysisLaneCandidates,
       discoveredStartLane,
+      laneEvidenceRunKey: decision.rawTime === undefined ? null : laneRunContextKey({
+        source: laneEvidenceSource,
+        acceptedStart: Math.max(0, roundTime(decision.rawTime + startSignalOffset)),
+        trustedBodyZone,
+      }),
     };
   }
 
-  function commitAcceptedStartContext(context: PendingAutomaticAnalysisContext) {
+  function commitAcceptedStartContext(context: PendingAutomaticAnalysisContext, acceptedStart: number) {
     setAnalysisBuild(APP_BUILD);
     automaticLaneCandidatesRef.current = context.analysisLaneCandidates ?? [];
+    const trustedBodyZone = zones.startBody && !zones.startBody.label.startsWith("Automatic lane") ? zones.startBody : undefined;
+    automaticLaneRunContextRef.current = automaticLaneCandidatesRef.current.length
+      ? laneRunContextKey({ source: videoRef.current?.src ?? "", acceptedStart, trustedBodyZone }) : null;
     const lane = context.discoveredStartLane;
     if (!lane) return;
     setZones(current => ({ ...current, startLight: lane.zone }));
@@ -1961,6 +1988,7 @@ function App() {
     // prior evidence context rather than leave half of the old analysis gone.
     const previousContext = pendingAutomaticContextRef.current;
     const previousLaneCandidates = automaticLaneCandidatesRef.current;
+    const previousLaneRunContext = automaticLaneRunContextRef.current;
     const hadPreviousAnalysis = timestamps.some(marker => marker.rawTime !== null) || Boolean(startResult || finishResult || biomechanics.result);
     const restorePreviousAnalysis = () => {
       setAnalysisBuild(analysisBuild);
@@ -1984,6 +2012,7 @@ function App() {
       setTimestampReview(timestampReview);
       pendingAutomaticContextRef.current = previousContext;
       automaticLaneCandidatesRef.current = previousLaneCandidates;
+      automaticLaneRunContextRef.current = previousLaneRunContext;
     };
     let startReplacementCommitted = false;
     closeTimestampReview();
@@ -2016,6 +2045,7 @@ function App() {
             analysisLightCalibration,
             analysisLaneCandidates,
             discoveredStartLane,
+            laneEvidenceRunKey,
           } = await gatherFusedStartEvidence(
             video,
             abortController.signal,
@@ -2042,6 +2072,7 @@ function App() {
               analysisLightCalibration,
               analysisLaneCandidates,
               discoveredStartLane,
+              laneEvidenceRunKey,
             };
             setSuggestedStartRawTime(decision.rawTime);
             reviewSeekTarget = decision.rawTime;
@@ -2081,6 +2112,7 @@ function App() {
               analysisLightCalibration,
               analysisLaneCandidates,
               discoveredStartLane,
+              laneEvidenceRunKey,
             };
             setSuggestedStartRawTime(decision.rawTime);
             reviewSeekTarget = decision.rawTime;
@@ -2103,7 +2135,7 @@ function App() {
             },
           );
 
-          commitAcceptedStartContext({ analysisLaneCandidates, discoveredStartLane });
+          commitAcceptedStartContext({ analysisLaneCandidates, discoveredStartLane }, acceptedStart);
           pendingAutomaticContextRef.current = null;
           await continueAutomaticAnalysisAfterStart(
             video,
@@ -2434,7 +2466,9 @@ function App() {
     setAutomaticFinishReview(null);
     const trustedBodyZone = zones.startBody && !zones.startBody.label.startsWith("Automatic lane")
       ? zones.startBody : undefined;
-    const laneIdentity = assessFinishLaneIdentity({ lightZone, lightCalibration, acceptedStart, laneCandidates, trustedBodyZone });
+    const hasFreshLaneEvidence = hasFreshLaneRunContext(automaticLaneRunContextRef.current,
+      { source: video.src, acceptedStart, trustedBodyZone }, laneCandidates.length);
+    const laneIdentity = assessFinishLaneIdentity({ lightZone, lightCalibration, acceptedStart, laneCandidates, trustedBodyZone, hasFreshLaneEvidence });
     if (laneIdentity.requiresAthleteSelection) {
       // This shared branch also handles the standalone Find Finish action.
       // Functional updates preserve a Start just committed by Quick Analyze.
@@ -2518,10 +2552,7 @@ function App() {
         setZones((current) => ({ ...current, startLight: candidate.zone }));
         setStartLightCalibration(candidate.calibration);
         setStartDetectionProfile("calibrated");
-        automaticLaneCandidatesRef.current = [
-          candidate,
-          ...candidates.filter((item) => item !== candidate),
-        ];
+        automaticLaneCandidatesRef.current = finishLaneEvidenceAfterScan(laneIdentity.pool, candidate, hasFreshLaneEvidence);
         acceptTimestamp("finishPad", result.rawTime, "Finish light detection", result.confidence, {
           observationIntervalSeconds: result.observationIntervalSeconds,
           detectedRawTime: result.rawTime,
@@ -2594,10 +2625,7 @@ function App() {
     if (upperFinish.result.detected && upperFinish.result.rawTime !== undefined && upperFinish.zone) {
       setFinishResult(upperFinish.result);
       setZones((current) => ({ ...current, finishLight: upperFinish.zone }));
-      automaticLaneCandidatesRef.current = [
-        upperLaneCandidate,
-        ...candidates.filter((item) => item !== upperLaneCandidate),
-      ];
+      automaticLaneCandidatesRef.current = finishLaneEvidenceAfterScan(laneIdentity.pool, upperLaneCandidate, hasFreshLaneEvidence);
       if (upperFinish.result.confidence === "High" && upperAgreesWithOfficial) {
         acceptTimestamp("finishPad", upperFinish.result.rawTime, "Finish light detection", upperFinish.result.confidence, {
           detectedRawTime: upperFinish.result.rawTime,
@@ -2648,10 +2676,7 @@ function App() {
       );
     }
     if (review.result.detected && review.result.rawTime !== undefined) {
-      automaticLaneCandidatesRef.current = [
-        review.candidate,
-        ...candidates.filter((item) => item !== review.candidate),
-      ];
+      automaticLaneCandidatesRef.current = finishLaneEvidenceAfterScan(laneIdentity.pool, review.candidate, hasFreshLaneEvidence);
       return {
         rawTime: review.result.rawTime,
         zone: review.candidate.zone,
@@ -2670,30 +2695,32 @@ function App() {
     }
     const source = startResult ? startSourceForResult(startResult) : "Fused start detection";
     const confidence: Confidence = startResult && startResult.confidence !== "None" ? startResult.confidence : "Medium";
+    const originalSuggestedStart = Math.max(0, roundTime(suggestedStartRawTime + startSignalOffset));
     const acceptedStart = reviewedRawTime === undefined
-      ? Math.max(0, roundTime(suggestedStartRawTime + startSignalOffset))
+      ? originalSuggestedStart
       : Math.max(0, roundTime(reviewedRawTime));
-    const pendingContext = pendingAutomaticContextRef.current ?? {
-      analysisScope,
-      analysisBodyZone: zones.startBody,
-      analysisLightZone: zones.startLight,
-      analysisLightCalibration: calibrationReady ? startLightCalibration : undefined,
-      analysisLaneCandidates: automaticLaneCandidatesRef.current,
-    };
+    const pendingContext = pendingAutomaticContextRef.current;
+    const trustedBodyZone = zones.startBody && !zones.startBody.label.startsWith("Automatic lane") ? zones.startBody : undefined;
+    const canContinue = canContinueSuggestedLaneRun(pendingContext?.laneEvidenceRunKey ?? null,
+      originalSuggestedStart, reviewedRawTime, { source: video?.src ?? "", trustedBodyZone });
     acceptTimestamp("startSignal", acceptedStart, source, confidence, {
       detectedRawTime: suggestedStartRawTime,
       offsetApplied: roundTime(acceptedStart - suggestedStartRawTime),
       note: `Suggested by Quick Analyze and accepted after review. ${frameTimeNote ?? ""}`,
       frameReviewed: reviewedRawTime !== undefined, observationIntervalSeconds,
     });
-    commitAcceptedStartContext(pendingContext);
+    setAnalysisBuild(APP_BUILD);
     setSuggestedStartRawTime(null);
     setStartReviewNeeded(false);
-    setActiveAnalysisScope(pendingContext.analysisScope ?? "full");
-    if (!video) {
-      setAutoAnalysisStatus(`Start accepted at ${acceptedStart.toFixed(3)}s.`);
+    if (!canContinue || !pendingContext || !video) {
+      const reason = reviewedRawTime !== undefined && reviewedRawTime !== originalSuggestedStart
+        ? "The Start frame changed."
+        : "The recording or climber context needs a new lane check.";
+      setAutoAnalysisStatus(`Start accepted at ${acceptedStart.toFixed(3)}s. ${reason} Review Finish manually or run automatic analysis again.`);
       return;
     }
+    commitAcceptedStartContext(pendingContext, acceptedStart);
+    setActiveAnalysisScope(pendingContext.analysisScope ?? "full");
     const abortController = new AbortController();
     analysisRuns.automatic = abortController;
     setAutoAnalysisRunning(true);
@@ -2734,6 +2761,8 @@ function App() {
   ) {
     if (id === "startSignal") {
       pendingAutomaticContextRef.current = null;
+      automaticLaneCandidatesRef.current = [];
+      automaticLaneRunContextRef.current = null;
       clearFinishDependents(false);
       setSuggestedStartRawTime(null);
     setStartReviewNeeded(false);
@@ -2790,9 +2819,32 @@ function App() {
     }
   }
 
+  function invalidateAthleteSelection(message: string) {
+    pendingAutomaticContextRef.current = null;
+    automaticLaneCandidatesRef.current = [];
+    automaticLaneRunContextRef.current = null;
+    closeTimestampReview();
+    setTimestamps(clearAthleteDependentMarkers);
+    setStartResult(null);
+    setSuggestedStartRawTime(null);
+    setStartReviewNeeded(false);
+    setStartEvidenceStatus(message);
+    setMovementResult(null);
+    setMovementPreviewFrames({});
+    setFinishResult(null);
+    setFinishStatus(message);
+    setAutomaticFinishReview(null);
+    setBiomechanics(clearAutomaticLaneBiomechanics);
+    setRouteAlignment(null);
+    setHold10SecondPass(null);
+    setSecondPassStatus("");
+    setAutoAnalysisStatus(message);
+  }
+
   function invalidateStartDetectorSuggestion(message: string) {
     pendingAutomaticContextRef.current = null;
     automaticLaneCandidatesRef.current = [];
+    automaticLaneRunContextRef.current = null;
     setStartResult(null);
     setSuggestedStartRawTime(null);
     setStartReviewNeeded(false);
@@ -2851,6 +2903,7 @@ function App() {
   function invalidateStartLightDependents(message: string) {
     pendingAutomaticContextRef.current = null;
     automaticLaneCandidatesRef.current = [];
+    automaticLaneRunContextRef.current = null;
     setStartLightCalibration({});
     setCalibrationStatus(message);
     const acceptedStart = getTimestamp(timestamps, "startSignal");
@@ -2868,6 +2921,7 @@ function App() {
     if (id === "startSignal") {
       pendingAutomaticContextRef.current = null;
       automaticLaneCandidatesRef.current = [];
+      automaticLaneRunContextRef.current = null;
       setStartResult(null);
       setSuggestedStartRawTime(null);
     setStartReviewNeeded(false);
@@ -3108,6 +3162,9 @@ function App() {
       return;
     }
     analysisContextRef.current += 1;
+    automaticLaneCandidatesRef.current = [];
+    automaticLaneRunContextRef.current = null;
+    pendingAutomaticContextRef.current = null;
     // Review callbacks capture the marker/session that opened them. Closing
     // the review prevents a frame accepted for one climb from mutating the
     // session that is about to be loaded or duplicated.
@@ -3921,6 +3978,8 @@ function App() {
                 pendingAutomaticContextRef.current = null;
                 if (selectedZoneId === "startLight") {
                   invalidateStartLightDependents("Start-light region deleted; its learned colors and finish were cleared.");
+                } else if (selectedZoneId === "startBody" && zones.startBody) {
+                  invalidateAthleteSelection("Climber selection removed. Start was kept; select your climber and run analysis again, or review timing manually.");
                 }
                 setZones((current) => omitZone(current, selectedZoneId));
               }}
@@ -3931,6 +3990,7 @@ function App() {
               disabled={videoAnalysisRunning}
               onClick={() => {
                 pendingAutomaticContextRef.current = null;
+                invalidateAthleteSelection("Athlete zones cleared. Movement, Hold 10, Finish, and tracking need review.");
                 invalidateStartLightDependents("All zones and lane-light calibration were cleared.");
                 setZones({});
               }}

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { assessFinishLaneIdentity, clearAutomaticLaneBiomechanics, clearAutomaticLaneDependentMarkers } from "./finishLaneIdentity";
+import { assessFinishLaneIdentity, clearAutomaticLaneBiomechanics, clearAutomaticLaneDependentMarkers, finishLaneEvidenceAfterScan } from "./finishLaneIdentity";
 import { startLaneId, type AnalysisLaneCandidate } from "./startLaneEvidence";
 import { createPracticeSession } from "./practiceRecordings";
 import { createDefaultBiomechanicsSession } from "./biomechanicsSession";
@@ -11,7 +11,7 @@ const lane = (center: number): AnalysisLaneCandidate => ({
   calibration: { beforeStartRGB: { r: 10, g: 100, b: 20 }, afterStartRGB: { r: 10, g: 20, b: 100 }, colorDelta: 113 },
   label: "Observed patch", startRawTime: 9.4, score: 10,
 });
-const assess = (lanes: AnalysisLaneCandidate[]) => assessFinishLaneIdentity({ acceptedStart: 9.4, laneCandidates: lanes });
+const assess = (lanes: AnalysisLaneCandidate[]) => assessFinishLaneIdentity({ acceptedStart: 9.4, laneCandidates: lanes, hasFreshLaneEvidence: true });
 
 describe("Finish athlete-lane identity", () => {
   it("preserves compatible left and right patch groups without certifying an athlete", () => {
@@ -55,7 +55,7 @@ describe("Finish athlete-lane identity", () => {
 
   it("uses an explicit body selection only when it excludes the competing hypothesis", () => {
     const lanes = [.23, .76].map(lane);
-    const options = { acceptedStart: 9.4, laneCandidates: lanes, lightZone: lanes[1].zone, lightCalibration: lanes[1].calibration };
+    const options = { acceptedStart: 9.4, laneCandidates: lanes, lightZone: lanes[1].zone, lightCalibration: lanes[1].calibration, hasFreshLaneEvidence: true };
     const selected = assessFinishLaneIdentity({ ...options,
       trustedBodyZone: { id: "startBody", label: "User climber", x1: .1, x2: .4, y1: .4, y2: .9 } });
     expect(selected.requiresAthleteSelection).toBe(false);
@@ -68,7 +68,7 @@ describe("Finish athlete-lane identity", () => {
     const lanes = [.23, .76].map(lane), before = JSON.stringify(lanes);
     for (const ordered of [lanes, [...lanes].reverse()]) for (const official of [12.1, 25.9]) {
       // Official time is deliberately outside the assessment's supported inputs.
-      const options = { acceptedStart: official, laneCandidates: ordered.map((value, i) => ({ ...value, score: i ? 1e9 : 1, confidence: "High" as const })), expectedFinishTime: official };
+      const options = { acceptedStart: official, laneCandidates: ordered.map((value, i) => ({ ...value, score: i ? 1e9 : 1, confidence: "High" as const })), expectedFinishTime: official, hasFreshLaneEvidence: true };
       expect(assessFinishLaneIdentity(options).requiresAthleteSelection).toBe(true);
     }
     expect(JSON.stringify(lanes)).toBe(before);
@@ -121,6 +121,37 @@ describe("Finish athlete-lane identity", () => {
     const session = createPracticeSession("a"), hold = session.timestamps.find(marker => marker.id === "hold10")!;
     hold.source = "COM halfway estimate"; hold.acceptanceMode = "frame-review";
     expect(clearAutomaticLaneDependentMarkers(session.timestamps).find(marker => marker.id === "hold10")?.rawTime).toBeNull();
+  });
+
+  it("does not infer a fresh single lane from a saved automatic zone, even with a selected body or official total", () => {
+    const saved = lane(.23), lightZone = { ...saved.zone, label: "Auto-detected green-to-blue start light" };
+    const options = { lightZone, lightCalibration: saved.calibration, acceptedStart: 9.4, laneCandidates: [],
+      trustedBodyZone: { id: "startBody" as const, label: "User climber", x1: .1, x2: .4, y1: .4, y2: .9 }, expectedFinishTime: 21.6 };
+    expect(assessFinishLaneIdentity(options)).toMatchObject({ requiresAthleteSelection: true, contextMissing: true });
+    expect(assessFinishLaneIdentity({ ...options, laneCandidates: [saved], hasFreshLaneEvidence: false }).requiresAthleteSelection).toBe(true);
+    expect(assessFinishLaneIdentity({ ...options, laneCandidates: [saved], hasFreshLaneEvidence: true }).requiresAthleteSelection).toBe(false);
+    // Explicit user-selected/calibrated sensor geometry remains a manual setup.
+    expect(assessFinishLaneIdentity({ ...options, lightZone: saved.zone }).requiresAthleteSelection).toBe(false);
+  });
+
+  it("keeps repeated explicit manual sensor scans usable without inventing a discovery ledger", () => {
+    const manual = lane(.23);
+    let ledger: AnalysisLaneCandidate[] = [];
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const result = assessFinishLaneIdentity({ lightZone: manual.zone, lightCalibration: manual.calibration,
+        acceptedStart: 9.4, laneCandidates: ledger, hasFreshLaneEvidence: false });
+      expect(result.requiresAthleteSelection).toBe(false);
+      ledger = finishLaneEvidenceAfterScan(result.pool, result.candidates[0], false);
+      expect(ledger).toEqual([]);
+    }
+  });
+
+  it("reorders a fresh discovery pool without dropping unscanned competing evidence", () => {
+    const pool = [.2, .27, .34, .75].map(lane), before = [...pool];
+    const reordered = finishLaneEvidenceAfterScan(pool, pool[1], true);
+    expect(reordered).toEqual([pool[1], pool[0], pool[2], pool[3]]);
+    expect(assess(reordered).requiresAthleteSelection).toBe(true);
+    expect(pool).toEqual(before);
   });
 });
 

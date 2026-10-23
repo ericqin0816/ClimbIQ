@@ -6,6 +6,7 @@ import { deriveAutomaticStartBodyZone } from "./startRegion";
 import { clearMarkerTimestamp } from "./timestampIntegrity";
 
 export const FINISH_LANE_SELECTION_REQUIRED = "Start is accepted. Start-light cues point to different climber regions, so automatic Finish, movement, and tracking are paused. In Manual lane setup, capture a Start frame and draw a Start Body Zone around your climber, then run analysis again; or review your climber's Finish manually.";
+export const FINISH_LANE_CONTEXT_REQUIRED = "Start is accepted. Automatic Finish needs a new lane check after the recording, Start, or climber selection changed. Run automatic analysis again, or review your climber's Finish manually.";
 
 interface FinishLaneIdentityOptions {
   lightZone?: NormalizedZone;
@@ -13,6 +14,7 @@ interface FinishLaneIdentityOptions {
   acceptedStart: number;
   laneCandidates: AnalysisLaneCandidate[];
   trustedBodyZone?: NormalizedZone;
+  hasFreshLaneEvidence?: boolean;
 }
 
 /** Existing automatic body regions are compatibility bounds, not proof of
@@ -32,9 +34,19 @@ export function assessFinishLaneIdentity(options: FinishLaneIdentityOptions) {
     // Pairwise and symmetric: an intermediate patch cannot bridge two lanes.
     if (!aContainsB || !bContainsA) conflicts.push([a.laneId ?? startLaneId(a.zone), b.laneId ?? startLaneId(b.zone)]);
   }
-  const requiresAthleteSelection = conflicts.length > 0;
+  const contextMissing = (options.lightZone?.label.startsWith("Auto-detected") || options.laneCandidates.length > 0) && options.hasFreshLaneEvidence !== true;
+  const requiresAthleteSelection = Boolean(contextMissing || conflicts.length > 0);
   return { candidates: pool.slice(0, 3), pool, conflicts, requiresAthleteSelection,
-    reason: requiresAthleteSelection ? FINISH_LANE_SELECTION_REQUIRED : "" };
+    contextMissing: Boolean(contextMissing),
+    reason: contextMissing ? FINISH_LANE_CONTEXT_REQUIRED : requiresAthleteSelection ? FINISH_LANE_SELECTION_REQUIRED : "" };
+}
+
+/** A successful scan can reorder actual discovery evidence; a manual sensor
+ * setup does not become a discovered lane ledger merely by producing Finish.
+ */
+export function finishLaneEvidenceAfterScan(pool: AnalysisLaneCandidate[], selected: AnalysisLaneCandidate,
+  hasFreshLaneEvidence: boolean): AnalysisLaneCandidate[] {
+  return hasFreshLaneEvidence ? [selected, ...pool.filter(candidate => candidate !== selected)] : [];
 }
 
 /** A shared Start can remain valid while automatic athlete-specific markers

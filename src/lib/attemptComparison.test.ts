@@ -86,6 +86,18 @@ describe("attempt comparison", () => {
       expect(attemptComparisonContextKey(a, changed)).not.toBe(key);
     }
   });
+  it("invalidates comparison context when selected athlete geometry changes even with identical accepted markers", () => {
+    const a = makeSession("a", { start: 1, finish: 11 }), b = makeSession("b", { start: 1, finish: 10.7 });
+    b.zones.startBody = { id: "startBody", label: "My climber", x1: .1, x2: .45, y1: .4, y2: .9 };
+    const key = attemptComparisonContextKey(a, b), originalMarkers = structuredClone(b.timestamps);
+    const changed = structuredClone(b); changed.zones.startBody!.x1 = .55; changed.zones.startBody!.x2 = .99;
+    expect(changed.timestamps).toEqual(originalMarkers);
+    expect(attemptComparisonContextKey(a, changed)).not.toBe(key);
+    const removed = structuredClone(b); delete removed.zones.startBody;
+    expect(attemptComparisonContextKey(a, removed)).not.toBe(key);
+    const renamed = structuredClone(b); renamed.zones.startBody!.label = "Same selected region";
+    expect(attemptComparisonContextKey(a, renamed)).toBe(key);
+  });
   it("links the longest reliable wall third and withholds stale or interrupted tracking", () => {
     const s = withRouteTracking(makeSession("sections", { start: 2, finish: 6 }), 2, 6);
     const result = s.biomechanics!.result!;

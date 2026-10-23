@@ -6,6 +6,7 @@ import { validateWallCalibration } from "./wallCalibration";
 import { observationComparisonFloor } from "./timingEvidence";
 import { assessAttemptIdentity, attemptIdentityConfirmationKey, type AttemptIdentityAssessment } from "./attemptIdentity";
 import { practiceIdForLineage } from "./practiceRecordings";
+import { athleteRegionGeometry } from "./athleteLaneContext";
 
 export type AttemptMetricId =
   | "total"
@@ -242,6 +243,7 @@ export function attemptComparisonContextKey(left: SavedAnalysisSession, right: S
     climberName: session.climberName, location: session.location, attemptType: session.attemptType,
     date: session.date, notes: session.notes, settings: session.settings,
     timestamps: sanitizeTimestampSequence(session.timestamps, session.videoMetadata?.duration),
+    athleteRegion: athleteRegionGeometry(session.zones.startBody),
     wallCalibration: session.biomechanics?.calibration,
   })) });
 }

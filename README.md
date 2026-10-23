@@ -48,6 +48,13 @@ they are not real-climber recordings or independent accuracy labels.
 The default start search covers the first 12 seconds. For a longer recording,
 set the race's time window in **Review & advanced tools**.
 
+If cues point to different climbers, automatic Finish pauses. In **Manual lane
+setup**, capture a Start frame and draw a **Start Body Zone** around your climber,
+then rerun analysis. You can also review that climber's Finish manually. Changing
+the climber selection clears movement, Hold 10, Finish, and tracking; the shared
+Start clock stays. Reopened automatic light regions need a fresh analysis before
+they can generate a new automatic Finish.
+
 Use **Saved** to search by name, climber, gym, date, or notes and reopen measurements
 without the video. Keep original recordings separately for frame review. When an
 app cannot establish that a selected file belongs to an open attempt, choose
