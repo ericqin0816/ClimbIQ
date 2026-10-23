@@ -196,6 +196,17 @@ reviewed scopes. The final documentation commit records this result without
 changing the reviewed application or tests. The scores remain implementation
 assessments, subject to the evidence limits below.
 
+At the first production publish (`57fc62b`), the public app and coaching status
+endpoint returned HTTP 200, the production policy was present, and
+[`build-info.json`](https://climbiq-detection-lab.vercel.app/build-info.json)
+reported that commit with `workingTreeDirty: true`. The deployed checkout's
+changes were not inspected; their cause or contents are not established here.
+The corresponding local checkout/build was clean. Preserve the hosted flag:
+this production build is not a qualifying frozen-study build. Use and retain a
+verified clean build for that study. The project reviewer independently checked
+this limitation and retained the 9.6 software/delivery score; the flag does not
+invalidate the successful reviewed-code CI run.
+
 ## Evidence limits
 
 The product rubric assesses the implemented experience. Overall product readiness
