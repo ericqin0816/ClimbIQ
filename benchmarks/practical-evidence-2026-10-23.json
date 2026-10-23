@@ -1,0 +1,454 @@
+{
+  "schemaVersion": 1,
+  "dataKind": "derived-public-agent-observational-summary",
+  "createdAt": "2026-10-23T15:30:10.050381+00:00",
+  "independentHumanStudy": false,
+  "rawReplayableEvidenceBundleIncluded": false,
+  "scope": "Four first default predictive runs on previously prediction-unseen public source groups, plus a predeclared P07 guided diagnostic and separately operated manual source review. All are desktop-browser observations, including emulated phone viewports; no actual iPhone or recruited human study.",
+  "artifactIntegrityLimit": "Hashes preserve supplied source/artifact identity and internal consistency. They do not independently attest executable identity, honest blinding, recording permission, or physical timing calibration. Raw local reports and downloaded media are not published in this summary.",
+  "protocol": {
+    "referencesAndRunConditionsFrozenBy": "2026-10-23T14:50:28.844533+00:00",
+    "firstPredictiveRunStartedAt": "2026-10-23T14:52:36.188Z",
+    "comparisonToleranceSeconds": 0.1,
+    "toleranceMeaning": "Predeclared observational interval tolerance only. No accepted fresh automatic endpoints means no automatic timing-error result.",
+    "splitMeaning": "Held out only for each group first default primary. After prediction exposure all group reruns/tuning are development; guided diagnostics do not add independent attempts."
+  },
+  "frozenRunEnvironment": {
+    "build": {
+      "schemaVersion": 1,
+      "appVersion": "0.30.0",
+      "commitSha": "874e604b5268c9f00a63fbe468993c85f4c560e0",
+      "workingTreeDirty": false
+    },
+    "browser": "156.0.8078.47"
+  },
+  "originalArtifactHashes": {
+    "defaultWorkflowSha256": "f3cdd1b02e93de2a626cfeac91fd3b23bf5d8a4ec774edbafe90d1bb63bfca24",
+    "guidedWorkflowSha256": "237e9364e6419a23a63e91bb89f8e490fccecbf42fb93f6bb38b28126f5bd916",
+    "normalizedAuditInputSha256": "a545c43b5785b398d22c6d2ce8ff6f8cfcff52acd86ad4033d6f277396903825",
+    "verifiedAuditOutputSha256": "d7d451385bb859505c356bd61d817dd0e521f21d2eb4bb29af23dd6c3dae8a39",
+    "manualRecoverySha256": "04bdffcbf6774b5f5fc6ed2ae08ad3d6a589022de3301f387f7e3302e181eaf0"
+  },
+  "originalReferenceHashes": {
+    "jan-reference-frozen.json": "e835670b703fffd471709bd4cf55c79e080af137de3e0a7e94069f526b278aad",
+    "p05-reference-frozen.json": "36ca4118c0f408a6294b93bd4659ec0aa316ecb7c6190a28c6128a3e76a8d7f5",
+    "p07-reference-frozen.json": "821ddcdc8c58177ae9736be45fa7b4f2fec3b7d9cb7b040618c5452dea021589"
+  },
+  "counts": {
+    "distinctOriginalAttempts": 4,
+    "wholeSourceClimberGroups": 3,
+    "primaryEndpointOpportunities": 8,
+    "acceptedAutomaticEndpoints": 0,
+    "automaticCoverageFraction": 0,
+    "automaticTimingErrorComparableEndpoints": 0,
+    "populationAccuracyOrFalseAcceptanceRateEstablished": false,
+    "supportedFixedPhoneOriginalsAdded": 0,
+    "start": {
+      "review": 4,
+      "automatic": 0
+    },
+    "finish": {
+      "missingNotRun": 4,
+      "automatic": 0
+    }
+  },
+  "sources": [
+    {
+      "id": "p01",
+      "sourceUrl": "https://www.youtube.com/watch?v=IV6A8nruvK4",
+      "sourceSha256": "93321a72a702e5194529391748a7ad6f5c04bac98d480e6e8b79536d7dbed23f",
+      "sourceGroupId": "jan-kriz-training-group",
+      "durationSeconds": 25.36,
+      "cohort": "panning",
+      "sourceSpeedStatus": "unknown",
+      "namedAthleteLaneIdentityVerified": false,
+      "primary": {
+        "runId": "p01-primary-default",
+        "outcomeIndex": 0,
+        "effectiveStartSearchWindowSeconds": [
+          0,
+          12
+        ],
+        "startStatus": "review",
+        "finishStatus": "missing-not-run",
+        "acceptedAutomaticEndpoints": 0,
+        "totalAvailable": false,
+        "firstUsefulTerminalMilliseconds": 13247.6,
+        "latencyLimit": "Single local run, approximately100ms polling; processing latency is not human correction time or a speed-population estimate."
+      },
+      "references": {
+        "start": {
+          "status": "unobservable",
+          "reason": "Neither independent observer establishes the qualifying recorded start protocol. Unresolved is not evidence that audio is absent.",
+          "frozenAt": "2026-10-23T14:22:15.494007+00:00",
+          "originalObservers": [
+            {
+              "reviewerId": "codex-evaluator-a",
+              "reviewedAt": "2026-10-23T14:12:53.710928+00:00",
+              "status": "unobservable",
+              "reason": "No clearly identifiable two-matching-preparation plus different-pitch final cue established in the broad raw spectrogram. Music/speech and athlete departure do not establish a signal. No Start bracket assigned."
+            },
+            {
+              "reviewerId": "codex-reliability-b",
+              "reviewedAt": "2026-10-23T14:12:00Z",
+              "reviewedAtKind": "conservative-reviewed-by-upper-bound-not-exact-observation-time",
+              "status": "unobservable",
+              "reason": "Raw spectrogram has multiple tonal/broadband components but no confidently identified two-preparation-plus-distinct-final sequence in this visual-only audio review; actual perceptual playback was unsupported. Physical departure is not an electronic Start cue."
+            }
+          ]
+        },
+        "finish": {
+          "status": "unobservable",
+          "reason": "Observer A can bracket apparent image hand/pad overlap only; observer B cannot resolve first physical pad contact. These different observability results cannot qualify an independent first-contact reference. Preserve navigation-only windows without timing accuracy claims.",
+          "frozenAt": "2026-10-23T14:22:15.494007+00:00",
+          "originalObservers": [
+            {
+              "reviewerId": "codex-evaluator-a",
+              "reviewedAt": "2026-10-23T14:12:53.710928+00:00",
+              "status": "observable",
+              "reason": "The upper fixture is visible and the athlete rises into an apparent hand/pad overlap before hanging away. The bracket intentionally spans several native frames because motion blur, hand/head overlap, oblique depth and panning prevent exact physical-contact or electronic-trigger timing. Only this apparent overlap is referenceable; the displayed total was not used as event truth.",
+              "eventDefinition": "apparent-first-hand-overlap-with-upper-finish-pad",
+              "laneId": "right-speed-lane",
+              "bracket": [
+                13.26325,
+                13.555208
+              ]
+            },
+            {
+              "reviewerId": "codex-reliability-b",
+              "reviewedAt": "2026-10-23T14:12:00Z",
+              "reviewedAtKind": "conservative-reviewed-by-upper-bound-not-exact-observation-time",
+              "status": "unobservable",
+              "reason": "At13.138125s the upper pad and rising athlete are visible, but the approach becomes self-occluded/blurred as the hand could reach the pad. Frames13.179833,13.221542,13.263250,13.304958 and13.346667 do not let this observer distinguish first pad contact from the hand/body overlap reliably. Later height/descent is not contact proof."
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "p02",
+      "sourceUrl": "https://www.youtube.com/watch?v=16a3Qm7QJ7U",
+      "sourceSha256": "a31e8f43bc83f452b6cde4287a9c838275d188850e05e9b2a8df90a185b14997",
+      "sourceGroupId": "jan-kriz-training-group",
+      "durationSeconds": 33.97,
+      "cohort": "panning",
+      "sourceSpeedStatus": "unknown",
+      "namedAthleteLaneIdentityVerified": false,
+      "primary": {
+        "runId": "p02-primary-default",
+        "outcomeIndex": 1,
+        "effectiveStartSearchWindowSeconds": [
+          0,
+          12
+        ],
+        "startStatus": "review",
+        "finishStatus": "missing-not-run",
+        "acceptedAutomaticEndpoints": 0,
+        "totalAvailable": false,
+        "firstUsefulTerminalMilliseconds": 20179.6,
+        "latencyLimit": "Single local run, approximately100ms polling; processing latency is not human correction time or a speed-population estimate."
+      },
+      "references": {
+        "start": {
+          "status": "unobservable",
+          "reason": "Neither independent observer establishes the qualifying recorded start protocol. Unresolved is not evidence that audio is absent.",
+          "frozenAt": "2026-10-23T14:22:15.494007+00:00",
+          "originalObservers": [
+            {
+              "reviewerId": "codex-evaluator-a",
+              "reviewedAt": "2026-10-23T14:12:53.710928+00:00",
+              "status": "unobservable",
+              "reason": "No clearly identifiable two-matching-preparation plus different-pitch final cue established in the broad raw spectrogram. Music/speech and athlete departure do not establish a signal. No Start bracket assigned."
+            },
+            {
+              "reviewerId": "codex-reliability-b",
+              "reviewedAt": "2026-10-23T14:12:00Z",
+              "reviewedAtKind": "conservative-reviewed-by-upper-bound-not-exact-observation-time",
+              "status": "unobservable",
+              "reason": "Source spectrogram after the intro has dense sustained musical/tonal content. No isolated countdown/final arrival was confidently identified in this visual-only audio review; actual perceptual playback was unsupported. Do not force a cue clock from athlete departure or source display."
+            }
+          ]
+        },
+        "finish": {
+          "status": "unobservable",
+          "reason": "Observer A can bracket apparent image hand/pad overlap only; observer B cannot resolve first physical pad contact. These different observability results cannot qualify an independent first-contact reference. Preserve navigation-only windows without timing accuracy claims.",
+          "frozenAt": "2026-10-23T14:22:15.494007+00:00",
+          "originalObservers": [
+            {
+              "reviewerId": "codex-evaluator-a",
+              "reviewedAt": "2026-10-23T14:12:53.710928+00:00",
+              "status": "observable",
+              "reason": "The upper fixture is visible and the athlete rises into an apparent hand/pad overlap before hanging away. The bracket intentionally spans several native frames because motion blur, hand/head overlap, oblique depth and panning prevent exact physical-contact or electronic-trigger timing. Only this apparent overlap is referenceable; the displayed total was not used as event truth.",
+              "eventDefinition": "apparent-first-hand-overlap-with-upper-finish-pad",
+              "laneId": "right-speed-lane",
+              "bracket": [
+                20.6,
+                20.92
+              ]
+            },
+            {
+              "reviewerId": "codex-reliability-b",
+              "reviewedAt": "2026-10-23T14:12:00Z",
+              "reviewedAtKind": "conservative-reviewed-by-upper-bound-not-exact-observation-time",
+              "status": "unobservable",
+              "reason": "The athlete rises toward the upper pad over20.60\u201320.96s. The visible left hand remains near a lower hold while the other arm/hand overlaps or is hidden by the torso/head near the pad. I cannot confidently identify an independently visible first hand-to-pad contact frame. A later body peak or displayed final time cannot resolve the occlusion."
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "p05",
+      "sourceUrl": "https://www.youtube.com/watch?v=31RVli_2b4I",
+      "sourceSha256": "be93f065a38404eaae3dd64f90e56a64fdcad68500feb0ae9a83a1caa3b9b6a8",
+      "sourceGroupId": "stan-kokorin-rusrecord-2015",
+      "durationSeconds": 16.0,
+      "cohort": "panning",
+      "sourceSpeedStatus": "unknown",
+      "namedAthleteLaneIdentityVerified": false,
+      "primary": {
+        "runId": "p05-primary-default",
+        "outcomeIndex": 2,
+        "effectiveStartSearchWindowSeconds": [
+          0,
+          12
+        ],
+        "startStatus": "review",
+        "finishStatus": "missing-not-run",
+        "acceptedAutomaticEndpoints": 0,
+        "totalAvailable": false,
+        "firstUsefulTerminalMilliseconds": 12298.7,
+        "latencyLimit": "Single local run, approximately100ms polling; processing latency is not human correction time or a speed-population estimate."
+      },
+      "references": {
+        "start": {
+          "status": "disputed",
+          "reason": "Both observers cannot positively identify the final acoustic start protocol. A long tonal onset alone does not establish the race cue; do not infer from official total or departure. Original A unobservable and B disputed statuses are preserved.",
+          "frozenAt": "2026-10-23T14:50:28.844533+00:00",
+          "originalObservers": [
+            {
+              "reviewerId": "codex-evaluator-a",
+              "reviewedAt": "2026-10-23T14:27:38.634018+00:00",
+              "status": "unobservable",
+              "reason": "A long narrow-band recorded tone onset can be seen around2.32seconds, but I cannot identify two matching preceding preparation cues in the raw first3.5-second plot. I do not infer final-protocol identity from athlete departure or official total."
+            },
+            {
+              "reviewerId": "root-ai-agent",
+              "reviewedAt": "2026-10-23T14:29:49.2539298Z",
+              "status": "disputed",
+              "reason": "A long tonal burst is visible near2.3s but I cannot establish two matching preparatory tones or positively identify that acoustic event as the race start signal from these observations. No electronic trigger, AV offset or acoustic propagation calibration exists."
+            }
+          ]
+        },
+        "finish": {
+          "status": "unobservable",
+          "reason": "Both observers cannot resolve first physical hand/pad contact through upper beam/blur; no lane-specific contact timestamp qualifies.",
+          "frozenAt": "2026-10-23T14:50:28.844533+00:00",
+          "originalObservers": [
+            {
+              "reviewerId": "codex-evaluator-a",
+              "reviewedAt": "2026-10-23T14:27:38.634018+00:00",
+              "status": "unobservable",
+              "reason": "Both athletes reach the upper fixtures, but a horizontal roof/steel member overlaps the hands/pad region during the left athlete arrival. Native unresized frames near7.9to8.2seconds do not resolve first physical contact. No exact bracket or official-total subtraction is assigned."
+            },
+            {
+              "reviewerId": "root-ai-agent",
+              "reviewedAt": "2026-10-23T14:29:49.2539298Z",
+              "status": "unobservable",
+              "reason": "Hands, red holds and upper timing fixtures overlap under roof structure with motion blur. First physical hand-to-pad contact and positive pad identity cannot be established reliably from the native frames inspected. No displayed-total arithmetic used."
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "p07",
+      "sourceUrl": "https://www.youtube.com/watch?v=1EpzcLV0NtM",
+      "sourceSha256": "05b6ec8b546372cea84fc16a21086357a768e66ddea1f6a395f7f4ce0b2857c1",
+      "sourceGroupId": "scs-nationals-sidney-final1-2013",
+      "durationSeconds": 37.15,
+      "cohort": "panning",
+      "sourceSpeedStatus": "unknown",
+      "namedAthleteLaneIdentityVerified": false,
+      "primary": {
+        "runId": "p07-primary-default",
+        "outcomeIndex": 3,
+        "effectiveStartSearchWindowSeconds": [
+          0,
+          12
+        ],
+        "startStatus": "review",
+        "finishStatus": "missing-not-run",
+        "acceptedAutomaticEndpoints": 0,
+        "totalAvailable": false,
+        "firstUsefulTerminalMilliseconds": 11511.6,
+        "latencyLimit": "Single local run, approximately100ms polling; processing latency is not human correction time or a speed-population estimate."
+      },
+      "references": {
+        "start": {
+          "status": "observable",
+          "reason": "Two independent preprediction source observations; preserved original uncertainty, semantic event-name normalization only.",
+          "frozenAt": "2026-10-23T14:46:22.975819+00:00",
+          "eventDefinition": "visible-lower-start-light-red-to-green",
+          "laneId": "right",
+          "envelopeMethod": "union-of-overlapping-observer-brackets",
+          "bracket": [
+            18.585233,
+            18.651967
+          ],
+          "originalObservers": [
+            {
+              "reviewerId": "codex-evaluator-a",
+              "reviewedAt": "2026-10-23T14:37:31.602200+00:00",
+              "status": "observable",
+              "reason": "The circular lower lamp between the lanes beside the right athlete is clearly red in native0033, mixed/pale in0034, and green in0035. The matching left lower lamp changes too. This is the recorded visible transition, not the acoustic third-tone arrival, pad release, or calibrated electronic trigger.",
+              "eventDefinition": "visible-lower-start-light-red-to-green",
+              "laneId": "right",
+              "bracket": [
+                18.585233,
+                18.651967
+              ]
+            },
+            {
+              "reviewerId": "codex-experience-b",
+              "reviewedAt": "2026-10-23T14:34:25.639Z",
+              "status": "observable",
+              "reason": "Separate lower circular light near source x660/y265 has the same red\u00e2\u2020\u2019pale\u00e2\u2020\u2019green sequence in native-start0033/0034/0035. Both lanes are identified spatially, not by athlete name.",
+              "eventDefinition": "visible-lower-start-light-red-to-green",
+              "laneId": "right",
+              "bracket": [
+                18.585233,
+                18.651967
+              ]
+            }
+          ]
+        },
+        "finish": {
+          "status": "observable",
+          "reason": "Two independent preprediction source observations; preserved original uncertainty, semantic event-name normalization only.",
+          "frozenAt": "2026-10-23T14:46:22.975819+00:00",
+          "eventDefinition": "apparent-first-pad-contact",
+          "laneId": "right",
+          "envelopeMethod": "union-of-overlapping-observer-brackets",
+          "bracket": [
+            25.7257,
+            25.892533
+          ],
+          "originalObservers": [
+            {
+              "reviewerId": "codex-evaluator-a",
+              "reviewedAt": "2026-10-23T14:37:31.602200+00:00",
+              "status": "observable",
+              "reason": "The right red-top athlete extends the right hand into the upper pad region; blurred hand/rim overlap is apparent before the clearly flat palm at0042. The conservative interval spans the onset ambiguity. Oblique image overlap is not an electronic pad trigger label.",
+              "eventDefinition": "apparent-first-pad-contact",
+              "laneId": "right",
+              "bracket": [
+                25.759067,
+                25.892533
+              ]
+            },
+            {
+              "reviewerId": "codex-experience-b",
+              "reviewedAt": "2026-10-23T14:34:25.639Z",
+              "status": "observable",
+              "reason": "native-finish0037(25.725700) shows a visible gap below the pad.0038\u00e2\u20ac\u201c0040 have blur/possible lower-rim overlap;0041(25.859167) shows the hand clearly across the pad face. Conservative first-contact bracket retains that ambiguity; it is separate from the later light transition.",
+              "eventDefinition": "apparent-first-pad-contact",
+              "laneId": "right",
+              "bracket": [
+                25.7257,
+                25.859167
+              ]
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "p07GuidedDiagnostic": {
+    "role": "predeclared secondary after first default prediction exposure; development only",
+    "effectiveStartSearchWindowSeconds": [
+      17,
+      21
+    ],
+    "unacceptedCandidateRawTime": 20.654,
+    "candidateIsEventTruth": false,
+    "acceptedAutomaticEndpoints": 0,
+    "finishRun": false,
+    "firstUsefulTerminalMilliseconds": 11049.4,
+    "limit": "The guided window does not replace the default0to12-second result. Neither the acoustic candidate nor visible light is treated as the other event."
+  },
+  "p07AdditionalSeparateReference": {
+    "status": "observable",
+    "reason": "Two independent preprediction source observations; preserved original uncertainty, semantic event-name normalization only.",
+    "frozenAt": "2026-10-23T14:46:22.975819+00:00",
+    "eventDefinition": "visible-upper-finish-indicator-green-to-red",
+    "laneId": "right",
+    "envelopeMethod": "union-of-overlapping-observer-brackets",
+    "bracket": [
+      25.8258,
+      25.9259
+    ],
+    "originalObservers": [
+      {
+        "reviewerId": "codex-evaluator-a",
+        "reviewedAt": "2026-10-23T14:37:31.602200+00:00",
+        "status": "observable",
+        "reason": "The right upper rectangular indicator is green in0040 and0041, then visibly red by0042 and remains red. Hand partially occludes the strip. A wide three-frame interval retains uncertainty; this is separate from first hand contact or controller/sensor activation.",
+        "eventDefinition": "visible-upper-finish-indicator-green-to-red",
+        "laneId": "right",
+        "bracket": [
+          25.8258,
+          25.9259
+        ]
+      },
+      {
+        "reviewerId": "codex-experience-b",
+        "reviewedAt": "2026-10-23T14:34:25.639Z",
+        "status": "observable",
+        "reason": "Right pad bar remains green at native-finish0041, is red at0042. This separate visual event is not substituted for first physical hand contact.",
+        "eventDefinition": "visible-upper-finish-indicator-green-to-red",
+        "laneId": "right",
+        "bracket": [
+          25.859167,
+          25.892533
+        ]
+      }
+    ]
+  },
+  "p07ManualRecovery": {
+    "role": "Agent-operated recovery at supplied known source cursors after automatic results; separate from automatic coverage and human correction-time evidence.",
+    "viewports": [
+      {
+        "width": 320,
+        "height": 568
+      },
+      {
+        "width": 320,
+        "height": 740
+      }
+    ],
+    "nativeStartFrameSeconds": 18.6186,
+    "savedStartSeconds": 18.619,
+    "startPhysicalDefinition": "Visible right lower red-to-green light transition, not acoustic arrival or electronic trigger.",
+    "nativeFinishFrameSeconds": 25.8258,
+    "savedFinishSeconds": 25.826,
+    "finishPhysicalDefinition": "Apparent right hand/pad contact, separate from the later visible upper indicator transition.",
+    "sourceObservationIntervalSeconds": 0.033367,
+    "intervalIsEventAccuracyBound": false,
+    "savedMarkersWithinFrozenAgentObservationEnvelopes": true,
+    "savedNominalVisualElapsedSeconds": 7.207,
+    "elapsedIsOfficialElectronicTime": false,
+    "hold10Set": false,
+    "coreScriptedTaskActionsPerViewport": 13,
+    "humanCorrectionTimeMeasured": false,
+    "trainingPerformanceGainEstablished": false
+  },
+  "rights": "Publicly accessible does not mean redistributable. Source links and hashes are published; no downloaded media, signed media URLs or recording permission claim is included.",
+  "remainingLimits": [
+    "No recruited human independent labels, endpoint calibration, population precision/false-acceptance rate, field correction time, voluntary return or actual-iPhone evidence.",
+    "All four new tested recordings pan; they do not establish supported fixed full-wall phone accuracy.",
+    "Unobservable/disputed references are retained. Review/missing endpoints have no automatic timing-error score; abstention is not proved correct from absence of a reference.",
+    "Original Jan second-observer worksheet lacks an embedded review timestamp. A separately attested conservative reviewed-by upper bound is explicitly preserved, not an invented exact observation instant.",
+    "Runtime replay reliability is evaluated separately in the final engineering cycle; the detector observations here remain frozen to clean874e604."
+  ]
+}
