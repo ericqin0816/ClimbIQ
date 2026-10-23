@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useLayoutEffect, useRef } from "react";
 import "./PracticeWalkthrough.css";
 
 export default function PracticeWalkthrough({ active, disabled, canReview, saved, holdReviewed, bothSaved, revealRequested = false, onRevealHandled, onOpen, onInspect, onReviewHold, onSave }: {
@@ -16,14 +16,39 @@ export default function PracticeWalkthrough({ active, disabled, canReview, saved
   onSave(): void;
 }) {
   const walkthrough = useRef<HTMLElement>(null);
-  useEffect(() => {
-    if (!revealRequested || !active || !canReview || disabled) return;
+  const revealHandled = useRef(false);
+  const handleReveal = useRef(onRevealHandled);
+  useLayoutEffect(() => { handleReveal.current = onRevealHandled; }, [onRevealHandled]);
+  useLayoutEffect(() => {
+    revealHandled.current = false;
+    if (!revealRequested || !active) return;
+    const onOutsideIntent = (event: Event) => {
+      if (revealHandled.current || (event.target instanceof Node && walkthrough.current?.contains(event.target))) return;
+      // Cancel immediately, before an outside action or a newly ready frame can
+      // render. Only a fresh user-requested practice opening may reveal again.
+      revealHandled.current = true;
+      handleReveal.current?.();
+    };
+    document.addEventListener("pointerdown", onOutsideIntent, true);
+    document.addEventListener("focusin", onOutsideIntent, true);
+    document.addEventListener("keydown", onOutsideIntent, true);
+    document.addEventListener("wheel", onOutsideIntent, { capture: true, passive: true });
+    return () => {
+      document.removeEventListener("pointerdown", onOutsideIntent, true);
+      document.removeEventListener("focusin", onOutsideIntent, true);
+      document.removeEventListener("keydown", onOutsideIntent, true);
+      document.removeEventListener("wheel", onOutsideIntent, true);
+    };
+  }, [revealRequested, active]);
+  useLayoutEffect(() => {
+    if (!revealRequested || !active || !canReview || disabled || revealHandled.current) return;
     const step = walkthrough.current?.querySelector<HTMLElement>('[aria-current="step"]');
     if (!step) return;
+    revealHandled.current = true;
     step.scrollIntoView({ block: "center", behavior: "instant" });
     step.querySelector<HTMLElement>("button.primary, a.primary")?.focus({ preventScroll: true });
-    onRevealHandled?.();
-  }, [revealRequested, active, canReview, disabled, onRevealHandled]);
+    handleReveal.current?.();
+  }, [revealRequested, active, canReview, disabled]);
   const next = !holdReviewed ? "review" : !saved ? "save" : bothSaved ? "compare" : "other";
   const other = active === "a" ? "b" : "a";
   return <section ref={walkthrough} className="practice-walkthrough" aria-label="Practice walkthrough">

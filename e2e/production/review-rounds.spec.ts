@@ -138,6 +138,37 @@ async function importComparison(page: Page, personal = false) {
   await page.getByLabel("New attempt", { exact: true }).selectOption(sessions[1].id);
 }
 
+test("a pending practice landing yields to an outside export action", async ({ page }, testInfo) => {
+  test.skip(process.platform === "win32" && testInfo.project.name.startsWith("webkit"), "Native media readiness is verified by macOS WebKit CI.");
+  await page.goto("/");
+  await page.evaluate(() => {
+    // Hold only the visible player's readiness notifications. The detached
+    // preparation decoder and native video decoding still run normally.
+    const events = ["loadedmetadata", "loadeddata", "canplay"];
+    const gate = (event: Event) => {
+      if (event.target instanceof HTMLVideoElement && event.target.closest("#video-review")) event.stopImmediatePropagation();
+    };
+    for (const event of events) window.addEventListener(event, gate, true);
+    (window as any).__releaseVisibleMediaReadiness = () => {
+      for (const event of events) window.removeEventListener(event, gate, true);
+      document.querySelector("#video-review video")!.dispatchEvent(new Event("loadeddata"));
+    };
+  });
+  await page.getByRole("button", { name: "Try a practice recording", exact: true }).click();
+  await expect(page.locator("#results .summary-primary-metric strong")).toHaveText("5.600s");
+  await expect(page.getByRole("button", { name: "Review practice Hold 10", exact: true })).toBeDisabled();
+  await expect.poll(() => page.locator("#video-review video").evaluate(video => (video as HTMLVideoElement).readyState >= 2)).toBe(true);
+  const exportButton = page.getByRole("button", { name: "Download data", exact: true });
+  await exportButton.focus();
+  const downloadPromise = page.waitForEvent("download");
+  await exportButton.click();
+  const downloaded = await (await downloadPromise).path();
+  expect(JSON.parse(await readFile(downloaded!, "utf8")).analysisBuild).toBeNull();
+  await page.evaluate(() => (window as any).__releaseVisibleMediaReadiness());
+  await expect(page.locator(".video-meta-line")).toContainText("Ready");
+  await expect(exportButton).toBeFocused();
+});
+
 test("known practice pair prepares together and replays the largest reviewed phase", async ({ page }, testInfo) => {
   test.skip(process.platform === "win32" && testInfo.project.name.startsWith("webkit"), "Media fast path runs in macOS WebKit CI.");
   await importComparison(page);

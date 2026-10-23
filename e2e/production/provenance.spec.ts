@@ -82,5 +82,6 @@ test("failed media replacement preserves imported provenance and a new practice 
   await page.getByRole("button", { name: "Open practice B as a new attempt", exact: true }).click();
   await expect(page.locator(".video-meta-line")).toContainText("Ready");
   await expect(page.locator("#results .summary-primary-metric strong")).toHaveText("5.200s");
+  await expect(page.getByRole("button", { name: "Review practice Hold 10", exact: true })).toBeFocused();
   expect((await dataset(page)).analysisBuild).toBeNull();
 });

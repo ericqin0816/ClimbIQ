@@ -120,7 +120,7 @@ only after readiness. Generic review buttons and the practice review trigger
 capture their opener explicitly for Safari.
 
 Verification: 963 tests across 98 files, typecheck, production build, and compiled
-server checks passed. Production workflows passed 42 cases locally; 26 Windows
+server checks passed. Production workflows passed 44 cases locally; 28 Windows
 WebKit media cases are explicitly skipped on that host. The affected landing,
 review-focus, and replay cases passed again after the final layout refinement.
 Both replay frames are aligned and fully above fixed navigation at 320×740 and
@@ -157,6 +157,17 @@ to advance while that endpoint remains paused, and checks both final endpoints.
 It keeps the same 5 ms endpoint tolerance and actual native playback; no retries,
 playback stubs, or clock overrides were added. Failure reports retain clock,
 paused, seeking, ready-state, and visibility samples.
+
+The replacement [hosted run](https://github.com/ericqin0816/ClimbIQ/actions/runs/39874399165)
+passed both endpoint tests and both focus tests, but exposed one desktop WebKit
+export interaction after opening a practice recording. A separate controlled
+readiness regression then reproduced delayed practice landing stealing focus from
+an outside export action. Practice landing now completes in a layout effect
+before Ready is painted, and a pending request yields immediately to outside
+pointer, focus, keyboard, or wheel intent. The regression retains actual native
+decoding and an actual downloaded export; only visible-player readiness
+notifications are delayed to exercise the race. The provenance workflow also
+waits for its intended one-shot landing before initiating its next action.
 
 ## Evidence limits
 
