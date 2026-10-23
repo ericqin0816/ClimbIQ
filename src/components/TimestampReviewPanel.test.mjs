@@ -46,4 +46,26 @@ describe("timestamp review panel", () => {
     expect(html).toContain("66.67");
     expect(html).toContain("not a measured event-error bound");
   });
+  it("offers an explicitly collapsed precise-seek action without changing the displayed frame", () => {
+    const html = render({ decodedRawTime: 11.47, onJumpToTime() {} });
+    expect(html).toContain('aria-label="Jump to time"');
+    expect(html).toContain('aria-expanded="false"');
+    expect(html).toContain("Decoded frame");
+    expect(html).toContain("Set Hold 10 at 11.470s");
+    expect(html).not.toContain("Raw video time (seconds)");
+  });
+  it("does not offer an unavailable seek action, and disables it while analysis owns the video", () => {
+    expect(render()).not.toContain('aria-label="Jump to time"');
+    const html = render({ busy: true, onJumpToTime() {} });
+    expect(html).toContain('class="review-seek-toggle" disabled=""');
+    expect(html).toContain('class="primary" disabled=""');
+  });
+  it("keeps precise seeking disabled until the current displayed frame is ready", () => {
+    for (const pending of [{ frameReady: false }, { frameStatus: "pending" }]) {
+      const html = render({ onJumpToTime() {}, ...pending });
+      expect(html).toContain('aria-disabled="true"');
+    }
+    // Unsupported native timing still permits ready approximate cursor review.
+    expect(render({ onJumpToTime() {}, frameStatus: "unsupported" })).toContain('aria-disabled="false"');
+  });
 });

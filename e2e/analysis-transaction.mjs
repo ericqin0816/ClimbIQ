@@ -146,7 +146,7 @@ async function runCase(scenario, scope, index) {
       if(!button||button.disabled)throw new Error('Existing Finish review unavailable.');button.click();})()`);
     await until(evaluate, `Boolean(document.querySelector('.timestamp-review .primary:not(:disabled)')) && !document.querySelector('video').seeking`, "prior Finish review decoded");
     result.priorReview = await evaluate(`({ label:document.querySelector('.timestamp-review')?.textContent, cursor:document.querySelector('video').currentTime })`);
-    assert.match(result.priorReview.label, /Set reviewed finish/, "Fixture did not open its prior Finish callback.");
+    assert.match(result.priorReview.label, /Accept finish/, "Fixture did not open its prior Finish callback.");
     result.before = committedSnapshot(await exportDataset(protocol));
     assert.equal(result.before.session.notes, seed.notes, "Fixture notes were not imported.");
     assert.equal(result.before.markers.find(marker => marker.markerId === "finishPad")?.acceptedRawTime, seed.timestamps[1].rawTime, "Fixture Finish was not imported.");
@@ -170,7 +170,7 @@ async function runCase(scenario, scope, index) {
       assert(result.reviewButton, "Fixture did not pause with a fresh Start review proposal.");
       assert(result.proposalCandidates.length > 0, "Review proposal candidates are missing.");
       assert.match(result.status, /Start (?:evidence|cues).*review/i, "Fixture did not enter the expected review branch.");
-      assert(!result.reviewAfter.label?.includes("Set reviewed finish"), "The old Finish acceptance callback remained visible at the new Start proposal cursor.");
+      assert(!result.reviewAfter.label?.includes("Accept finish"), "The old Finish acceptance callback remained visible at the new Start proposal cursor.");
     } else {
       assert.match(result.status, /Start could not be confirmed/i, "Fixture did not enter the expected no-found branch.");
       assert.equal(result.reviewButton, null, "No-found rerun unexpectedly retained a Start proposal.");

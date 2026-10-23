@@ -201,7 +201,7 @@ interface TimestampReviewTarget {
   suggestedRawTime: number;
   confidence?: Confidence;
   acceptLabel: string;
-  onAccept: (rawTime: number, frameTimeNote?: string) => void | boolean;
+  onAccept: (rawTime: number, frameTimeNote?: string, observationIntervalSeconds?: number) => void | boolean;
   secondPassBasis?: Hold10SecondPassResult;
 }
 
@@ -944,7 +944,8 @@ function App() {
       ? ` Source frame duration ${framePresentation.durationSeconds.toFixed(6)}s; not an event-error bound.` : "") + padNote;
     const accepted = visibleTimestampReview.onAccept(decodedTime ?? video.currentTime, decodedTime !== undefined
       ? `Used browser presented-frame timestamp ${decodedTime.toFixed(6)}s (cursor ${video.currentTime.toFixed(6)}s).${frameDurationNote}`
-      : `Frame timestamp unavailable; used paused cursor ${video.currentTime.toFixed(6)}s.${padNote}`);
+      : `Frame timestamp unavailable; used paused cursor ${video.currentTime.toFixed(6)}s.${padNote}`,
+      decodedTime !== undefined && framePresentation.status === "available" ? framePresentation.durationSeconds : undefined);
     if (accepted === false) {
       setReviewAcceptanceRejected(true);
       return;
@@ -983,7 +984,7 @@ function App() {
     reviewTimestamp({ label: "Manual start signal", navigationOnly: true, suggestedRawTime: startSignalRaw ?? currentTime,
       instruction: "Locate the visible or audible start signal, then accept its frame. Athlete movement alone does not establish the signal. Leave Start unset if the signal is missing.",
       acceptLabel: "Accept start",
-      onAccept: (time, note) => acceptManualTimestamp("startSignal", time, { frameReviewed: true, note }),
+      onAccept: (time, note, observationIntervalSeconds) => acceptManualTimestamp("startSignal", time, { frameReviewed: true, observationIntervalSeconds, note }),
     });
   }
 
@@ -994,21 +995,25 @@ function App() {
     reviewTimestamp({ label: "Manual Hold 10 contact", navigationOnly: true, suggestedRawTime: cursor,
       instruction: "Find the first hand contact with the actual Hold 10. This starting cursor is only a navigation aid. If the hold or contact is obscured, close review and compare totals instead.",
       acceptLabel: "Accept Hold 10",
-      onAccept: (time, note) => acceptManualTimestamp("hold10", time, { frameReviewed: true, note }),
+      onAccept: (time, note, observationIntervalSeconds) => acceptManualTimestamp("hold10", time, { frameReviewed: true, observationIntervalSeconds, note }),
     });
   }
 
   function openGuidedFinishReview() {
     if (videoAnalysisRunning || !isCurrentVideoReady(videoRef.current) || startSignalRaw === null) return;
+    // A seek cursor can sit after the accepted Start while still displaying
+    // that same native frame. Compare frame clocks before reusing this position.
+    const displayedTime = readDecodedVideoFrameTime(videoRef.current)?.mediaTime ?? currentTime;
     const cursor = getTimestamp(timestamps, "finishPad")?.rawTime ??
       (activeFinishRecovery?.review ? activeFinishRecovery.review.start + .75 : undefined) ?? finishResult?.rawTime ??
       finishResult?.candidates?.[0]?.rawTime ?? finishSuggestion?.rawTime ??
-      (currentTime > startSignalRaw ? currentTime : Math.min(videoRef.current.duration - 0.1, startSignalRaw + 8));
-    reviewTimestamp({ kind: "finish", label: "Finish review — locate pad contact", suggestedRawTime: cursor,
-      confidence: "Low", acceptLabel: "Set reviewed finish",
-      onAccept: (rawTime, frameTimeNote) => acceptManualTimestamp("finishPad", rawTime, {
-        frameReviewed: true, detectedRawTime: cursor, offsetApplied: roundTime(rawTime - cursor),
-        note: `Finish manually reviewed in the full video and guided close-up. The initial review cursor is not a verified event. ${frameTimeNote ?? ""}`,
+      (displayedTime > startSignalRaw + .001 ? currentTime : Math.min(videoRef.current.duration - 0.1, startSignalRaw + 8));
+    reviewTimestamp({ kind: "finish", label: "Manual finish contact", navigationOnly: true, suggestedRawTime: cursor,
+      instruction: "Find the actual finish pad contact or finish signal in this recording. This starting cursor is only a navigation aid. If the finish is not visible, close review and leave Finish unset.",
+      acceptLabel: "Accept finish",
+      onAccept: (rawTime, frameTimeNote, observationIntervalSeconds) => acceptManualTimestamp("finishPad", rawTime, {
+        frameReviewed: true, observationIntervalSeconds,
+        note: `Finish manually reviewed in the video. The initial review cursor is not a verified event. ${finishResult?.debug.partialSourceObservation?.reason ?? ""} ${frameTimeNote ?? ""}`,
       }),
     });
   }
@@ -1088,8 +1093,8 @@ function App() {
     reviewTimestamp({ label: evidence.kind === "contact-candidate" ? "Hold 10 contact candidate — second pass" : "Possible Hold 10 — second pass",
       secondPassBasis: activeHold10SecondPass,
       suggestedRawTime: rawTime, confidence: "Low", acceptLabel: "Set Hold 10",
-      onAccept: (time, frameTimeNote) => acceptTimestamp("hold10", time, "Manual", "Medium", {
-        frameReviewed: true,
+      onAccept: (time, frameTimeNote, observationIntervalSeconds) => acceptTimestamp("hold10", time, "Manual", "Medium", {
+        frameReviewed: true, observationIntervalSeconds,
         detectedRawTime: evidence.candidateRawTime,
         offsetApplied: roundTime(time - evidence.candidateRawTime),
         note: `${evidence.reason} Broad cursor ${evidence.coarseRawTime.toFixed(3)}s; second-pass cursor ${evidence.candidateRawTime.toFixed(3)}s. Accepted after reviewing the full video. ${frameTimeNote ?? ""}`,
@@ -2622,7 +2627,7 @@ function App() {
     return null;
   }
 
-  async function acceptSuggestedStart(reviewedRawTime?: number, frameTimeNote?: string) {
+  async function acceptSuggestedStart(reviewedRawTime?: number, frameTimeNote?: string, observationIntervalSeconds?: number) {
     const video = videoRef.current;
     if (suggestedStartRawTime === null) {
       return;
@@ -2643,7 +2648,7 @@ function App() {
       detectedRawTime: suggestedStartRawTime,
       offsetApplied: roundTime(acceptedStart - suggestedStartRawTime),
       note: `Suggested by Quick Analyze and accepted after review. ${frameTimeNote ?? ""}`,
-      frameReviewed: reviewedRawTime !== undefined,
+      frameReviewed: reviewedRawTime !== undefined, observationIntervalSeconds,
     });
     commitAcceptedStartContext(pendingContext);
     setSuggestedStartRawTime(null);
@@ -2720,7 +2725,7 @@ function App() {
   function acceptManualTimestamp(
     id: TimestampMarker["id"],
     rawTime: number,
-    acceptanceMetadata?: { detectedRawTime?: number; offsetApplied?: number; note?: string; frameReviewed?: boolean },
+    acceptanceMetadata?: { detectedRawTime?: number; offsetApplied?: number; note?: string; frameReviewed?: boolean; observationIntervalSeconds?: number },
   ) {
     const validation = applyTimestampAcceptance(timestamps, {
       id,
@@ -3486,7 +3491,7 @@ function App() {
         onReview={suggestedStartRawTime !== null ? () => reviewTimestamp({
           label: "Quick Analyze start", suggestedRawTime: Math.max(0, roundTime(suggestedStartRawTime + startSignalOffset)),
           confidence: startResult?.confidence ?? "Medium", acceptLabel: "Accept start",
-          onAccept: (rawTime, frameTimeNote) => { void acceptSuggestedStart(rawTime, frameTimeNote); },
+          onAccept: (rawTime, frameTimeNote, observationIntervalSeconds) => { void acceptSuggestedStart(rawTime, frameTimeNote, observationIntervalSeconds); },
         }) : startReviewNeeded ? openManualStartReview : startSignalRaw !== null ? openGuidedFinishReview : undefined}
       />}
 
@@ -3541,7 +3546,7 @@ function App() {
               const reference = practiceRecordings.find(item => item.id === practiceIdForLineage(attemptLineageId));
               if (reference) reviewTimestamp({ label: "Practice Hold 10 contact", suggestedRawTime: reference.hold10,
                 confidence: "High", acceptLabel: "Accept Hold 10",
-                onAccept: (time, note) => acceptTimestamp("hold10", time, "Manual", "High", { frameReviewed: true, note }),
+                onAccept: (time, note, observationIntervalSeconds) => acceptTimestamp("hold10", time, "Manual", "High", { frameReviewed: true, observationIntervalSeconds, note }),
               });
             }}
             onSave={() => { void saveCurrentSession(); }}
@@ -3597,7 +3602,7 @@ function App() {
                     suggestedRawTime: Math.max(0, roundTime(suggestedStartRawTime + startSignalOffset)),
                     confidence: startResult?.confidence ?? "Medium",
                     acceptLabel: "Accept start",
-                    onAccept: (rawTime, frameTimeNote) => { void acceptSuggestedStart(rawTime, frameTimeNote); },
+                    onAccept: (rawTime, frameTimeNote, observationIntervalSeconds) => { void acceptSuggestedStart(rawTime, frameTimeNote, observationIntervalSeconds); },
                   })}
                   disabled={videoAnalysisRunning}
                 >
@@ -3824,6 +3829,7 @@ function App() {
             frameReady={reviewFrameReady} busy={videoAnalysisRunning} acceptLabel={visibleTimestampReview.acceptLabel}
             onReturn={() => reviewTimestamp(visibleTimestampReview)} onAccept={acceptReviewedTimestamp}
             onClose={closeTimestampReview}
+            onJumpToTime={jumpTo}
           >{reviewAcceptanceRejected && <p role="alert">{timestampStatus || "That frame was not accepted. Check the event order and choose a frame within this attempt."}</p>}{visibleTimestampReview.kind === "finish" && <Suspense fallback={<p>Preparing finish close-up…</p>}><FinishReviewPanel key={`${videoUrl}:${startSignalRaw}`}
             video={videoRef.current} currentTime={currentTime} frameReady={reviewFrameReady}
             busy={videoAnalysisRunning} scanning={finishReviewRunning} progress={finishReviewProgress}
@@ -4079,8 +4085,8 @@ function App() {
               suggestedRawTime: Math.max(0, roundTime(candidate.rawTime + startSignalOffset)),
               confidence: candidate.confidence,
               acceptLabel: "Accept start",
-              onAccept: (rawTime, frameTimeNote) => acceptTimestamp("startSignal", rawTime, startSourceForCandidate(candidate), candidate.confidence, {
-                frameReviewed: true,
+              onAccept: (rawTime, frameTimeNote, observationIntervalSeconds) => acceptTimestamp("startSignal", rawTime, startSourceForCandidate(candidate), candidate.confidence, {
+                frameReviewed: true, observationIntervalSeconds,
                 detectedRawTime: candidate.rawTime,
                 offsetApplied: roundTime(rawTime - candidate.rawTime),
                 note: `${candidate.reason} Reviewed against the video frame. ${frameTimeNote ?? ""}`,
@@ -4092,8 +4098,8 @@ function App() {
               suggestedRawTime: Math.max(0, roundTime(startResult.rawTime + startSignalOffset)),
               confidence: startResult.confidence,
               acceptLabel: "Accept start",
-              onAccept: (rawTime, frameTimeNote) => acceptTimestamp("startSignal", rawTime, startSourceForResult(startResult), startResult.confidence, {
-                frameReviewed: true,
+              onAccept: (rawTime, frameTimeNote, observationIntervalSeconds) => acceptTimestamp("startSignal", rawTime, startSourceForResult(startResult), startResult.confidence, {
+                frameReviewed: true, observationIntervalSeconds,
                 detectedRawTime: startResult.rawTime!,
                 offsetApplied: roundTime(rawTime - startResult.rawTime!),
                 note: `${startResult.reason} Reviewed against the video frame. ${frameTimeNote ?? ""}`,
@@ -4198,8 +4204,8 @@ function App() {
                 suggestedRawTime: Math.max(0, roundTime(candidate.rawTime + firstMovementOffset)),
                 confidence: candidate.confidence,
                 acceptLabel: `Accept ${movementDefinitionLabel(definition).toLowerCase()}`,
-                onAccept: (rawTime, frameTimeNote) => acceptTimestamp(definition === "committed" ? "committedLaunch" : "firstMovement", rawTime, "Body motion detection", candidate.confidence, {
-                  frameReviewed: true,
+                onAccept: (rawTime, frameTimeNote, observationIntervalSeconds) => acceptTimestamp(definition === "committed" ? "committedLaunch" : "firstMovement", rawTime, "Body motion detection", candidate.confidence, {
+                  frameReviewed: true, observationIntervalSeconds,
                   detectedRawTime: candidate.rawTime,
                   offsetApplied: roundTime(rawTime - candidate.rawTime),
                   note: `${candidate.reason} Reviewed against the video frame. ${frameTimeNote ?? ""}`,
@@ -4215,8 +4221,8 @@ function App() {
               suggestedRawTime: Math.max(0, roundTime(movementResult.rawTime + firstMovementOffset)),
               confidence: movementResult.confidence,
               acceptLabel: `Accept ${movementDefinitionLabel(firstMovementDefinition).toLowerCase()}`,
-              onAccept: (rawTime, frameTimeNote) => acceptTimestamp(firstMovementDefinition === "committed" ? "committedLaunch" : "firstMovement", rawTime, "Body motion detection", movementResult.confidence, {
-                frameReviewed: true,
+              onAccept: (rawTime, frameTimeNote, observationIntervalSeconds) => acceptTimestamp(firstMovementDefinition === "committed" ? "committedLaunch" : "firstMovement", rawTime, "Body motion detection", movementResult.confidence, {
+                frameReviewed: true, observationIntervalSeconds,
                 detectedRawTime: movementResult.rawTime!,
                 offsetApplied: roundTime(rawTime - movementResult.rawTime!),
                 note: `${movementResult.reason} Reviewed against the video frame. ${frameTimeNote ?? ""}`,
@@ -4258,8 +4264,8 @@ function App() {
                     suggestedRawTime: finishResult.rawTime!,
                     confidence: finishResult.confidence,
                     acceptLabel: "Accept finish",
-                    onAccept: (rawTime, frameTimeNote) => acceptManualTimestamp("finishPad", rawTime, {
-                      frameReviewed: true,
+                    onAccept: (rawTime, frameTimeNote, observationIntervalSeconds) => acceptManualTimestamp("finishPad", rawTime, {
+                      frameReviewed: true, observationIntervalSeconds,
                       detectedRawTime: finishResult.rawTime,
                       offsetApplied: roundTime(rawTime - finishResult.rawTime!),
                       note: `${finishResult.reason} Reviewed against the video frame. ${frameTimeNote ?? ""}`,
@@ -4282,10 +4288,10 @@ function App() {
                     kind: "finish", label: "Unverified color change — locate actual finish contact",
                     suggestedRawTime: candidate.rawTime,
                     confidence: "Low", acceptLabel: "Set manual finish",
-                    onAccept: (rawTime, frameTimeNote) => acceptManualTimestamp("finishPad", rawTime, {
-                      frameReviewed: true,
+                    onAccept: (rawTime, frameTimeNote, observationIntervalSeconds) => acceptManualTimestamp("finishPad", rawTime, {
+                      frameReviewed: true, observationIntervalSeconds,
                       detectedRawTime: candidate.rawTime, offsetApplied: roundTime(rawTime - candidate.rawTime),
-                      note: `Manually reviewed from an unverified color-change cursor, not a verified light event. ${frameTimeNote ?? ""}`,
+                      note: `Manually reviewed from an unverified color-change cursor, not a verified light event. ${finishResult?.debug.partialSourceObservation?.reason ?? ""} ${frameTimeNote ?? ""}`,
                     }),
                   })}>Inspect {candidate.rawTime.toFixed(3)}s</button>
                 ))}
@@ -4325,8 +4331,8 @@ function App() {
                     suggestedRawTime: finishSuggestion.rawTime,
                     confidence: "High",
                     acceptLabel: "Accept finish",
-                    onAccept: (rawTime, frameTimeNote) => acceptTimestamp("finishPad", rawTime, "Official total time", "High", {
-                      frameReviewed: true,
+                    onAccept: (rawTime, frameTimeNote, observationIntervalSeconds) => acceptTimestamp("finishPad", rawTime, "Official total time", "High", {
+                      frameReviewed: true, observationIntervalSeconds,
                       detectedRawTime: finishSuggestion.rawTime,
                       offsetApplied: roundTime(rawTime - finishSuggestion.rawTime),
                       note: `Official-time finish reviewed against the video frame. ${frameTimeNote ?? ""}`,
@@ -4381,8 +4387,8 @@ function App() {
                                 suggestedRawTime: item.rawTime!,
                                 confidence: item.confidence,
                                 acceptLabel: "Update marker",
-                                onAccept: (rawTime, frameTimeNote) => acceptManualTimestamp(item.id, rawTime, {
-                                  frameReviewed: true,
+                                onAccept: (rawTime, frameTimeNote, observationIntervalSeconds) => acceptManualTimestamp(item.id, rawTime, {
+                                  frameReviewed: true, observationIntervalSeconds,
                                   detectedRawTime: item.rawTime ?? undefined,
                                   offsetApplied: item.rawTime === null ? undefined : roundTime(rawTime - item.rawTime),
                                   note: `Accepted time reviewed and adjusted in the video player. ${frameTimeNote ?? ""}`,
@@ -4463,8 +4469,8 @@ function App() {
                     suggestedRawTime: hold10Contact.rawTime!,
                     confidence: hold10Contact.confidence,
                     acceptLabel: "Set Hold 10",
-                    onAccept: (rawTime, frameTimeNote) => acceptTimestamp("hold10", rawTime, "Manual", "Medium", {
-                      frameReviewed: true,
+                    onAccept: (rawTime, frameTimeNote, observationIntervalSeconds) => acceptTimestamp("hold10", rawTime, "Manual", "Medium", {
+                      frameReviewed: true, observationIntervalSeconds,
                       detectedRawTime: hold10Contact.rawTime,
                       offsetApplied: roundTime(rawTime - hold10Contact.rawTime!),
                       note: `${hold10Contact.reason} Reviewed against the video frame. ${frameTimeNote ?? ""}`,
@@ -4479,8 +4485,8 @@ function App() {
                     suggestedRawTime: hold10HeightEstimate.rawTime!,
                     confidence: "Low",
                     acceptLabel: "Set Hold 10",
-                    onAccept: (rawTime, frameTimeNote) => acceptTimestamp("hold10", rawTime, "Manual", "Medium", {
-                      frameReviewed: true,
+                    onAccept: (rawTime, frameTimeNote, observationIntervalSeconds) => acceptTimestamp("hold10", rawTime, "Manual", "Medium", {
+                      frameReviewed: true, observationIntervalSeconds,
                       detectedRawTime: hold10HeightEstimate.rawTime,
                       offsetApplied: roundTime(rawTime - hold10HeightEstimate.rawTime!),
                       note: `${hold10HeightEstimate.reason} Confirmed manually against the contact frame. ${frameTimeNote ?? ""}`,

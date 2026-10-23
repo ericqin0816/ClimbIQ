@@ -12,6 +12,16 @@
 .video-review-card .timestamp-review-times > div { padding: 8px; }
 .video-review-card .timestamp-review-times span { font-size: 0.7rem; }
 .video-review-card .timestamp-review-times strong { font-size: 0.88rem; }
+.video-review-card .timestamp-review-times > .review-current-time { padding: 0; }
+.video-review-card .review-seek-toggle { display: grid; gap: 2px; width: 100%; height: 100%; min-height: 44px; padding: 8px; border: 0; border-radius: inherit; text-align: left; background: transparent; color: inherit; }
+.video-review-card .review-seek-toggle[aria-disabled="true"] { opacity: 0.55; cursor: wait; }
+.video-review-card .review-seek-toggle strong { display: flex; align-items: center; justify-content: space-between; gap: 4px; }
+.video-review-card .review-seek-toggle .review-seek-label { font-size: 0.64rem; font-weight: 600; color: #164aa8; text-decoration: underline; }
+.video-review-card .review-seek-form { display: grid; gap: 5px; margin: 0; padding: 8px; border: 1px solid #9bb5df; border-radius: 8px; background: #fff; }
+.video-review-card .review-seek-form label, .video-review-card .review-seek-form p { margin: 0; font-size: 0.75rem; }
+.video-review-card .review-seek-form > div { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px; }
+.video-review-card .review-seek-form input, .video-review-card .review-seek-form button { min-width: 0; min-height: 44px; padding: 7px; }
+.video-review-card .review-seek-form input { width: 100%; }
 .video-review-card .review-instruction, .video-review-card .review-frame-source { font-size: 0.82rem; margin: 0; }
 .video-review-card .review-time-details { font-size: 0.78rem; margin: 0; }
 .video-review-card .review-time-details summary { cursor: pointer; }

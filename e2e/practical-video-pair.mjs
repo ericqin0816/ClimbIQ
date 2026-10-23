@@ -14,6 +14,8 @@ const reportPath = path.resolve(argument("report") ?? "test-results/practical-on
 const appUrl = argument("url") ?? process.env.CLIMBIQ_E2E_URL ?? "http://127.0.0.1:5190/";
 const restoreBackupOnly = argument("restore-backup");
 const guided = process.argv.includes("--guided"), phone = process.argv.includes("--phone"), backup = process.argv.includes("--backup");
+const manualEntry = process.argv.includes("--manual-entry");
+const requireContextGate = process.argv.includes("--require-context-gate");
 const contextOptions = { viewport: phone ? { width: 320, height: 740 } : { width: 1440, height: 1050 },
   isMobile: phone, hasTouch: phone, deviceScaleFactor: 1, acceptDownloads: true };
 const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
@@ -36,9 +38,9 @@ for (const clip of manifest.clips) {
 }
 assert.notEqual(manifest.clips[0].sha256, manifest.clips[1].sha256, "Duplicate files cannot establish an actual pair workflow.");
 assert.notEqual(manifest.clips[0].id, manifest.clips[1].id);
-const report = { schemaVersion: 1, appUrl, guided, phone, backup, restoreBackupOnly: Boolean(restoreBackupOnly), startedAt: new Date().toISOString(), isGroundTruthLabel: false,
+const report = { schemaVersion: 1, appUrl, guided, phone, backup, manualEntry, requireContextGate, restoreBackupOnly: Boolean(restoreBackupOnly), startedAt: new Date().toISOString(), isGroundTruthLabel: false,
   scope: "Two-clip operational workflow; automation and manual correction reported separately. Not an independent detector validation or a same-athlete training conclusion.",
-  clips: manifest.clips.map(({ file, ...clip }) => ({ ...clip, fileName: path.basename(file) })), stages: [], pageErrors: [], policyViolations: [] };
+  clips: manifest.clips.map(({ file, ...clip }) => ({ ...clip, fileName: path.basename(file) })), stages: [], visibilityActions: [], pageErrors: [], policyViolations: [] };
 let owner, browser, page;
 const stage = async (name, action, { continueOnFailure = false } = {}) => {
   const started = performance.now();
@@ -59,7 +61,16 @@ const stage = async (name, action, { continueOnFailure = false } = {}) => {
     if (!continueOnFailure) throw error;
   }
 };
-const reveal = async locator => locator.evaluate(node => { for (let parent = node.parentElement; parent; parent = parent.parentElement) if (parent instanceof HTMLDetailsElement) parent.open = true; });
+const reveal = async locator => {
+  if (!manualEntry) return locator.evaluate(node => { for (let parent = node.parentElement; parent; parent = parent.parentElement) if (parent instanceof HTMLDetailsElement) parent.open = true; });
+  for (const details of await locator.locator("xpath=ancestor::details").all()) {
+    if (await details.getAttribute("open") === null) {
+      const summary = details.locator(":scope > summary");
+      report.visibilityActions.push((await summary.innerText()).trim());
+      await summary.click();
+    }
+  }
+};
 const library = async () => JSON.parse(await readSessionLibraryJson(expression => page.evaluate(expression)));
 const dataset = async label => {
   const button = page.getByRole("button", { name: "Download data", exact: true });
@@ -80,9 +91,28 @@ const setMarker = async (label, time) => {
 };
 const reviewMarker = async (clip, id, label, cursor) => {
   const started = performance.now();
-  await setMarker(label, cursor);
-  const row = page.locator("#timing-markers tbody tr").filter({ has: page.getByRole("cell", { name: label, exact: true }) });
-  await row.getByRole("button", { name: "Review", exact: true }).click();
+  const controlActions = [];
+  let jumpSubmission = null;
+  if (manualEntry) {
+    let opener = page.getByRole("button", { name: id === "startSignal" ? "Review timing manually" : id === "finishPad" ? "Review finish" : "Review Hold 10 contact", exact: true });
+    if (id === "finishPad" && await opener.count() === 0) opener = page.getByRole("button", { name: "Review finish / mark pad", exact: true });
+    await opener.click(); controlActions.push(`Open manual ${label}`);
+    await page.getByRole("button", { name: "Jump to time", exact: true }).click(); controlActions.push("Open precise time navigation");
+    const input = page.getByRole("textbox", { name: "Raw video time (seconds)", exact: true });
+    await input.fill(String(cursor)); controlActions.push("Enter operational cursor");
+    jumpSubmission = await input.evaluate(node => { const video = document.querySelector("#video-review video"); return {
+      typedValue: node.value, currentTime: video.currentTime, seeking: video.seeking, readyState: video.readyState,
+      acceptDisabled: document.querySelector(".timestamp-review-actions .primary").disabled,
+      jumpDisabled: document.querySelector(".review-seek-form button").disabled,
+    }; });
+    await input.press("Enter"); controlActions.push("Jump to cursor");
+    await expect.poll(() => page.locator("#video-review video").evaluate(video => video.currentTime), { timeout: 15000,
+      message: `The requested ${label} cursor ${cursor}s must actually be reached before frame acceptance.` }).toBeCloseTo(cursor, 4);
+  } else {
+    await setMarker(label, cursor);
+    const row = page.locator("#timing-markers tbody tr").filter({ has: page.getByRole("cell", { name: label, exact: true }) });
+    await row.getByRole("button", { name: "Review", exact: true }).click();
+  }
   const accept = page.locator(".timestamp-review-actions button.primary");
   await expect(accept).toBeEnabled({ timeout: 15000 });
   const frame = await page.locator(".timestamp-review").evaluate(node => ({ text: node.innerText,
@@ -91,8 +121,9 @@ const reviewMarker = async (clip, id, label, cursor) => {
   await page.locator("#video-review").screenshot({ path: path.join(outputDirectory, `${clip.id}-${id}-review.png`) });
   // Accept only the ready, natively decoded frame rendered by the real review UI.
   await accept.click();
+  if (manualEntry) controlActions.push("Accept the displayed native frame");
   await expect(page.locator(".timestamp-review")).toHaveCount(0);
-  return { markerId: id, requestedCursor: cursor, ...frame, automatedCorrectionWorkflowMs: performance.now() - started,
+  return { markerId: id, requestedCursor: cursor, ...frame, manualEntry, controlActions, jumpSubmission, automatedCorrectionWorkflowMs: performance.now() - started,
     correctionTimeScope: "Automated UI actions, native readiness and screenshot; excludes participant search or thinking time.", isGroundTruthLabel: false };
 };
 const save = async name => {
@@ -150,7 +181,7 @@ try {
   } else {
   const savedSessions = [];
   for (const clip of manifest.clips) {
-    await stage(`${clip.id}: import and real timing-only analysis`, async () => {
+    await stage(`${clip.id}: ${manualEntry ? "import without detector inference" : "import and real timing-only analysis"}`, async () => {
       const imported = performance.now(); await upload(clip);
       const importMs = performance.now() - imported;
       if (savedSessions.length) {
@@ -158,13 +189,19 @@ try {
         assert.notEqual(fresh.session.attemptLineageId, savedSessions[0].attemptLineageId);
         assert.ok(fresh.acceptedTimestamps.every(marker => marker.acceptedRawTime === null), "New recording inherited accepted analysis.");
       }
-      if (guided) {
+      if (guided && !manualEntry) {
         await page.getByRole("button", { name: "Review timing manually", exact: true }).click();
         await expect(page.locator("#timestamp-review-instruction")).toContainText("Athlete movement alone does not establish the signal");
         await expect(page.locator("#timestamp-review-instruction")).toContainText("Leave Start unset if the signal is missing");
         await page.getByRole("button", { name: "Close review", exact: true }).click();
         const afterClose = await dataset(`${clip.id}-closed-manual-start`);
         assert.equal(markers(afterClose).find(marker => marker.id === "startSignal").rawTime, null);
+      }
+      if (manualEntry) {
+        const unanalysed = await dataset(`${clip.id}-unanalysed`);
+        assert.ok(markers(unanalysed).every(marker => marker.rawTime === null));
+        return { importMs, detectorInferenceRun: false, automaticEndpointCount: null, automaticCoverageMeasured: false,
+          manualEndpointCountNeeded: 2, manualEntryAvailable: await page.getByRole("button", { name: "Review timing manually", exact: true }).isEnabled() };
       }
       await page.getByLabel("Analysis scope", { exact: true }).selectOption("timing-only");
       const run = page.getByRole("button", { name: "Find start & finish", exact: true });
@@ -199,6 +236,7 @@ try {
       const reviewed = await dataset(`${clip.id}-reviewed`);
       for (const frame of frames) assert.equal(markers(reviewed).find(marker => marker.id === frame.markerId).acceptanceMode, "frame-review");
       assert.equal(reviewed.hold10PhaseAnalysis.available, Number.isFinite(clip.review.hold10));
+      if (manualEntry) await page.getByRole("link", { name: "Save this attempt", exact: true }).click();
       const saved = await save(name); savedSessions.push(saved);
       const player = page.locator("#video-review video"), source = await player.getAttribute("src");
       await page.getByLabel("Replace video", { exact: true }).setInputFiles({ name: "undecodable.mp4", mimeType: "video/mp4", buffer: Buffer.from("Not a decodable video") });
@@ -208,6 +246,8 @@ try {
       assert.deepEqual(afterFailure.acceptedTimestamps, reviewed.acceptedTimestamps);
       assert.equal(afterFailure.session.attemptLineageId, saved.attemptLineageId);
       return { frames, savedId: saved.id, lineage: saved.attemptLineageId, unresolvedContactEntryClosedWithoutAccepting: guided && !Number.isFinite(clip.review.hold10), reviewedMarkers: markers(reviewed),
+        ...(manualEntry ? { baseReviewSaveControlActions: ["Import recording", ...frames.flatMap(frame => frame.controlActions), "Follow Save this attempt", "Save Session"],
+          actionScope: "Scripted core import/review/save controls with supplied operational cursors; additional metadata entry, evidence exports, detail-summary navigation and recovery checks are separate. Not human search time or a minimum action count." } : {}),
         phases: reviewed.hold10PhaseAnalysis, savedAfterFailureUnchanged: true };
     });
   }
@@ -220,11 +260,25 @@ try {
     return { savedCount: committed.length, unchanged: true, replayRequiresReattachment: true };
   });
   await stage("distinct real recordings attach and replay available accepted ranges", async () => {
+    await reveal(page.getByLabel("Baseline attempt", { exact: true }));
     await page.getByLabel("Baseline attempt", { exact: true }).selectOption(savedSessions[0].id);
     await page.getByLabel("New attempt", { exact: true }).selectOption(savedSessions[1].id);
     const identity = page.locator(".comparison-identity-check input");
     const requiredIdentityConfirmation = await identity.count() > 0;
     if (requiredIdentityConfirmation) await identity.check();
+    const contextConfirmation = page.locator(".comparison-context-check input");
+    let comparisonDecisionScope = { comparabilityGateAvailable: false };
+    if (requireContextGate) await expect(contextConfirmation).toHaveCount(1);
+    if (await contextConfirmation.count()) {
+      // The supplied Start cursors are departure-window workflow inputs. They
+      // cannot honestly authorize a same-physical-event training conclusion.
+      await expect(contextConfirmation).not.toBeChecked();
+      await expect(page.locator(".comparison-table")).toContainText("Recorded difference");
+      await expect(page.locator(".comparison-table .gained, .comparison-table .lost")).toHaveCount(0);
+      await expect(page.getByRole("button", { name: /^Replay changed .* phase$/ })).toHaveCount(0);
+      comparisonDecisionScope = { comparabilityGateAvailable: true, comparableEventsConfirmed: false,
+        numericDeltaIsObservational: true, gainOrChangedPhaseRecommendationSuppressed: true };
+    }
     const players = page.locator(".comparison-players video");
     await page.getByLabel("Attach baseline recording", { exact: true }).setInputFiles(manifest.clips[0].file);
     await page.getByLabel("Attach new attempt recording", { exact: true }).setInputFiles(manifest.clips[1].file);
@@ -232,6 +286,26 @@ try {
     await expect(confirmations).toHaveCount(2); await confirmations.nth(0).check(); await confirmations.nth(1).check();
     const whole = page.getByRole("button", { name: "Replay whole attempt", exact: true });
     await expect(whole).toBeEnabled({ timeout: 20000 });
+    let swappedRecordingCheck = null;
+    if (manualEntry) {
+      // These personal sessions have no stored content hash. An unrelated file
+      // covering the range must remain unconfirmed; do not claim hash rejection.
+      const originalSources = await players.evaluateAll(videos => videos.map(video => video.src));
+      const baselineInput = page.getByLabel("Attach baseline recording", { exact: true });
+      await reveal(baselineInput);
+      await baselineInput.setInputFiles(manifest.clips[1].file);
+      await expect(confirmations.nth(0)).not.toBeChecked();
+      await expect(whole).toBeDisabled();
+      await expect.poll(() => players.nth(0).getAttribute("src")).not.toBe(originalSources[0]);
+      const swappedSource = await players.nth(0).getAttribute("src");
+      swappedRecordingCheck = { knownContentHashAvailable: false, wrongFileLoadedWithoutConfirmation: true,
+        replayBlockedWithoutExplicitConfirmation: true, hashMismatchRejectionClaimed: false };
+      await baselineInput.setInputFiles(manifest.clips[0].file);
+      await expect.poll(() => players.nth(0).getAttribute("src")).not.toBe(swappedSource);
+      await expect(confirmations.nth(0)).not.toBeChecked();
+      await confirmations.nth(0).check();
+      await expect(whole).toBeEnabled({ timeout: 20000 });
+    }
     const ranges = savedSessions.map(session => Object.fromEntries(session.timestamps.filter(marker => ["startSignal", "hold10", "finishPad"].includes(marker.id)).map(marker => [marker.id, marker.rawTime])));
     await page.evaluate(starts => {
       const probe = { samples: [], events: [], actions: [], firstWaiting: null, active: true, started: performance.now() };
@@ -295,7 +369,7 @@ try {
       await page.getByRole("button", { name: "Pause comparison", exact: true }).click();
       invalidComparisonReplacementRecovered = true;
     }
-    return { requiredIdentityConfirmation, genuineFileAttachments: true, ranges, synchronizedMovingSamples: moving.length,
+    return { requiredIdentityConfirmation, comparisonDecisionScope, genuineFileAttachments: true, ranges, swappedRecordingCheck, synchronizedMovingSamples: moving.length,
       maximumElapsedSkewSeconds: Math.max(...elapsedSkews), nativeEnd, phases,
       nativeReplayEvents: replay.events,
       invalidComparisonReplacementRecovered,
@@ -332,7 +406,8 @@ try {
     await expect(page.locator(".video-meta-line")).toContainText("Ready");
     const before = await library();
     const original = savedSessions[0].timestamps.find(marker => marker.id === "finishPad").rawTime;
-    await setMarker("Finish Pad", original - .1);
+    const correctionFrame = manualEntry ? await reviewMarker(manifest.clips[0], "finishPad", "Finish Pad", original - .1) : null;
+    if (!manualEntry) await setMarker("Finish Pad", original - .1);
     assert.deepEqual(await library(), before, "Unsaved correction changed committed measurements.");
     const draft = await dataset("corrected-unsaved-draft");
     assert.equal(draft.session.attemptLineageId, savedSessions[0].attemptLineageId);
@@ -340,7 +415,9 @@ try {
     const corrected = await save(savedSessions[0].name);
     assert.equal(corrected.attemptLineageId, savedSessions[0].attemptLineageId);
     assert.equal((await library()).length, 2, "Correction created a falsely distinct training attempt.");
-    return { identityRetained: true, unsavedEditsIsolated: true, correctedFinishRawTime: original - .1, libraryCount: 2 };
+    if (manualEntry) await expect(page.locator(".recent-attempts button")).toHaveCount(2);
+    return { identityRetained: true, unsavedEditsIsolated: true, correctionFrame,
+      correctedFinishRawTime: corrected.timestamps.find(marker => marker.id === "finishPad").rawTime, libraryCount: 2 };
   }, { continueOnFailure: true });
   if (backup) await stage("real library backup reimports into an isolated browser context and survives reload", async () => {
     const committed = await library();
