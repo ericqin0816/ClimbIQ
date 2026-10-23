@@ -105,6 +105,11 @@ manifest, a blinded label worksheet, and reporting for endpoint error, false
 acceptances, automatic coverage, correction time, and voluntary return. The
 study still needs real participants and independent labels.
 
+The [three practical video reviews](docs/practical-video-review-2026-10-22.md)
+separately report new online-video workflows, automatic coverage, manual recovery,
+and actual comparison playback. They include failed and unsupported cases; their
+workflow scores are not timing-accuracy estimates.
+
 ## Run locally
 
 Use Node.js 22, matching [.nvmrc](.nvmrc).

@@ -12,6 +12,7 @@ const argument = name => process.argv.find(value => value.startsWith(`--${name}=
 const manifestPath = path.resolve(argument("manifest") ?? "test-results/practical-online/manifest.json");
 const reportPath = path.resolve(argument("report") ?? "test-results/practical-online/pair-round1.json");
 const appUrl = argument("url") ?? process.env.CLIMBIQ_E2E_URL ?? "http://127.0.0.1:5190/";
+const restoreBackupOnly = argument("restore-backup");
 const guided = process.argv.includes("--guided"), phone = process.argv.includes("--phone"), backup = process.argv.includes("--backup");
 const contextOptions = { viewport: phone ? { width: 320, height: 740 } : { width: 1440, height: 1050 },
   isMobile: phone, hasTouch: phone, deviceScaleFactor: 1, acceptDownloads: true };
@@ -35,18 +36,27 @@ for (const clip of manifest.clips) {
 }
 assert.notEqual(manifest.clips[0].sha256, manifest.clips[1].sha256, "Duplicate files cannot establish an actual pair workflow.");
 assert.notEqual(manifest.clips[0].id, manifest.clips[1].id);
-const report = { schemaVersion: 1, appUrl, guided, phone, backup, startedAt: new Date().toISOString(), isGroundTruthLabel: false,
+const report = { schemaVersion: 1, appUrl, guided, phone, backup, restoreBackupOnly: Boolean(restoreBackupOnly), startedAt: new Date().toISOString(), isGroundTruthLabel: false,
   scope: "Two-clip operational workflow; automation and manual correction reported separately. Not an independent detector validation or a same-athlete training conclusion.",
   clips: manifest.clips.map(({ file, ...clip }) => ({ ...clip, fileName: path.basename(file) })), stages: [], pageErrors: [], policyViolations: [] };
 let owner, browser, page;
-const stage = async (name, action) => {
+const stage = async (name, action, { continueOnFailure = false } = {}) => {
   const started = performance.now();
   try { const result = await action(); report.stages.push({ name, passed: true, elapsedMs: performance.now() - started, ...result }); return result; }
   catch (error) {
     const diagnostic = page ? await page.evaluate(() => ({ title: document.title, status: document.querySelector(".quick-analysis-box .status-message")?.textContent,
       uploadError: document.querySelector(".upload-error")?.textContent, review: document.querySelector(".timestamp-review")?.textContent,
-      storage: document.querySelector("[data-session-storage-state]")?.getAttribute("data-session-storage-state") })).catch(() => null) : null;
-    report.stages.push({ name, passed: false, elapsedMs: performance.now() - started, error: String(error), diagnostic }); throw error;
+      storage: document.querySelector("[data-session-storage-state]")?.getAttribute("data-session-storage-state"),
+      comparison: { status: document.querySelector(".comparison-playback-status")?.textContent,
+        alerts: Array.from(document.querySelectorAll("#comparison-replay [role=alert]")).map(node => node.textContent), hidden: document.hidden,
+        players: Array.from(document.querySelectorAll(".comparison-players video")).map(video => ({ currentTime: video.currentTime,
+          paused: video.paused, seeking: video.seeking, readyState: video.readyState, networkState: video.networkState,
+          mediaErrorCode: video.error?.code ?? null, buffered: Array.from({ length: video.buffered.length }, (_, index) => [video.buffered.start(index), video.buffered.end(index)]) })),
+        replayProbe: window.__practicalReplay ? { firstWaiting: window.__practicalReplay.firstWaiting, actions: window.__practicalReplay.actions,
+          events: window.__practicalReplay.events, lastSamples: window.__practicalReplay.samples.slice(-12) } : null } })).catch(() => null) : null;
+    report.stages.push({ name, passed: false, elapsedMs: performance.now() - started, error: String(error), diagnostic });
+    if (continueOnFailure && page) await page.screenshot({ path: path.join(outputDirectory, `stage-${report.stages.length}-failure.png`), fullPage: true }).catch(() => {});
+    if (!continueOnFailure) throw error;
   }
 };
 const reveal = async locator => locator.evaluate(node => { for (let parent = node.parentElement; parent; parent = parent.parentElement) if (parent instanceof HTMLDetailsElement) parent.open = true; });
@@ -101,6 +111,23 @@ const upload = async clip => {
   await expect(page.locator(".video-meta-line")).toContainText("Ready", { timeout: 20000 });
   await expect(page.locator(".upload-error")).toHaveCount(0);
 };
+const importBackupAndReload = async (file, originalSessions) => {
+  // Import intentionally resets only this transient decoder flag: a saved
+  // measurement cannot establish a loaded HTMLVideoElement in a fresh context.
+  const expected = originalSessions.map(session => session.videoMetadata ? { ...session,
+    videoMetadata: { ...session.videoMetadata, metadataLoaded: false } } : session);
+  assert.deepEqual(await library(), []);
+  await page.locator('input[accept="application/json,.json"]').setInputFiles(file);
+  await expect.poll(library).toEqual(expected);
+  await page.reload();
+  await expect(page.locator("[data-session-storage-state]")).toHaveAttribute("data-session-storage-state", "ready");
+  const restored = await library(); assert.deepEqual(restored, expected);
+  assert.ok(restored.every(session => !session.videoMetadata || session.videoMetadata.metadataLoaded === false));
+  await expect(page.locator("#video-review video, .comparison-players video")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Replay whole attempt", exact: true })).toBeDisabled();
+  return { restoredCount: restored.length, allSavedFieldsPreservedExceptTransientDecoderReadiness: true,
+    timestampsAndLineagesPreserved: true, importedDecoderFlagsFalse: true, noRestoredVideoAttachment: true };
+};
 
 try {
   report.build = await (await fetch(new URL("build-info.json", appUrl))).json();
@@ -113,6 +140,14 @@ try {
   await context.addInitScript(() => document.addEventListener("securitypolicyviolation", event => void window.__practicalPolicy(`${event.effectiveDirective}: ${event.blockedURI}`)));
   await page.goto(appUrl);
   await expect(page.locator("[data-session-storage-state]")).toHaveAttribute("data-session-storage-state", "ready");
+  if (restoreBackupOnly) {
+    await stage("focused actual downloaded backup reimport and reload without detector inference", async () => {
+      const file = path.resolve(restoreBackupOnly), bytes = await readFile(file), exported = JSON.parse(bytes);
+      assert.equal(exported.format, "climbiq-session-library"); assert.equal(exported.version, 1);
+      const restored = await importBackupAndReload(file, exported.sessions);
+      return { ...restored, actualDownloadedBackup: path.basename(file), sourceBackupSha256: createHash("sha256").update(bytes).digest("hex"), detectorInferenceRun: false };
+    });
+  } else {
   const savedSessions = [];
   for (const clip of manifest.clips) {
     await stage(`${clip.id}: import and real timing-only analysis`, async () => {
@@ -184,7 +219,7 @@ try {
     assert.notEqual(savedSessions[0].attemptLineageId, savedSessions[1].attemptLineageId);
     return { savedCount: committed.length, unchanged: true, replayRequiresReattachment: true };
   });
-  await stage("distinct real recordings attach, synchronize, finish and replay reviewed phases", async () => {
+  await stage("distinct real recordings attach and replay available accepted ranges", async () => {
     await page.getByLabel("Baseline attempt", { exact: true }).selectOption(savedSessions[0].id);
     await page.getByLabel("New attempt", { exact: true }).selectOption(savedSessions[1].id);
     const identity = page.locator(".comparison-identity-check input");
@@ -199,8 +234,20 @@ try {
     await expect(whole).toBeEnabled({ timeout: 20000 });
     const ranges = savedSessions.map(session => Object.fromEntries(session.timestamps.filter(marker => ["startSignal", "hold10", "finishPad"].includes(marker.id)).map(marker => [marker.id, marker.rawTime])));
     await page.evaluate(starts => {
-      const probe = { samples: [], active: true };
+      const probe = { samples: [], events: [], actions: [], firstWaiting: null, active: true, started: performance.now() };
       window.__practicalReplay = probe;
+      const started = probe.started;
+      const videos = Array.from(document.querySelectorAll(".comparison-players video"));
+      for (const [index, video] of videos.entries()) for (const type of ["waiting", "stalled", "pause", "playing", "seeking", "seeked", "error"]) {
+        video.addEventListener(type, () => {
+          if (!probe.active) return;
+          const event = { type, index, elapsedMs: performance.now() - started, currentTime: video.currentTime,
+            paused: video.paused, seeking: video.seeking, readyState: video.readyState, hidden: document.hidden,
+            buffered: Array.from({ length: video.buffered.length }, (_, range) => [video.buffered.start(range), video.buffered.end(range)]) };
+          if (probe.events.length < 200) probe.events.push(event);
+          if (type === "waiting" && probe.firstWaiting === null) probe.firstWaiting = event;
+        });
+      }
       const sample = () => {
         const videos = Array.from(document.querySelectorAll(".comparison-players video"));
         if (probe.active && probe.samples.length < 2000 && videos.length === 2) {
@@ -211,7 +258,9 @@ try {
     }, ranges.map(range => range.startSignal));
     await whole.click();
     await expect.poll(() => page.evaluate(() => window.__practicalReplay.samples.some(pair => pair.every(video => !video.paused && !video.seeking && video.elapsed > .15))), { timeout: 15000 }).toBe(true);
+    await page.evaluate(() => window.__practicalReplay.actions.push({ type: "element-screenshot-start", elapsedMs: performance.now() - window.__practicalReplay.started, width: innerWidth, height: innerHeight }));
     await page.locator("#comparison-replay").screenshot({ path: path.join(outputDirectory, "actual-pair-playing.png") });
+    await page.evaluate(() => window.__practicalReplay.actions.push({ type: "element-screenshot-end", elapsedMs: performance.now() - window.__practicalReplay.started, width: innerWidth, height: innerHeight }));
     await expect(page.locator(".comparison-playback-status")).toContainText("Finished", { timeout: 60000 });
     const replay = await page.evaluate(() => { window.__practicalReplay.active = false; return window.__practicalReplay; });
     const nativeEnd = await players.evaluateAll(videos => videos.map(video => ({ currentTime: video.currentTime, paused: video.paused, readyState: video.readyState })));
@@ -248,10 +297,34 @@ try {
     }
     return { requiredIdentityConfirmation, genuineFileAttachments: true, ranges, synchronizedMovingSamples: moving.length,
       maximumElapsedSkewSeconds: Math.max(...elapsedSkews), nativeEnd, phases,
+      nativeReplayEvents: replay.events,
       invalidComparisonReplacementRecovered,
       phaseComparisonAvailable: canReviewPhases, phaseLimitation: canReviewPhases ? null : "Hold 10 contact was not independently observable in both clips; no contact cursor was invented.",
       comparison: await page.locator(".comparison-table").innerText() };
-  });
+  }, { continueOnFailure: true });
+  if (!report.stages.at(-1).passed) await stage("separate explicit native Replay recovery after the observed initial playback failure", async () => {
+    const before = await page.locator(".comparison-playback-status").textContent();
+    const alerts = await page.locator("#comparison-replay [role=alert]").allTextContents();
+    assert.ok(alerts.some(message => message.includes("Playback buffered")), "The initial failure was not the known recoverable buffering state.");
+    const players = page.locator(".comparison-players video");
+    await expect.poll(() => players.evaluateAll(videos => videos.length === 2 && videos.every(video =>
+      !video.seeking && video.readyState >= 3 && Array.from({ length: video.buffered.length }, (_, index) =>
+        video.buffered.start(index) <= video.currentTime && video.buffered.end(index) >= Math.min(video.duration, video.currentTime + .25)).some(Boolean))), { timeout: 15000 }).toBe(true);
+    const ready = await players.evaluateAll(videos => videos.map(video => ({ currentTime: video.currentTime, readyState: video.readyState, paused: video.paused })));
+    await page.evaluate(() => window.__practicalReplay.actions.push({ type: "explicit-user-replay-recovery", elapsedMs: performance.now() - window.__practicalReplay.started }));
+    // One distinct user recovery action. The failed initial completion assertion
+    // remains a failed stage and remains part of the overall result.
+    await page.getByRole("button", { name: "Replay whole attempt", exact: true }).click();
+    await expect(page.locator(".comparison-playback-status")).toContainText("Playing");
+    await expect(page.locator(".comparison-playback-status")).toContainText("Finished", { timeout: 30000 });
+    const nativeEnd = await players.evaluateAll(videos => videos.map(video => ({ currentTime: video.currentTime, paused: video.paused })));
+    nativeEnd.forEach((video, index) => {
+      const end = savedSessions[index].timestamps.find(marker => marker.id === "finishPad").rawTime;
+      assert.equal(video.paused, true); assert.ok(Math.abs(video.currentTime - end) < .005);
+    });
+    const nativeEvents = await page.evaluate(() => { window.__practicalReplay.active = false; return window.__practicalReplay.events; });
+    return { originalCompletionStillFailed: true, userReplayActions: 1, before, alerts, ready, nativeEnd, nativeEvents };
+  }, { continueOnFailure: true });
   await stage("annotation correction retains identity and changes neither saved pair nor original measurements until save", async () => {
     await page.locator(".attempt-library-list > button").filter({ hasText: savedSessions[0].name }).click();
     await page.getByLabel("Choose video", { exact: true }).setInputFiles(manifest.clips[0].file);
@@ -268,7 +341,7 @@ try {
     assert.equal(corrected.attemptLineageId, savedSessions[0].attemptLineageId);
     assert.equal((await library()).length, 2, "Correction created a falsely distinct training attempt.");
     return { identityRetained: true, unsavedEditsIsolated: true, correctedFinishRawTime: original - .1, libraryCount: 2 };
-  });
+  }, { continueOnFailure: true });
   if (backup) await stage("real library backup reimports into an isolated browser context and survives reload", async () => {
     const committed = await library();
     const exportButton = page.getByRole("button", { name: "Export saved library", exact: true, includeHidden: true });
@@ -288,18 +361,14 @@ try {
       page.on("pageerror", error => report.pageErrors.push(error.message));
       await page.goto(appUrl);
       await expect(page.locator("[data-session-storage-state]")).toHaveAttribute("data-session-storage-state", "ready");
-      assert.deepEqual(await library(), []);
-      await page.locator('input[accept="application/json,.json"]').setInputFiles(downloadedFile);
-      await expect.poll(library).toEqual(committed);
-      await page.reload();
-      await expect(page.locator("[data-session-storage-state]")).toHaveAttribute("data-session-storage-state", "ready");
-      assert.deepEqual(await library(), committed);
-      await expect(page.locator(".comparison-players video")).toHaveCount(0);
-      return { realDownloadedBackup: true, isolatedContextReimport: true, restoredCount: committed.length, timestampsAndLineagesPreserved: true, noRestoredVideoAttachment: true };
+      const restored = await importBackupAndReload(downloadedFile, committed);
+      return { ...restored, realDownloadedBackup: true, isolatedContextReimport: true };
     } finally { page = originalPage; await restoredContext.close(); }
-  });
+  }, { continueOnFailure: true });
+  }
   assert.deepEqual(report.pageErrors, []); assert.deepEqual(report.policyViolations, []);
-  report.passed = true;
+  report.passed = report.stages.every(stage => stage.passed);
+  if (!report.passed) process.exitCode = 1;
 } catch (error) {
   report.passed = false; report.error = String(error); process.exitCode = 1;
   if (page) await page.screenshot({ path: path.join(outputDirectory, "failure.png"), fullPage: true }).catch(() => {});
