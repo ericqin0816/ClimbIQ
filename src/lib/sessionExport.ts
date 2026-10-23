@@ -96,6 +96,13 @@ export function createSessionDataset(input: SessionExportInput) {
       audioTimingWindow: startResult?.debug.audioTimingWindow ?? null,
       associationTime: startResult?.debug.laneAssociationTime ?? null, entries: startResult?.debug.laneEvidence ?? [],
       activeLightLaneId: zones.startLight ? startLaneId(zones.startLight) : null },
+    finishEvidenceAudit: { scope: "current-analysis-only", isGroundTruthLabel: false, isEventAccuracyBound: false,
+      available: finishResult !== null, detected: finishResult?.detected ?? null, proposedRawTime: finishResult?.rawTime ?? null,
+      confidence: finishResult?.confidence ?? null, reason: finishResult?.reason ?? null,
+      detectionMethod: finishResult?.debug.detectionMethod ?? null,
+      evidenceKind: finishResult?.debug.finishEvidenceKind ?? null,
+      sourceFrameSamplingFailed: finishResult === null ? null : finishResult.debug.sourceFrameSamplingFailed ?? false,
+      partialSourceObservation: finishResult?.debug.partialSourceObservation ?? null },
     biomechanics: input.biomechanics,
     athleteNotes: session.notes,
   };

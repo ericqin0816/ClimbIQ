@@ -68,6 +68,7 @@ export function createSessionReport(dataset: SessionDataset, context: ReportCont
     `\n## Detection Notes\n` +
     `- Start Signal: ${marker("startSignal")?.note || context.startReason || "Not set"}\n` +
     `- First Movement: ${marker("firstMovement")?.note || context.movementReason || "Not set"}\n` +
+    `- Finish: ${marker("finishPad")?.note || dataset.finishEvidenceAudit.reason || "Not set"}\n` +
     `- Calibration: ${calibrationNote}\n` +
     `- Warnings: ${dataset.detectionWarnings.join("; ") || "None"}\n\n` +
     `## Athlete Notes\nWrite observations here.\n\n` +
@@ -76,5 +77,6 @@ export function createSessionReport(dataset: SessionDataset, context: ReportCont
       appVersion: dataset.appVersion, exportBuild: dataset.exportBuild, analysisBuild: dataset.analysisBuild, exportTimestamp: dataset.exportTimestamp,
       session: dataset.session, video: dataset.video, timestamps: dataset.acceptedTimestamps, splits: dataset.splitCalculations,
       zones: dataset.zones, calibration: dataset.calibration, settings: dataset.settings, biomechanics: dataset.biomechanics, warnings: dataset.detectionWarnings,
+      startLaneEvidenceAudit: dataset.startLaneEvidenceAudit, finishEvidenceAudit: dataset.finishEvidenceAudit,
     }, null, 2) + "\n```\n";
 }

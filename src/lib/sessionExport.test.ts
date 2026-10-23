@@ -21,7 +21,7 @@ describe("portable dataset and report boundary", () => {
     const source = input();
     const before = JSON.stringify(source);
     const dataset = createSessionDataset(source);
-    expect(Object.keys(dataset)).toEqual(["appVersion", "exportBuild", "analysisBuild", "exportTimestamp", "session", "video", "zones", "calibration", "settings", "acceptedTimestamps", "candidates", "splitCalculations", "sourceFrameTimingAudit", "hold10PhaseAnalysis", "hold10SecondPassEvidence", "detectionWarnings", "automationAudit", "startLaneEvidenceAudit", "biomechanics", "athleteNotes"]);
+    expect(Object.keys(dataset)).toEqual(["appVersion", "exportBuild", "analysisBuild", "exportTimestamp", "session", "video", "zones", "calibration", "settings", "acceptedTimestamps", "candidates", "splitCalculations", "sourceFrameTimingAudit", "hold10PhaseAnalysis", "hold10SecondPassEvidence", "detectionWarnings", "automationAudit", "startLaneEvidenceAudit", "finishEvidenceAudit", "biomechanics", "athleteNotes"]);
     expect(dataset).toMatchObject({ appVersion: "0.30.0", exportBuild: source.exportBuild, analysisBuild: null,
       exportTimestamp: source.exportedAt, video: { officialTotalTime: 5.6 },
       hold10PhaseAnalysis: { available: true, startToHold10Seconds: 2.8, hold10ToFinishSeconds: 2.8, bottomPhaseShare: .5, topPhaseShare: .5 },
@@ -78,5 +78,32 @@ describe("portable dataset and report boundary", () => {
     expect(dataset.candidates.startSignal).toMatchObject([{ accepted: true, rejected: false, candidateRawTime: 1 },
       { accepted: false, rejected: true, candidateRawTime: 2 }]);
     expect(dataset.detectionWarnings).toEqual(["Check light visibility", "Start Light Zone may be large for light detection."]);
+  });
+
+  it("keeps an incomplete Finish scan separate from accepted markers and exact event accuracy", () => {
+    const source = input();
+    const partial = { requestedTime: 13.27, observedThroughTime: 13.233333, lastFrameRawTime: 13.2,
+      lastFrameDurationSeconds: .033333, containerDuration: 13.328254,
+      reason: "Container tail has no verified video frame", isEventAccuracyBound: false as const };
+    source.finishResult = { detected: true, rawTime: 8.2, confidence: "Low", reason: "Review incomplete scan", threshold: 1,
+      debug: { zoneExists: true, framesSampled: 40, maxColorDistance: 20, threshold: 1, detectedCrossings: [], samples: [],
+        detectionMethod: "top reach", finishEvidenceKind: "physical-top-reach", partialSourceObservation: partial } };
+    const dataset = createSessionDataset(source);
+    expect(dataset.finishEvidenceAudit).toMatchObject({ scope: "current-analysis-only", isGroundTruthLabel: false, isEventAccuracyBound: false,
+      confidence: "Low", proposedRawTime: 8.2, evidenceKind: "physical-top-reach", partialSourceObservation: partial });
+    // Exporting diagnostic Finish evidence does not replace a reviewed marker.
+    expect(dataset.acceptedTimestamps.find(marker => marker.markerId === "finishPad")?.acceptedRawTime).toBe(6.6);
+    const report = createSessionReport(dataset, { fallbackDate: "unused" });
+    const embedded = JSON.parse(report.split("```json\n")[1].split("\n```\n")[0]);
+    expect(embedded.finishEvidenceAudit.partialSourceObservation).toEqual(partial);
+    // On reload, saved marker notes preserve the source limitation even though
+    // transient detector state is intentionally absent.
+    source.session.timestamps.find(marker => marker.id === "finishPad")!.note = `Frame reviewed. ${partial.reason}`;
+    const restored = datasetToSavedSession(createSessionDataset(source));
+    source.session = restored;
+    source.finishResult = null;
+    const afterReload = createSessionDataset(source);
+    expect(afterReload.finishEvidenceAudit).toMatchObject({ available: false, detected: null, sourceFrameSamplingFailed: null, confidence: null });
+    expect(createSessionReport(afterReload, { fallbackDate: "unused" })).toContain(`- Finish: Frame reviewed. ${partial.reason}`);
   });
 });
