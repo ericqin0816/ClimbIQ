@@ -66,6 +66,14 @@ test("opposing authored lanes offer frame-safe climber setup with cancellation a
   await expect(page.locator(".zone-frame")).toBeVisible();
   expect(await page.locator("#video-review video").getAttribute("src")).toBe(source);
   expect((await dataset(page)).acceptedTimestamps).toEqual(before.acceptedTimestamps);
+
+  // A deliberate manual observation can complete timing while automatic lane
+  // identity remains unresolved. This operational frame is not event truth.
+  await page.locator('[aria-label="Your next step"]').getByRole("button", { name: "Review finish", exact: true }).click();
+  await expect(page.locator(".timestamp-review-actions .primary")).toBeEnabled();
+  await page.locator(".timestamp-review-actions .primary").click();
+  await expect(page.locator('[aria-label="Your next step"]').getByRole("link", { name: "Save this attempt", exact: true })).toBeVisible();
+  await expect(page.locator('[aria-label="Your next step"]')).not.toContainText("Two lane regions need a choice");
 });
 
 test("keyboard region rejects incomplete/bounded/empty input and valid Apply clears athlete-specific annotations", async ({ page }) => {

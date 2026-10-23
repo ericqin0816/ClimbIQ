@@ -596,7 +596,10 @@ function App() {
       ? "Calibrated light transition"
       : "Generic color-distance detection";
   const videoTaskRunning = calibrationSampling || frameTestRunning || startRunning || movementRunning || movementPreviewRunning || finishRunning || biomechanicsRunning || autoAnalysisRunning || secondPassRunning || finishReviewRunning || climberSetupRunning;
-  const opposingFinishLanes = finishResult?.reason === FINISH_LANE_SELECTION_REQUIRED;
+  const opposingFinishLanes = acceptedFinishRawTime === null && finishResult?.reason === FINISH_LANE_SELECTION_REQUIRED;
+  const nextStepStatus = acceptedFinishRawTime !== null && finishResult?.reason === FINISH_LANE_SELECTION_REQUIRED
+    ? "Your Finish time is set. Check the timing, then save this attempt."
+    : climberSetupRunning || opposingFinishLanes ? climberSetupStatus || autoAnalysisStatus : autoAnalysisStatus;
   const videoReplacementBlocked = videoTaskRunning || librarySaving || importPending;
   const videoAnalysisRunning = videoReplacementBlocked || videoPreparationPending || pendingVideoAttachment !== null;
   const visibleTimestampReview = timestampReview && (!timestampReview.secondPassBasis || timestampReview.secondPassBasis === activeHold10SecondPass) ? timestampReview : null;
@@ -3645,7 +3648,7 @@ function App() {
 
       {hasSelectedVideo && <NextStepCard
         stage={!hasLoadedVideo ? "loading" : climberSetupRunning ? "preparing-climber" : videoTaskRunning ? "analyzing" : suggestedStartRawTime !== null || startReviewNeeded ? "review-start" : opposingFinishLanes ? "select-climber" : calculatedClimbTime !== null ? "results" : startSignalRaw !== null ? "review-finish" : "ready"}
-        status={(climberSetupRunning || opposingFinishLanes ? climberSetupStatus || autoAnalysisStatus : autoAnalysisStatus) || undefined}
+        status={nextStepStatus || undefined}
         saved={openAttemptSaved} canCompare={canCompareSaved}
         onAnalyze={() => { void runAutomaticAnalysis(); }}
         onCancel={climberSetupRunning ? cancelClimberSetup : autoAnalysisRunning ? () => analysisRuns.automatic?.abort() : undefined}
