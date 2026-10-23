@@ -1106,7 +1106,10 @@ function App() {
     cancelPendingReviewSeek();
     return analysisRuns.run({ video, work, completeMessage, taskName,
       isCurrent: () => video === videoRef.current && video.src === previousObjectUrl.current,
-      onStatus: setVideoRestoreStatus, onTime: setCurrentTime,
+      onStatus: setVideoRestoreStatus, onTime: time => {
+        setCurrentTime(time);
+        setReviewFrameReady(video.paused && !video.seeking);
+      },
     });
   }
 
@@ -3752,11 +3755,14 @@ function App() {
               onLoadedData={handleMetadataLoaded}
               onCanPlay={handleMetadataLoaded}
               onError={handleVideoLoadError}
-              onTimeUpdate={(event) => setCurrentTime(event.currentTarget.currentTime)}
+              onTimeUpdate={(event) => { if (!autoAnalysisRunning) setCurrentTime(event.currentTarget.currentTime); }}
               onSeeking={() => { if (timestampReview) setReviewFrameReady(false); }}
               onPlay={() => { if (timestampReview) setReviewFrameReady(false); }}
-              onPause={(event) => { setCurrentTime(event.currentTarget.currentTime); setReviewFrameReady(!event.currentTarget.seeking); }}
+              onPause={(event) => { if (!autoAnalysisRunning) { setCurrentTime(event.currentTarget.currentTime); setReviewFrameReady(!event.currentTarget.seeking); } }}
               onSeeked={(event) => {
+                // Automatic sampling owns this cursor; publish its restored
+                // position once through runWithVideoRestore, not every crop.
+                if (autoAnalysisRunning) return;
                 setCurrentTime(event.currentTarget.currentTime);
                 setReviewFrameReady(event.currentTarget.paused);
               }}
