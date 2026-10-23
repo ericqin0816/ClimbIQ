@@ -246,48 +246,85 @@ test("recovered waiting notices preserve replay and current unready data require
   test.skip(process.platform === "win32" && testInfo.project.name.startsWith("webkit"), "Media readiness regression runs on macOS WebKit CI.");
   await prepareReplay(page);
   const replay = page.getByRole("button", { name: "Replay bottom phase", exact: true });
-  await replay.click();
-  await expect(page.getByRole("button", { name: "Pause comparison", exact: true })).toBeEnabled();
   await page.evaluate(() => {
     const videos = Array.from(document.querySelectorAll<HTMLVideoElement>(".comparison-players video"));
-    if (videos.length !== 2 || videos.some(video => video.paused || video.readyState < 3)) {
-      throw new Error("Expected two native players with future data.");
-    }
-    const before = videos.map(video => video.currentTime);
-    const probe = { dispatchedReady: videos[0].readyState, continued: false };
+    const replayButton = Array.from(document.querySelectorAll<HTMLButtonElement>("#comparison-replay button"))
+      .find(button => button.textContent === "Replay bottom phase");
+    if (!replayButton) throw new Error("Bottom phase replay is unavailable.");
+    const probe = { dispatchedReady: 0, continued: false, ownerPlaying: false,
+      firstPlayingTimes: null as number[] | null, dispatchTimes: null as number[] | null, error: "" };
     (window as any).__recoveredWaitingProbe = probe;
-    // Model a queued notification after readiness has recovered, as observed
-    // in the preserved native phone trace. Media clocks and decoding stay real.
-    videos[0].dispatchEvent(new Event("waiting"));
-    const started = performance.now();
-    const observe = () => {
-      probe.continued ||= videos.every((video, index) => !video.paused && video.currentTime > before[index] + .08);
-      if (!probe.continued && performance.now() - started < 2000) requestAnimationFrame(observe);
-    };
-    requestAnimationFrame(observe);
+    replayButton.addEventListener("click", () => {
+      const started = performance.now();
+      const observe = () => {
+        const ownerPlaying = /· Playing$/.test(document.querySelector(".comparison-playback-status")?.textContent?.trim() ?? "");
+        if (!probe.dispatchTimes && ownerPlaying && videos.length === 2 &&
+            videos.every(video => !video.paused && !video.seeking && video.readyState >= 3)) {
+          probe.firstPlayingTimes ??= videos.map(video => video.currentTime);
+          if (videos.every((video, index) => video.currentTime > probe.firstPlayingTimes![index] + .02)) {
+            probe.dispatchTimes = videos.map(video => video.currentTime);
+            probe.dispatchedReady = videos[0].readyState;
+            probe.ownerPlaying = true;
+            // Model a queued notice after readiness recovered, as observed in
+            // the native phone trace. Media clocks and decoding stay real.
+            videos[0].dispatchEvent(new Event("waiting"));
+          }
+        }
+        if (probe.dispatchTimes) probe.continued ||= videos.every((video, index) =>
+          !video.paused && video.currentTime > probe.dispatchTimes![index] + .08);
+        if (!probe.continued && performance.now() - started < 5000) requestAnimationFrame(observe);
+        else if (!probe.continued) probe.error = "Ready replay did not continue after the recovered waiting notice.";
+      };
+      requestAnimationFrame(observe);
+    }, { once: true });
   });
+  await replay.click();
   await expect.poll(() => page.evaluate(() => {
     const probe = (window as any).__recoveredWaitingProbe;
-    return { futureData: probe.dispatchedReady >= 3, continued: probe.continued };
-  })).toEqual({ futureData: true, continued: true });
+    return { futureData: probe.dispatchedReady >= 3, continued: probe.continued, ownerPlaying: probe.ownerPlaying, error: probe.error };
+  })).toEqual({ futureData: true, continued: true, ownerPlaying: true, error: "" });
   await expect(page.locator("#comparison-replay [role=alert]")).toHaveCount(0);
 
-  await replay.click();
-  await expect(page.getByRole("button", { name: "Pause comparison", exact: true })).toBeEnabled();
   await page.evaluate(() => {
     const videos = Array.from(document.querySelectorAll<HTMLVideoElement>(".comparison-players video"));
-    if (videos.some(video => video.paused)) throw new Error("Expected active native playback before the controlled readiness case.");
-    const video = videos[0], original = Object.getOwnPropertyDescriptor(video, "readyState");
-    try {
-      // Controlled readiness is a policy regression, not proof of a real
-      // network stall. Restore it before the explicit user recovery action.
-      Object.defineProperty(video, "readyState", { configurable: true, get: () => 2 });
-      video.dispatchEvent(new Event("waiting"));
-    } finally {
-      if (original) Object.defineProperty(video, "readyState", original);
-      else delete (video as any).readyState;
-    }
+    const replayButton = Array.from(document.querySelectorAll<HTMLButtonElement>("#comparison-replay button"))
+      .find(button => button.textContent === "Replay bottom phase");
+    if (!replayButton) throw new Error("Bottom phase replay is unavailable.");
+    const probe = { dispatched: false, progressed: false, ownerPlaying: false, firstPlayingTimes: null as number[] | null, error: "" };
+    (window as any).__controlledWaitingProbe = probe;
+    // Prearm before the UI click. A remote assertion can arrive while native
+    // seeking is still pending, or after this short phase has already ended.
+    replayButton.addEventListener("click", () => {
+      const started = performance.now();
+      const observe = () => {
+        const ownerPlaying = /· Playing$/.test(document.querySelector(".comparison-playback-status")?.textContent?.trim() ?? "");
+        if (ownerPlaying && videos.length === 2 && videos.every(video => !video.paused && !video.seeking && video.readyState >= 3)) {
+          probe.firstPlayingTimes ??= videos.map(video => video.currentTime);
+          probe.progressed ||= videos.every((video, index) => video.currentTime > probe.firstPlayingTimes![index] + .02);
+          if (probe.progressed) {
+            const video = videos[0], original = Object.getOwnPropertyDescriptor(video, "readyState");
+            try {
+              // Controlled readiness is a policy regression, not proof of a
+              // real network stall. Restore it before explicit user recovery.
+              Object.defineProperty(video, "readyState", { configurable: true, get: () => 2 });
+              video.dispatchEvent(new Event("waiting"));
+              probe.dispatched = true;
+              probe.ownerPlaying = true;
+            } finally {
+              if (original) Object.defineProperty(video, "readyState", original);
+              else delete (video as any).readyState;
+            }
+            return;
+          }
+        }
+        if (performance.now() - started < 5000) requestAnimationFrame(observe);
+        else probe.error = "Native replay did not advance both ready players before the controlled waiting check.";
+      };
+      requestAnimationFrame(observe);
+    }, { once: true });
   });
+  await replay.click();
+  await expect.poll(() => page.evaluate(() => (window as any).__controlledWaitingProbe)).toMatchObject({ dispatched: true, progressed: true, ownerPlaying: true, error: "" });
   await expect.poll(() => page.locator(".comparison-players video").evaluateAll(videos => videos.every(video => (video as HTMLVideoElement).paused))).toBe(true);
   await expect(page.locator("#comparison-replay [role=alert]")).toContainText("Playback buffered");
   await expect.poll(() => page.locator(".comparison-players video").evaluateAll(videos => videos.every(video => (video as HTMLVideoElement).readyState >= 3))).toBe(true);

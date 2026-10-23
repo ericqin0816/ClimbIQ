@@ -331,6 +331,20 @@ recovered-notification branch evidence. The original failure remains retained.
 This identifies the reproduced practice-recording race; it does not establish
 the cause of every older unexplained playback pause.
 
+The first hosted run ([39938844173](https://github.com/ericqin0816/ClimbIQ/actions/runs/39938844173))
+passed verification and Chromium; WebKit passed 39/40. Its sole failure was setup
+of the new controlled-readiness case: the test treated an enabled Pause button
+as native playback readiness, but that button is also enabled while preparing.
+Both original WebKit endpoint tests passed. The test now waits for actual native
+playback before dispatching the controlled event in the same page operation;
+the runtime guard and endpoint assertions are unchanged.
+
+A read-only deployed check at that point returned the then-current main SHA
+`8bebebd` but `workingTreeDirty: true`; the local published build of the same SHA
+reported false. The deployed difference's cause/files remain uninspected. Its
+flag was not suppressed, and that served artifact is excluded from frozen-study
+qualification. This is separate from the clean local builds used above.
+
 ## Grades and delivery scope
 
 Independent agent assessments after the replay fix:
