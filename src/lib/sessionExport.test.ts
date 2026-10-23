@@ -70,7 +70,11 @@ describe("portable dataset and report boundary", () => {
       debug: { zoneExists: true, framesSampled: 2, maxColorDistance: 20, threshold: 10, detectedCrossings: [], samples: [], failureReason: "Check light visibility" },
       candidates: [{ rawTime: 1, confidence: "High", reason: "Chosen transition", score: 1, kind: "light" },
         { rawTime: 2, confidence: "Low", reason: "Other transition", score: .1, kind: "light" }] };
+    source.startResult.debug.audioTimingWindow = { startRawTime: .99, endRawTime: 1.01,
+      hopSeconds: .01, isEventAccuracyBound: false };
     const dataset = createSessionDataset(source);
+    expect(dataset.startLaneEvidenceAudit).toMatchObject({ scope: "current-analysis-only", isGroundTruthLabel: false,
+      audioTimingWindow: source.startResult.debug.audioTimingWindow });
     expect(dataset.candidates.startSignal).toMatchObject([{ accepted: true, rejected: false, candidateRawTime: 1 },
       { accepted: false, rejected: true, candidateRawTime: 2 }]);
     expect(dataset.detectionWarnings).toEqual(["Check light visibility", "Start Light Zone may be large for light detection."]);

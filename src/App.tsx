@@ -1839,6 +1839,7 @@ function App() {
         laneAssociationTime: laneAssociation.associationTime,
         audioSearchHintTime: audioStart.searchHintTime,
         audioConfidence: audioStart.confidence,
+        audioTimingWindow: audioStart.timingWindow,
         detailRecovery: automaticLight.detailRecovery,
         selectedCandidateTime: decision.rawTime,
         selectedCandidateReason: decision.reason,
@@ -5386,6 +5387,7 @@ function buildAudioStartResult(audio: AudioStartResult): StartSignalDetectionRes
     debug: {
       zoneExists: false,
       detectionMethod: "Pitch-coded start audio detection",
+      audioTimingWindow: audio.timingWindow,
       framesSampled: audio.segments.length,
       maxColorDistance: 0,
       threshold: 0,

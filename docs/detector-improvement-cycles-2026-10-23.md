@@ -57,8 +57,8 @@ Scores remain separate:
 | 6 | Sampling UI overhead and reserved-source check | Native seeks unchanged; React commits reduced; Start/Finish cancellation restoration passed |
 | 7 | Start windows beginning in a previous blue state | Later valid green departure recovered in controls; existing real ROI results identical |
 | 8 | Exposure compensation experiment | Rejected after real-pixel counterexample; safeguards retained |
-| 9 | Contact timing provenance | Actual saved pose replay and source-time correction under review |
-| 10 | Acoustic onset bias and reserved-source evaluation | Generated-tone investigation; fresh whole group still reserved |
+| 9 | Contact timing provenance | Independently reviewed source-time correction; actual replay decisions preserved |
+| 10 | Acoustic onset bias and reserved-source evaluation | Point refinement rejected after counterexamples; honest analysis-window metadata retained; final source check pending |
 
 ## Cycle 1: audio transform reuse
 
@@ -156,6 +156,12 @@ standalone latency claim. Start and Finish cancellation both restored 2.500s,
 retained accepted markers, blocked replacement and settled without stale writes.
 The clean cumulative Cycle 7 check passed 996 tests, types, build and server checks.
 
+The cumulative Cycle 5 production pass returned 4.620 / 14.140 / 13.004 / 13.364
+seconds, median 13.184 versus baseline 13.139 seconds (provisional speed grade
+4.975/10). Coverage remained two of eight. This replaces the earlier favorable
+single-pass speed estimate as the latest observation; repeated final comparisons
+are needed before claiming an app-wide latency gain.
+
 The previously reserved H06 whole athlete/source group was released. Both
 baseline and cumulative Cycle 5 accepted Start at 2.070s, 15–30 ms early against
 the two-agent recorded-acoustic bracket 2.085–2.100s. This is not an electronic
@@ -191,6 +197,69 @@ confidence. This was a coarse-helper regression, not demonstrated final false
 acceptance. An initial fixture-coordinate error was corrected and retained in
 the local evidence. Independent review supported rejecting the variant; no
 runtime change or performance/accuracy gain is credited for this cycle.
+
+## Cycle 9: contact calculations use the clock of their pixels
+
+Contact deduplication already recognized native frames, but dwell, speed and
+onset still used later seek cursors. A private working copy now uses sanitized
+source PTS consistently, including attempt boundaries. Saved input and original
+cursor provenance remain intact. Missing or invalid PTS keeps the legacy fallback.
+
+Sixty-three focused tests and types passed; an independent 105-test cross-check
+also passed. On one actual cached phone attempt with 62 pose samples, replaying
+20 hold-target queries preserved every detection/confidence decision. An existing
+Hold 14 estimate moved 18.797→18.791s. These are 20 queries on one attempt, not 20
+independent attempts. An initial assumption of a 20ms Hold 10 correction was
+retracted after inspecting that exact sample: its PTS and cursor are both 15.000s.
+No newly detected contact or independently verified contact accuracy is claimed.
+
+## Cycle 10: reject an unsupported audio point estimate
+
+Ninety-six generated exact-protocol waveforms exposed a 5–17ms early leading
+window timestamp, averaging 12.917ms before known PCM insertion. A proposed
+local-energy refiner reduced this constructed set's mean absolute error to
+7.563ms and abstained on slow attacks. Independent agents then found two
+counterexamples: an unrelated leading pulse could receive a false resolved-onset
+label, and a quiet same-pitch lead followed by a loud step could move a previously
+1ms-early clock to 10ms late. Fourteen of 160 additional quiet-lead controls
+worsened insertion error by over 3ms. These are PCM insertion controls, not
+electronic timing measurements.
+
+The timing refinement was rejected rather than tuned to those cases. Original
+clocks, pitch qualification, confidence, sequence and fallback behavior remain.
+High-protocol diagnostics now expose their actual analysis-window support
+(20ms at 8kHz), hop (10ms) and `isEventAccuracyBound: false`. The rejected helper
+is absent from the runtime. The prototype's favorable error reduction is not a
+shipped improvement. Current-analysis exports retain the window provenance;
+the existing color-only fused observation-interval contract stays conservative.
+
+## Additional restoration review
+
+An agent found that readiness was published just before resuming prior playback.
+It now publishes after the playback request settles, including denial, guarded
+against source replacement. Tests cover playing-origin success, work failure and
+play denial. The actual H06 failure path also restored a paused, non-seeking
+0.000s cursor and matching display. The underlying tail sampling failure remains.
+
+## Public source provenance
+
+H06 comes from [NEW JR AMERICAN RECORD 6.22 - NOAH BRATSCHI](https://www.youtube.com/watch?v=KxhPIrlUJfs)
+(MD Climbing, 2019-07-31). The local file SHA256 is
+`ae2260a80ba4de363bdb53cfedbf36b14ae778ced2427e96906bc63431292f94`.
+The frozen pre-prediction reference SHA256 is
+`c669867550600165cd3bbb97d782c8a0198ed14a39d624051fdfd386efe699ec`.
+
+H11 comes from [IFSC Europe Continental Cup Speed - Innsbruck 2022](https://www.youtube.com/watch?v=ob8BTtV1uY8)
+(Austria Climbing, 2022-06-21), a separate event/athlete group. Its continuous
+11-second live-ascent derivative excludes later replay and interview. SHA256 is
+`41b1a38a80570b893b9dfcabee9566217b18536f4384de20890ef5071c5e42cf`;
+the frozen two-agent reference SHA256 is
+`261b65f83bfef556c9708ce4c3de56a881fe563bda343fea2a250a5d873d53b0`.
+Recorded-cue brackets combine conservatively to 2.65–2.80s, apparent left-lane pad
+contact to 8.08–8.24s. Source speed, acoustic propagation, source A/V alignment and
+electronic trigger timing are uncalibrated. These are rough source observations,
+not human independent validation or precise electronic labels. Media stays out
+of Git. H11 remains reserved until the final candidate is frozen.
 
 Local detailed evidence currently lives under ignored `test-results/detector-ten/`,
 `test-results/detection-cycles/`, and `test-results/finish-cycles/`.

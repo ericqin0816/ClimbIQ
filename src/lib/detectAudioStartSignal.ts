@@ -53,9 +53,20 @@ export interface AudioStartResult {
   searchHintTime?: number;
   confidence: Confidence;
   reason: string;
+  timingWindow?: AudioTimingWindow;
   matchedPattern?: "two-same-then-different" | "regular-countdown" | "single-prominent-beep";
   sequence?: AudioToneSegment[];
   segments: AudioToneSegment[];
+}
+
+/** Nominal feature window at the reported leading cursor. Qualification can
+ * use later frames; this is neither its full support nor an event-error bound.
+ */
+export interface AudioTimingWindow {
+  startRawTime: number;
+  endRawTime: number;
+  hopSeconds: number;
+  isEventAccuracyBound: false;
 }
 
 interface DetectAudioStartOptions {
@@ -219,6 +230,17 @@ export function analyzeBeepSequence(
         ? roundMetric(finalBeep.startTime) : undefined,
       confidence,
       reason: `Detected ${pitchCoded.sequence.length - 1} matching-pitch countdown beeps followed by the different-pitch start beep.${confidence === "High" ? "" : " The pitch pattern is approximate or weakly supported, so audio alone requires review."}`,
+      // Spectral frames contain future samples, and segment cursors can be
+      // backtracked. Keep the original clock and expose its nominal feature
+      // window, without claiming full qualification support or sound arrival.
+      ...(confidence === "High" ? {
+        timingWindow: {
+          startRawTime: finalBeep.startTime,
+          endRawTime: finalBeep.startTime + frameSize / sampleRate,
+          hopSeconds: hopSize / sampleRate,
+          isEventAccuracyBound: false as const,
+        },
+      } : {}),
       matchedPattern: "two-same-then-different",
       sequence: pitchCoded.sequence,
       segments,
