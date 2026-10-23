@@ -78,16 +78,35 @@ export function fuseStartEvidence(evidence: StartEvidence[]): FusedStartDecision
   );
   // High audio is reserved for the exact same/same/different start protocol.
   // It cannot be outvoted by an unrelated Medium color + Low passerby-motion pair.
-  const best = exactAudioCluster ?? ranked[0].cluster;
+  const originalBest = exactAudioCluster ?? ranked[0].cluster;
+  let best = originalBest;
+  const originalHasEligibleExactAudio = originalBest.some(item =>
+    item.kind === "audio" && item.confidence === "High" && item.automaticVoteAllowed !== false);
+  if (!originalHasEligibleExactAudio && originalBest.some(item => item.automaticVoteAllowed === false)) {
+    // A rejected camera cut/overlay is still diagnostic evidence, but its
+    // original confidence must not make it the preferred review event. Retain
+    // the original ranking below for conservative conflict/acceptance checks.
+    const reviewRanked = ranked.map(entry => ({ ...entry,
+      eligible: entry.cluster.filter(item => item.automaticVoteAllowed !== false),
+    })).filter(entry => entry.eligible.some(item => item.kind !== "motion"))
+      .sort((left, right) => clusterScore(right.eligible) - clusterScore(left.eligible));
+    const eligibleExactAudio = reviewRanked.find(entry => entry.eligible.some(item =>
+      item.kind === "audio" && item.confidence === "High"));
+    best = eligibleExactAudio?.cluster ?? reviewRanked[0]?.cluster ?? originalBest;
+  }
+  const reviewEventChanged = best !== originalBest;
   const bestRanked = ranked.find((entry) => entry.cluster === best) ?? ranked[0];
   // Exact protocol audio already defines this clock. Do not change spatial
   // lane association by imposing a visual-clock vote that is not being used.
   const audioDefinesClock = best.some(item=>item.kind==="audio"&&item.confidence==="High"&&item.automaticVoteAllowed!==false);
   const visualTiming = audioDefinesClock ? {outliers:[] as StartEvidence[],ambiguous:false}
     : visualConfirmationConsensus(best.filter(item=>item.automaticVoteAllowed!==false));
-  const supported = best.filter(item=>!visualTiming.outliers.includes(item));
+  const visualSupported = best.filter(item=>!visualTiming.outliers.includes(item));
+  const eligible = visualSupported.filter(item => item.automaticVoteAllowed !== false);
+  // Low motion alone cannot replace an all-artifact light/audio review cursor.
+  // With an eligible clock cue, excluded patches belong in rejected diagnostics.
+  const supported = eligible.some(item => item.kind !== "motion") ? eligible : visualSupported;
   const sources = new Set(supported.map((item) => item.kind));
-  const eligible = supported.filter(item => item.automaticVoteAllowed !== false);
   const strongColor = eligible.some((item) => item.kind === "color" && item.confidence !== "Low");
   const strongAudio = eligible.some((item) => item.kind === "audio" && item.confidence !== "Low");
   const strongMotion = eligible.some((item) => item.kind === "motion" && item.confidence !== "Low");
@@ -122,6 +141,12 @@ export function fuseStartEvidence(evidence: StartEvidence[]): FusedStartDecision
   } else {
     confidence = "Low";
   }
+  if (reviewEventChanged) {
+    // Better review navigation cannot authorize a different event. In
+    // particular, dropping an artifact must never bypass the original veto.
+    autoAccept = false;
+    if (confidence === "High") confidence = "Medium";
+  }
 
   // Artifacts remain useful review cursors, but may not shift an accepted
   // clock merely because they landed in the same cluster as a valid cue.
@@ -134,7 +159,7 @@ export function fuseStartEvidence(evidence: StartEvidence[]): FusedStartDecision
   const premovementNote = rejectedEvidence.some((item) => item.kind === "motion" && item.rawTime < rawTime - AGREEMENT_SECONDS)
     ? " Earlier body motion was treated as setup rocking rather than the start."
     : "";
-  const artifactNotes = [...new Set(best.filter(item => item.automaticVoteAllowed === false).map(item => item.artifactReason).filter(Boolean))];
+  const artifactNotes = [...new Set([...originalBest, ...best].filter(item => item.automaticVoteAllowed === false).map(item => item.artifactReason).filter(Boolean))];
   return {
     found: true,
     rawTime,
@@ -142,7 +167,7 @@ export function fuseStartEvidence(evidence: StartEvidence[]): FusedStartDecision
     confidence,
     autoAccept,
     conflict,
-    reason: `${autoAccept ? "Start evidence agreed" : "Start review cursor"} at ${rawTime.toFixed(3)}s using ${sourceSummary}.${premovementNote}${conflictNote}${artifactNotes.length ? ` ${artifactNotes.join(" ")}` : ""}${visualTiming.outliers.length ? " An earlier or later patch did not share the majority blue confirmation and was excluded from the clock." : ""}`,
+    reason: `${autoAccept ? "Start evidence agreed" : "Start review cursor"} at ${rawTime.toFixed(3)}s using ${sourceSummary}.${premovementNote}${conflictNote}${artifactNotes.length ? ` ${artifactNotes.join(" ")}` : ""}${reviewEventChanged ? " An excluded artifact did not set this alternative review cursor; the event still requires frame review." : ""}${visualTiming.outliers.length ? " An earlier or later patch did not share the majority blue confirmation and was excluded from the clock." : ""}`,
     supportingEvidence: supported,
     rejectedEvidence,
     visualTimingOutlierLabels: visualTiming.outliers.flatMap(item=>item.label?[item.label]:[]),

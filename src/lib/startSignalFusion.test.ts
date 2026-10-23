@@ -11,6 +11,118 @@ it("does not average an excluded artifact into an otherwise accepted light clock
 });
 
 describe("start signal fusion", () => {
+  it("does not rank a known camera cut above an eligible alternative review event", () => {
+    // Reconstructed from the Edinburgh4103 development export. These are
+    // observed cues, not independent labels for the true electronic Start.
+    const cut: StartEvidence = { kind: "color", rawTime: 5.433333, confidence: "High", label: "cut",
+      automaticVoteAllowed: false, artifactReason: "Camera cut changed 40.9% of the frame.", reason: "excluded patch" };
+    const alternative: StartEvidence = { kind: "color", rawTime: 6.466667, confidence: "High", label: "alternative", reason: "eligible visual cue" };
+    const decision = fuseStartEvidence([cut, alternative,
+      { kind: "color", rawTime: 5.2, confidence: "Low", reason: "weak patch" },
+      { kind: "audio", rawTime: 9.82, confidence: "Medium", reason: "approximate beep" },
+      { kind: "motion", rawTime: 0.8, confidence: "Low", reason: "motion estimate" },
+    ]);
+    expect(decision.rawTime).toBe(6.467);
+    expect(decision.autoAccept).toBe(false);
+    expect(decision.confidence).toBe("Medium");
+    expect(decision.supportingEvidence).toEqual([alternative]);
+    expect(decision.rejectedEvidence).toContain(cut);
+    expect(decision.reason).toContain(cut.artifactReason);
+    expect(decision.reason).toContain("still requires frame review");
+  });
+
+  it("omits an artifact from a mixed review clock without discarding its diagnostics", () => {
+    const artifact: StartEvidence = { kind: "color", rawTime: 2, confidence: "High", reason: "overlay", automaticVoteAllowed: false };
+    const decision = fuseStartEvidence([artifact,
+      { kind: "color", rawTime: 2.2, confidence: "Medium", reason: "eligible light" },
+      { kind: "motion", rawTime: 2.3, confidence: "Low", reason: "uncertain motion" },
+    ]);
+    expect(decision.rawTime).toBe(2.2);
+    expect(decision.autoAccept).toBe(false);
+    expect(decision.rejectedEvidence).toContain(artifact);
+    expect(decision.supportingEvidence).not.toContain(artifact);
+  });
+
+  it("does not promote a different event after removing an artifact's ranking vote", () => {
+    const decision = fuseStartEvidence([
+      { kind: "color", rawTime: 1, confidence: "High", reason: "overlay", automaticVoteAllowed: false },
+      { kind: "color", rawTime: 3, confidence: "High", reason: "other visual event" },
+    ]);
+    expect(decision.rawTime).toBe(3);
+    expect(decision.autoAccept).toBe(false);
+    expect(decision.conflict).toBe(true);
+  });
+
+  it("keeps a changed event review-only even when weak artifacts cannot trigger the strong-conflict veto", () => {
+    const artifacts = Array.from({ length: 7 }, (_, index): StartEvidence => ({
+      kind: "color", rawTime: 1 + index * 0.001, confidence: "Low", reason: "weak overlay patch", automaticVoteAllowed: false,
+    }));
+    const decision = fuseStartEvidence([...artifacts,
+      { kind: "color", rawTime: 3, confidence: "High", reason: "eligible alternative" },
+    ]);
+    expect(decision.rawTime).toBe(3);
+    expect(decision.conflict).toBe(false);
+    expect(decision.autoAccept).toBe(false);
+    expect(decision.confidence).toBe("Medium");
+  });
+
+  it("preserves an exact eligible audio clock even when a rejected visual cluster ranks highly", () => {
+    const decision = fuseStartEvidence([
+      { kind: "color", rawTime: 1, confidence: "High", reason: "overlay", automaticVoteAllowed: false },
+      { kind: "color", rawTime: 1.01, confidence: "High", reason: "overlay duplicate", automaticVoteAllowed: false },
+      { kind: "audio", rawTime: 4, confidence: "High", reason: "exact protocol" },
+      { kind: "color", rawTime: 4.05, confidence: "Medium", reason: "eligible sensor" },
+    ]);
+    expect(decision.rawTime).toBe(4);
+    // Existing competing-evidence veto remains in force.
+    expect(decision.autoAccept).toBe(false);
+  });
+
+  it("keeps an accepted exact-audio clock with an artifact neighbor ahead of more Medium visual votes elsewhere", () => {
+    const audio: StartEvidence = { kind: "audio", rawTime: 2, confidence: "High", reason: "exact protocol" };
+    const artifact: StartEvidence = { kind: "color", rawTime: 2.1, confidence: "High", reason: "blocked neighboring patch", automaticVoteAllowed: false };
+    const alternatives = [5, 5.05, 5.1, 5.15].map((rawTime): StartEvidence => ({
+      kind: "color", rawTime, confidence: "Medium", reason: "unrelated visual event",
+    }));
+    const decision = fuseStartEvidence([audio, artifact, ...alternatives,
+      { kind: "motion", rawTime: 5.2, confidence: "Low", reason: "passerby" },
+    ]);
+    expect(decision.rawTime).toBe(2);
+    expect(decision.confidence).toBe("High");
+    expect(decision.autoAccept).toBe(true);
+    expect(decision.conflict).toBe(false);
+    expect(decision.supportingEvidence).toEqual([audio]);
+    expect(decision.rejectedEvidence).toContain(artifact);
+  });
+
+  it("does not replace the original eligible exact-audio event with a later higher-scoring exact-audio cluster", () => {
+    const original: StartEvidence = { kind: "audio", rawTime: 2, confidence: "High", reason: "first exact protocol" };
+    const artifacts = Array.from({ length: 7 }, (_, index): StartEvidence => ({
+      kind: "color", rawTime: 2.01 + index * 0.001, confidence: "High", reason: "blocked neighbor", automaticVoteAllowed: false,
+    }));
+    const alternatives = [5.05, 5.1, 5.15, 5.2].map((rawTime): StartEvidence => ({
+      kind: "color", rawTime, confidence: "Medium", reason: "later visual event",
+    }));
+    const decision = fuseStartEvidence([original, ...artifacts, ...alternatives,
+      { kind: "audio", rawTime: 5, confidence: "High", reason: "later exact protocol" },
+      { kind: "motion", rawTime: 5.2, confidence: "Low", reason: "passerby" },
+    ]);
+    expect(decision.rawTime).toBe(2);
+    expect(decision.autoAccept).toBe(true);
+    expect(decision.confidence).toBe("High");
+    expect(decision.supportingEvidence).toEqual([original]);
+  });
+
+  it("keeps an all-artifact cursor inspectable when no eligible light or audio clock exists", () => {
+    const artifact: StartEvidence = { kind: "color", rawTime: 1, confidence: "High", reason: "cut", automaticVoteAllowed: false };
+    const decision = fuseStartEvidence([artifact,
+      { kind: "motion", rawTime: 1.1, confidence: "Low", reason: "uncertain motion" },
+    ]);
+    expect(decision.rawTime).toBe(1);
+    expect(decision.autoAccept).toBe(false);
+    expect(decision.supportingEvidence).toContain(artifact);
+  });
+
   it("does not veto agreeing departures because their later blue confirmations differ", () => {
     const cues = [7.1, 7.3, 7.5].map((blue): StartEvidence => ({
       kind: "color", rawTime: 7.033333, blueConfirmationRawTime: blue,
