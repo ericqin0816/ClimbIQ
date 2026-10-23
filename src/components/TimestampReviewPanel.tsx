@@ -7,6 +7,7 @@ import "./TimestampReviewPanel.css";
 export interface TimestampReviewPanelProps {
   label: string;
   instruction?: string;
+  navigationOnly?: boolean;
   confidence?: Confidence;
   suggestedRawTime: number;
   currentTime: number;
@@ -42,19 +43,20 @@ export default function TimestampReviewPanel(props: TimestampReviewPanelProps) {
   const ready = props.frameReady && props.frameStatus !== "pending" && !props.busy;
   const source = props.decodedRawTime !== undefined ? "presentation"
     : props.frameStatus === "available" ? "unavailable" : props.frameStatus;
-  return <section ref={region} tabIndex={-1} className="timestamp-review" aria-labelledby="timestamp-review-title" aria-live="polite">
+  return <section ref={region} tabIndex={-1} className="timestamp-review" data-navigation-only={props.navigationOnly || undefined} aria-labelledby="timestamp-review-title" aria-live="polite">
     <div className="timestamp-review-heading">
-      <div><span className="review-eyebrow">Review before accepting</span><h3 id="timestamp-review-title">{props.label}</h3></div>
+      <div><span className="review-eyebrow">{props.navigationOnly ? "Manual frame review" : "Review before accepting"}</span><h3 id="timestamp-review-title">{props.label}</h3></div>
       {props.confidence ? <span className="review-confidence">{props.confidence} confidence</span> : null}
     </div>
     <div className="timestamp-review-times">
-      <div><span>Suggested</span><strong>{props.suggestedRawTime.toFixed(3)}s</strong></div>
+      <div><span>{props.navigationOnly ? "Starting cursor" : "Suggested"}</span><strong>{props.suggestedRawTime.toFixed(3)}s</strong></div>
       <div><span>{props.decodedRawTime !== undefined ? "Decoded frame" : "Cursor (approx.)"}</span><strong>{time.toFixed(3)}s</strong></div>
-      <div><span>Adjustment</span><strong>{adjustment >= 0 ? "+" : "−"}{Math.abs(adjustment).toFixed(3)}s</strong></div>
+      {!props.navigationOnly && <div><span>Adjustment</span><strong>{adjustment >= 0 ? "+" : "−"}{Math.abs(adjustment).toFixed(3)}s</strong></div>}
     </div>
+    {props.navigationOnly && <p id="timestamp-review-navigation" className="review-navigation-hint">Find the actual event. This cursor is not a prediction.</p>}
     <div className="button-row timestamp-review-actions">
-      <button className="primary" disabled={!ready} aria-describedby="timestamp-review-instruction timestamp-review-frame-source" onClick={props.onAccept}>{ready ? `${props.acceptLabel} at ${time.toFixed(3)}s` : "Pause and wait for the frame"}</button>
-      <button disabled={props.busy} onClick={props.onReturn}>Return to suggestion</button>
+      <button className="primary" disabled={!ready} aria-describedby={`${props.navigationOnly ? "timestamp-review-navigation " : ""}timestamp-review-instruction timestamp-review-frame-source`} onClick={props.onAccept}>{ready ? `${props.acceptLabel} at ${time.toFixed(3)}s` : "Pause and wait for the frame"}</button>
+      <button disabled={props.busy} onClick={props.onReturn}>{props.navigationOnly ? "Return to cursor" : "Return to suggestion"}</button>
       <button onClick={props.onClose}>Close review</button>
     </div>
     <p id="timestamp-review-instruction" className="review-instruction">{props.instruction ?? "Check the visible event before accepting."}</p>

@@ -8,6 +8,7 @@ import { createSessionLibraryBackup } from "../../src/lib/sessionLibrary";
 
 test("manual timing reaches native review without preaccepting missing markers", async ({ page }, testInfo) => {
   test.skip(process.platform === "win32" && testInfo.project.name.startsWith("webkit"), "macOS CI exercises media under WebKit; the local Windows decoder is unavailable.");
+  if (testInfo.project.name.endsWith("phone")) await page.setViewportSize({ width: 320, height: 568 });
   await page.goto("/");
   await page.getByLabel("Choose video", { exact: true }).setInputFiles(path.resolve("public/samples/climbiq-practice-a.mp4"));
   await expect(page.locator(".video-meta-line")).toContainText("Ready");
@@ -19,6 +20,21 @@ test("manual timing reaches native review without preaccepting missing markers",
   const manual = page.getByRole("button", { name: "Review timing manually", exact: true });
   await manual.click();
   await expect(page.locator(".timestamp-review")).toContainText("Leave Start unset if the signal is missing");
+  await expect(page.locator(".timestamp-review")).toContainText("Starting cursor");
+  await expect(page.locator(".timestamp-review")).not.toContainText("Suggested");
+  await expect(page.locator(".timestamp-review")).toContainText("This cursor is not a prediction");
+  if (testInfo.project.name.endsWith("phone")) {
+    const geometry = await page.evaluate(() => ({
+      frame: document.querySelector("#video-review video")!.getBoundingClientRect().toJSON(),
+      actions: document.querySelector(".timestamp-review-actions")!.getBoundingClientRect().toJSON(),
+      hint: document.querySelector(".review-navigation-hint")!.getBoundingClientRect().toJSON(),
+      nav: document.querySelector(".mobile-workflow")!.getBoundingClientRect().toJSON(),
+    }));
+    expect(geometry.frame.top).toBeGreaterThanOrEqual(0);
+    expect(geometry.frame.bottom).toBeLessThan(geometry.hint.top);
+    expect(geometry.hint.bottom).toBeLessThanOrEqual(geometry.actions.top);
+    expect(geometry.actions.bottom).toBeLessThanOrEqual(geometry.nav.top);
+  }
   await expect(start).toContainText("Not set");
   await page.getByRole("button", { name: "Close review", exact: true }).click();
   await expect(start).toContainText("Not set");

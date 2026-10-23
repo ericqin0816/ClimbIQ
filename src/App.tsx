@@ -197,6 +197,7 @@ interface TimestampReviewTarget {
   kind?: "finish";
   label: string;
   instruction?: string;
+  navigationOnly?: boolean;
   suggestedRawTime: number;
   confidence?: Confidence;
   acceptLabel: string;
@@ -979,9 +980,9 @@ function App() {
 
   function openManualStartReview() {
     if (videoAnalysisRunning || !isCurrentVideoReady(videoRef.current)) return;
-    reviewTimestamp({ label: "Manual start signal", suggestedRawTime: startSignalRaw ?? currentTime,
+    reviewTimestamp({ label: "Manual start signal", navigationOnly: true, suggestedRawTime: startSignalRaw ?? currentTime,
       instruction: "Locate the visible or audible start signal, then accept its frame. Athlete movement alone does not establish the signal. Leave Start unset if the signal is missing.",
-      confidence: "Medium", acceptLabel: "Accept start",
+      acceptLabel: "Accept start",
       onAccept: (time, note) => acceptManualTimestamp("startSignal", time, { frameReviewed: true, note }),
     });
   }
@@ -990,9 +991,9 @@ function App() {
     const finish = getTimestamp(timestamps, "finishPad").rawTime;
     if (videoAnalysisRunning || !isCurrentVideoReady(videoRef.current) || startSignalRaw === null || finish === null) return;
     const cursor = currentTime > startSignalRaw && currentTime < finish ? currentTime : (startSignalRaw + finish) / 2;
-    reviewTimestamp({ label: "Manual Hold 10 contact", suggestedRawTime: cursor,
+    reviewTimestamp({ label: "Manual Hold 10 contact", navigationOnly: true, suggestedRawTime: cursor,
       instruction: "Find the first hand contact with the actual Hold 10. This starting cursor is only a navigation aid. If the hold or contact is obscured, close review and compare totals instead.",
-      confidence: "Medium", acceptLabel: "Accept Hold 10",
+      acceptLabel: "Accept Hold 10",
       onAccept: (time, note) => acceptManualTimestamp("hold10", time, { frameReviewed: true, note }),
     });
   }
@@ -3809,6 +3810,7 @@ function App() {
           {visibleTimestampReview ? <TimestampReviewPanel
             label={visibleTimestampReview.label} confidence={visibleTimestampReview.confidence}
             instruction={visibleTimestampReview.instruction}
+            navigationOnly={visibleTimestampReview.navigationOnly}
             suggestedRawTime={visibleTimestampReview.suggestedRawTime} currentTime={currentTime}
             decodedRawTime={decodedReviewTime} frameStatus={framePresentation.status}
             sourceFrameDurationSeconds={decodedReviewTime !== undefined && framePresentation.status === "available" ? framePresentation.durationSeconds : undefined}
