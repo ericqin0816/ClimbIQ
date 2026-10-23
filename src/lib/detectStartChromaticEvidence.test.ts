@@ -36,16 +36,22 @@ function capturedSamples(row: typeof fixture.rows[number]): StartSignalDebug["sa
 }
 
 describe("native development RGB/PTS regression controls (not event labels)", () => {
-  it.each(fixture.rows)("preserves the captured baseline and bounded guarded result for $id lane $laneIndex", row => {
+  it.each(fixture.rows)("checks recorded behavior and before-state evidence for $id lane $laneIndex", row => {
     const samples = capturedSamples(row);
     const legacy = findVerifiedGreenDeparture(samples, row.calibration, 2, false, 2 / 30);
     const guarded = findVerifiedGreenDeparture(samples, row.calibration, 2, true, 2 / 30);
-    expect(legacy).toMatchObject(row.legacy);
-    expect(guarded).toMatchObject(row.guarded);
-    expect(samples[guarded!.onsetIndex].timestampMethod).toBe("video-frame");
+    if (row.id === "IMG_9076") expect(legacy).toBeUndefined();
+    else expect(legacy).toMatchObject(row.legacy);
+    // The fixture's guarded field preserves Cycle2 outputs, including the
+    // subsequently inspected moving-shoe proposal. It is not ground truth.
+    if (["IMG_9075", "IMG_9076"].includes(row.id)) expect(guarded).toBeUndefined();
+    else {
+      expect(guarded).toMatchObject(row.guarded);
+      expect(samples[guarded!.onsetIndex].timestampMethod).toBe("video-frame");
+    }
   });
 
-  it("does not let a brown distance-based 23-frame run hide the later chromatic departure", () => {
+  it("rejects the inspected moving-shoe proposal instead of treating distant brown frames as stable green", () => {
     const row = fixture.rows.find(value => value.id === "IMG_9075")!;
     const samples = capturedSamples(row);
     const legacy = findVerifiedGreenDeparture(samples, row.calibration, 2, false, 2 / 30)!;
@@ -56,14 +62,17 @@ describe("native development RGB/PTS regression controls (not event labels)", ()
     expect(brown.b - brown.g).toBe(-23);
     expect(brown.b - brown.g).toBeLessThan(row.calibration.beforeStartRGB.b - row.calibration.beforeStartRGB.g);
 
-    const guarded = findVerifiedGreenDeparture(samples, row.calibration, 2, true, 2 / 30)!;
-    expect(samples[guarded.onsetIndex].time).toBe(8.835);
-    expect(guarded.confirmationFrames).toBe(20);
-    // These are recorded patch changes, not independently labelled electronic Start times.
+    expect(samples[row.guarded.onsetIndex].time).toBe(8.835);
+    for (const previous of samples.slice(row.guarded.onsetIndex - 2, row.guarded.onsetIndex)) {
+      expect(previous.distanceToBefore!).toBeGreaterThan(previous.distanceToAfter!);
+    }
+    expect(findVerifiedGreenDeparture(samples, row.calibration, 2, true, 2 / 30)).toBeUndefined();
+    // Post-prediction source inspection identifies this fixed ROI as moving
+    // shoe/foot/floor, not an electronic lamp. There is no replacement proposal.
   });
 
   it("preserves source PTS and describes persistence as a run length rather than onset delay", async () => {
-    const row = fixture.rows.find(value => value.id === "IMG_9075")!;
+    const row = fixture.rows.find(value => value.id === "12.24" && value.laneIndex === 2)!;
     native.samples = row.samples.map(([time, r, g, b, , , duration]) => ({ time, averageRgb: { r, g, b }, duration }));
     const result = await detectStartSignal({ video: { videoWidth: 720, videoHeight: 1280 } as HTMLVideoElement,
       zone: { ...row.zone, id: "startLight" }, searchStart: row.samples[0][0] - .005, searchEnd: row.samples.at(-1)![0] + .005,
@@ -71,11 +80,25 @@ describe("native development RGB/PTS regression controls (not event labels)", ()
       calibration: { beforeStartRGB: row.calibration.beforeStartRGB, afterStartRGB: row.calibration.afterStartRGB,
         colorDelta: row.calibration.colorDelta }, requireChromaticDeparture: true });
     expect(result.detected).toBe(true);
-    expect(result.rawTime).toBe(8.835);
-    expect(result.debug.samples.find(sample => sample.time === result.rawTime)?.cursorTime).toBeCloseTo(8.836, 6);
-    expect(result.reason).toContain("20 consecutive blue-like frames");
+    expect(result.rawTime).toBe(9.448333);
+    expect(result.debug.samples.find(sample => sample.time === result.rawTime)?.cursorTime).toBeCloseTo(9.449333, 6);
+    expect(result.reason).toContain("31 consecutive blue-like frames");
     expect(result.reason).not.toContain("frames later");
-    expect(result.debug.blueConfirmationRawTime).toBe(8.835);
+    expect(result.debug.blueConfirmationRawTime).toBe(9.448333);
+  });
+
+  it("leaves the real shoe recording unverified in the dense detector, without another High candidate", async () => {
+    const row = fixture.rows.find(value => value.id === "IMG_9075")!;
+    native.samples = row.samples.map(([time, r, g, b, , , duration]) => ({ time, averageRgb: { r, g, b }, duration }));
+    const result = await detectStartSignal({ video: { videoWidth: 1080, videoHeight: 1920 } as HTMLVideoElement,
+      zone: { ...row.zone, id: "startLight" }, searchStart: row.samples[0][0] - .005, searchEnd: row.samples.at(-1)![0] + .005,
+      sensitivity: "medium", profile: "calibrated", fps: 30, colorSamplingMode: "opponent",
+      calibration: { beforeStartRGB: row.calibration.beforeStartRGB, afterStartRGB: row.calibration.afterStartRGB,
+        colorDelta: row.calibration.colorDelta }, requireChromaticDeparture: true });
+    expect(result.detected).toBe(false);
+    expect(result.rawTime).toBeUndefined();
+    expect(result.candidates).toEqual([]);
+    expect(result.debug.failureReason).toContain("No reliable calibrated transition");
   });
 });
 
@@ -116,11 +139,13 @@ const positives = COLOR_PAIRS.flatMap(([name, rawBefore, rawAfter]) => [.5, .75,
 }));
 const knownQuantizationLimitation = (value: typeof positives[number]) =>
   value.scale === .5 && value.prelude === "scaled-exposure" && ["faint", "tiny"].includes(value.name);
+const ambiguousGrayBeforeState = (value: typeof positives[number]) =>
+  value.scale === .5 && value.prelude === "additive-gray" && value.name === "very-faint";
 
 describe("constructed exposure and faint-light controls", () => {
-  it("keeps all 92 resolved positive controls at or after the known change, without losing the old correct controls", () => {
+  it("keeps all 90 resolved positive controls timely, with two faint gray-shift cases explicitly abstained", () => {
     let oldCorrect = 0, newlyCorrect = 0;
-    for (const value of positives.filter(value => !knownQuantizationLimitation(value))) {
+    for (const value of positives.filter(value => !knownQuantizationLimitation(value) && !ambiguousGrayBeforeState(value))) {
       const legacy = findVerifiedGreenDeparture(value.samples, value.calibration, 2, false, 2 / 30);
       const guarded = findVerifiedGreenDeparture(value.samples, value.calibration, 2, true, 2 / 30);
       expect(guarded, JSON.stringify({ ...value, samples: undefined })).toBeDefined();
@@ -130,17 +155,21 @@ describe("constructed exposure and faint-light controls", () => {
       else newlyCorrect++;
     }
     expect(oldCorrect).toBe(32);
-    expect(newlyCorrect).toBe(60);
+    expect(newlyCorrect).toBe(58);
   });
+
+  it.each(positives.filter(ambiguousGrayBeforeState))(
+    "abstains when the very faint pre-cue gray state is after-like (fade $fadeFrames)", value => {
+      expect(value.samples[8].distanceToBefore!).toBeGreaterThan(value.samples[8].distanceToAfter!);
+      expect(findVerifiedGreenDeparture(value.samples, value.calibration, 2, true, 2 / 30)).toBeUndefined();
+    });
 
   // Deliberately failing desired-behavior checks retain four pre-existing misses.
   // One-count RGB quantization can satisfy both unchanged chromatic thresholds
   // during half-exposure. This patch does not establish exposure invariance.
   it.fails.each(positives.filter(knownQuantizationLimitation))(
     "known quantization limitation: $name scale $scale fade $fadeFrames", value => {
-      const legacy = findVerifiedGreenDeparture(value.samples, value.calibration, 2, false, 2 / 30);
       const guarded = findVerifiedGreenDeparture(value.samples, value.calibration, 2, true, 2 / 30);
-      expect(legacy?.onsetIndex).toBe(6);
       expect(guarded?.onsetIndex).toBeGreaterThanOrEqual(9);
     });
 
@@ -172,5 +201,21 @@ describe("constructed exposure and faint-light controls", () => {
       expect(findVerifiedGreenDeparture(samples, calibration, 2, true, 2 / 30)?.onsetIndex).toBe(6);
       expect(findVerifiedGreenDeparture(samples.slice(0, 7), calibration, 2, true, 2 / 30)).toBeUndefined();
     }
+  });
+
+  it("does not call a distant after-like brown state stable green before a blue replacement", () => {
+    const before = { r: 46, g: 42, b: 31 }, after = { r: 113, g: 117, b: 136 }, brown = { r: 145, g: 97, b: 74 };
+    const calibration = { beforeStartRGB: before, afterStartRGB: after, colorDelta: computeColorDistance(before, after) };
+    const samples = syntheticSamples([before, before, before, brown, brown, brown, after, after, after, after], calibration);
+    expect(findVerifiedGreenDeparture(samples, calibration, 2, true, 2 / 30)).toBeUndefined();
+  });
+
+  it.fails("known hardware-identity limitation: an entering blue object can replace a genuinely before-like background", () => {
+    const before = { r: 40, g: 55, b: 42 }, object = { r: 40, g: 42, b: 75 };
+    const calibration = { beforeStartRGB: before, afterStartRGB: object, colorDelta: computeColorDistance(before, object) };
+    const samples = syntheticSamples([...Array.from({ length: 8 }, () => before), ...Array.from({ length: 12 }, () => object)], calibration);
+    // RGB history alone cannot certify stationary emitting hardware. This
+    // desired rejection remains an explicit known limitation, not a pass.
+    expect(findVerifiedGreenDeparture(samples, calibration, 2, true, 2 / 30)).toBeUndefined();
   });
 });

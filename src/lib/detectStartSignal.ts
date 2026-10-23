@@ -442,8 +442,11 @@ function findDepartureBeforeBlueRun(
     (!chromaticDeparture || chromaticDeparture(sample.averageRgb));
 
   for (let index = 2; index <= confirmationIndex; index += 1) {
+    // Not departing toward blue does not prove the prior state was green:
+    // a distant red/brown foreground can fail the chromatic departure check
+    // while already looking closer to the calibrated after state.
     const previousStable = [samples[index - 2], samples[index - 1]].every((sample) =>
-      !hasDeparted(sample),
+      !hasDeparted(sample) && (sample.distanceToBefore ?? Infinity) <= (sample.distanceToAfter ?? -Infinity),
     );
     if (!previousStable || !hasDeparted(samples[index])) {
       continue;
