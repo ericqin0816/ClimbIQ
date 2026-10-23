@@ -52,6 +52,17 @@ try {
       await page.locator('.upload-dropzone input[type="file"]').setInputFiles(file);
       await expect(page.locator(".video-meta-line")).toContainText("Ready", { timeout: 25000 });
       outcome.importMs = performance.now() - imported;
+      if (clip.startSearchWindow !== undefined) {
+        const window = clip.startSearchWindow;
+        const duration = await page.locator("#video-review video").evaluate(video => video.duration);
+        assert.ok(Array.isArray(window) && window.length === 2 && window.every(Number.isFinite) && window[0] >= 0 && window[1] > window[0] && window[1] <= duration,
+          "Predeclared search window must fit the actual recording.");
+        const start = page.getByLabel("Ignore video before (seconds)", { exact: true });
+        await start.evaluate(node => { for (let parent = node.parentElement; parent; parent = parent.parentElement) if (parent instanceof HTMLDetailsElement) parent.open = true; });
+        await start.fill(String(window[0]));
+        await page.getByLabel("Stop start search at video time (seconds)", { exact: true }).fill(String(window[1]));
+        outcome.requestedStartSearchWindow = window;
+      }
       await page.getByLabel("Analysis scope", { exact: true }).selectOption(scope);
       const started = performance.now();
       await page.locator("#upload .analyze-button").click();
@@ -85,6 +96,9 @@ try {
       const dataset = JSON.parse(await readFile(await download.path(), "utf8"));
       await writeFile(path.join(directory, `${clip.id}-${repeat}-dataset.json`), JSON.stringify(dataset, null, 2) + "\n", { flag: "wx" });
       outcome.accepted = dataset.acceptedTimestamps;
+      outcome.effectiveStartSearchWindow = [dataset.settings.startSearchStart, dataset.settings.startSearchEnd];
+      if (outcome.requestedStartSearchWindow) assert.deepEqual(outcome.effectiveStartSearchWindow, outcome.requestedStartSearchWindow,
+        "The original export must preserve the requested diagnostic search window.");
       outcome.automaticEndpointCount = dataset.acceptedTimestamps.filter(marker => ["startSignal", "finishPad"].includes(marker.markerId) && marker.acceptedRawTime !== null && marker.acceptanceMode === "automatic").length;
       outcome.passed = true;
       console.log(JSON.stringify({ id: clip.id, repeat, seconds: +(outcome.firstUsefulTerminalMs / 1000).toFixed(3), automaticEndpoints: outcome.automaticEndpointCount, status: outcome.state.status }));

@@ -1,15 +1,9 @@
 import {afterEach, beforeEach, describe, expect, it, vi} from "vitest";
 import {detectStartSignal} from "./detectStartSignal";
-import {detectFinishSignal} from "./detectFinishSignal";
+import {analyzeFinishColorSamples, detectFinishSignal, type FinishColorSample} from "./detectFinishSignal";
 
 const mocks=vi.hoisted(()=>({scan:vi.fn()}));
 vi.mock("./sourceFrameScan",()=>({scanSourceFrames:mocks.scan}));
-vi.mock("./videoFrameSampler",async importOriginal=>{
-  const actual=await importOriginal<typeof import("./videoFrameSampler")>();
-  return {...actual,sampleZoneOpponentColors:vi.fn(async(_video:HTMLVideoElement,time:number)=>({time,
-    averageRgb:time<5?{r:20,g:90,b:220}:{r:20,g:150,b:24},
-    directionalRgb:time<5?{r:20,g:90,b:220}:{r:20,g:150,b:24},pixelZone:{x:0,y:0,width:4,height:4}}))};
-});
 const calibration={beforeStartRGB:{r:20,g:150,b:24},afterStartRGB:{r:20,g:90,b:220},colorDelta:205};
 const zone={id:"startLight" as const,label:"Test sensor",x1:.1,x2:.2,y1:.7,y2:.8};
 beforeEach(()=>{mocks.scan.mockReset();vi.stubGlobal("VideoFrame",undefined);});
@@ -30,8 +24,34 @@ describe("incomplete source refinement",()=>{
       fps:30,sensitivity:"medium",profile:"calibrated",calibration})).rejects.toThrow("cancelled");
   });
   it("cannot leave a coarse Finish authoritative when the dense sampling pass fails",async()=>{
-    mocks.scan.mockRejectedValue(new Error("Source-frame timing became unavailable during refinement."));
-    await expect(detectFinishSignal({video:{duration:8} as HTMLVideoElement,zone,startSignalRawTime:0,calibration})).rejects.toThrow("became unavailable");
+    vi.stubGlobal("window", {setTimeout, clearTimeout});
+    const video=Object.assign(new EventTarget(), {src:"blob:finish-guard", duration:8,
+      videoWidth:40, videoHeight:40, readyState:2, seeking:false}) as unknown as HTMLVideoElement;
+    let cursor=0;
+    Object.defineProperty(video,"currentTime",{get:()=>cursor,set:(time:number)=>{
+      cursor=time;
+      queueMicrotask(()=>video.dispatchEvent(new Event("seeked")));
+    }});
+    const coarseSamples:FinishColorSample[]=[];
+    vi.stubGlobal("document",{createElement:()=>({width:0,height:0,getContext:()=>({
+      clearRect(){},drawImage(){},getImageData:()=>{
+        const color=cursor<5?calibration.afterStartRGB:calibration.beforeStartRGB;
+        coarseSamples.push({time:cursor,averageRgb:color,directionalRgb:color});
+        return {width:4,height:4,data:new Uint8ClampedArray(Array.from({length:16},()=>[color.r,color.g,color.b,255]).flat())};
+      },
+    })})});
+    const failure=new Error("Source-frame timing became unavailable during refinement.");
+    mocks.scan.mockImplementation(async options=>{
+      // The real seek/crop/weighted-color coarse path must establish a High
+      // candidate before this test injects failure at the dense scan boundary.
+      expect(analyzeFinishColorSamples(coarseSamples,calibration)).toMatchObject({detected:true,rawTime:5,confidence:"High"});
+      expect(options).toMatchObject({video,fallbackFps:30});
+      expect(options.start).toBeLessThan(5);
+      expect(options.end).toBeGreaterThan(5);
+      throw failure;
+    });
+    await expect(detectFinishSignal({video,zone,startSignalRawTime:0,calibration})).rejects.toBe(failure);
     expect(mocks.scan).toHaveBeenCalledOnce();
+    expect(coarseSamples.length).toBeGreaterThan(6);
   });
 });

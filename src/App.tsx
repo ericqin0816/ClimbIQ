@@ -3942,7 +3942,7 @@ function App() {
 
         <Card id="timing" title="Start timing">
           <p className="muted">
-            Quick Analyze searches the selected opening window, ignores upper-wall activity, and timestamps the first real blue-directed change near the floor instead of treating a climber covering green as the start. The later clear blue state verifies the faint onset. Exact octave-up audio anchors timing, and first movement is measured above the light spill inside the selected athlete lane.
+            Automatic analysis searches the selected opening window. If the start signal occurs later in your recording, expand the window in Manual timing settings below. Review uncertain cues before comparing attempts.
           </p>
           <details className="help-details">
             <summary>Manual timing settings</summary>
