@@ -242,6 +242,81 @@ test("the shorter phase stops exactly at its reviewed endpoint while the other c
   await page.evaluate(() => { (window as any).__phaseEndpointProbe.active = false; });
 });
 
+test("recovered waiting notices preserve replay and current unready data requires explicit replay", async ({ page }, testInfo) => {
+  test.skip(process.platform === "win32" && testInfo.project.name.startsWith("webkit"), "Media readiness regression runs on macOS WebKit CI.");
+  await prepareReplay(page);
+  const replay = page.getByRole("button", { name: "Replay bottom phase", exact: true });
+  await replay.click();
+  await expect(page.getByRole("button", { name: "Pause comparison", exact: true })).toBeEnabled();
+  await page.evaluate(() => {
+    const videos = Array.from(document.querySelectorAll<HTMLVideoElement>(".comparison-players video"));
+    if (videos.length !== 2 || videos.some(video => video.paused || video.readyState < 3)) {
+      throw new Error("Expected two native players with future data.");
+    }
+    const before = videos.map(video => video.currentTime);
+    const probe = { dispatchedReady: videos[0].readyState, continued: false };
+    (window as any).__recoveredWaitingProbe = probe;
+    // Model a queued notification after readiness has recovered, as observed
+    // in the preserved native phone trace. Media clocks and decoding stay real.
+    videos[0].dispatchEvent(new Event("waiting"));
+    const started = performance.now();
+    const observe = () => {
+      probe.continued ||= videos.every((video, index) => !video.paused && video.currentTime > before[index] + .08);
+      if (!probe.continued && performance.now() - started < 2000) requestAnimationFrame(observe);
+    };
+    requestAnimationFrame(observe);
+  });
+  await expect.poll(() => page.evaluate(() => {
+    const probe = (window as any).__recoveredWaitingProbe;
+    return { futureData: probe.dispatchedReady >= 3, continued: probe.continued };
+  })).toEqual({ futureData: true, continued: true });
+  await expect(page.locator("#comparison-replay [role=alert]")).toHaveCount(0);
+
+  await replay.click();
+  await expect(page.getByRole("button", { name: "Pause comparison", exact: true })).toBeEnabled();
+  await page.evaluate(() => {
+    const videos = Array.from(document.querySelectorAll<HTMLVideoElement>(".comparison-players video"));
+    if (videos.some(video => video.paused)) throw new Error("Expected active native playback before the controlled readiness case.");
+    const video = videos[0], original = Object.getOwnPropertyDescriptor(video, "readyState");
+    try {
+      // Controlled readiness is a policy regression, not proof of a real
+      // network stall. Restore it before the explicit user recovery action.
+      Object.defineProperty(video, "readyState", { configurable: true, get: () => 2 });
+      video.dispatchEvent(new Event("waiting"));
+    } finally {
+      if (original) Object.defineProperty(video, "readyState", original);
+      else delete (video as any).readyState;
+    }
+  });
+  await expect.poll(() => page.locator(".comparison-players video").evaluateAll(videos => videos.every(video => (video as HTMLVideoElement).paused))).toBe(true);
+  await expect(page.locator("#comparison-replay [role=alert]")).toContainText("Playback buffered");
+  await expect.poll(() => page.locator(".comparison-players video").evaluateAll(videos => videos.every(video => (video as HTMLVideoElement).readyState >= 3))).toBe(true);
+
+  // Recovery is a separate explicit replay, never an automatic retry of the
+  // failed uninterrupted run. Verify real progress and exact native endpoints.
+  await page.evaluate(() => {
+    const videos = Array.from(document.querySelectorAll<HTMLVideoElement>(".comparison-players video"));
+    const probe = { advanced: false, firstPlayingTimes: null as number[] | null };
+    (window as any).__explicitReplayRecoveryProbe = probe;
+    const started = performance.now();
+    const observe = () => {
+      if (videos.length === 2 && videos.every(video => !video.paused)) {
+        probe.firstPlayingTimes ??= videos.map(video => video.currentTime);
+        probe.advanced ||= videos.every((video, index) => video.currentTime > probe.firstPlayingTimes![index] + .08);
+      }
+      if (!probe.advanced && performance.now() - started < 5000) requestAnimationFrame(observe);
+    };
+    requestAnimationFrame(observe);
+  });
+  await replay.click();
+  await expect(page.locator("#comparison-replay [role=alert]")).toHaveCount(0);
+  await expect.poll(() => page.evaluate(() => (window as any).__explicitReplayRecoveryProbe.advanced)).toBe(true);
+  await expect.poll(() => page.locator(".comparison-players video").evaluateAll(videos => {
+    const [baseline, candidate] = videos as HTMLVideoElement[];
+    return baseline.paused && candidate.paused && Math.abs(candidate.currentTime - 3.3) < .005 && Math.abs(baseline.currentTime - 3.8) < .005;
+  })).toBe(true);
+});
+
 test("calibration owns its decoder task and blocks overlapping session changes", async ({ page }, testInfo) => {
   test.skip(process.platform === "win32" && testInfo.project.name.startsWith("webkit"), "Calibration media ownership runs on macOS WebKit CI.");
   const a = createPracticeSession("a"), b = createPracticeSession("b");

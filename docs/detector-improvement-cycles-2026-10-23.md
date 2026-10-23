@@ -1,6 +1,6 @@
 # Ten detector improvement cycles — October 22–23, 2026
 
-Status: running. The requested priority is Start/Finish detection, followed by
+Status: ten review cycles complete; final delivery checks running. The requested priority is Start/Finish detection, followed by
 contact/tracking where evidence supports a change. Each cycle tests a concrete
 hypothesis, reviews the result with agents, and keeps or rejects the change.
 This improves detector code; it does not retrain the pretrained pose model.
@@ -227,8 +227,10 @@ electronic timing measurements.
 
 The timing refinement was rejected rather than tuned to those cases. Original
 clocks, pitch qualification, confidence, sequence and fallback behavior remain.
-High-protocol diagnostics now expose their actual analysis-window support
-(20ms at 8kHz), hop (10ms) and `isEventAccuracyBound: false`. The rejected helper
+High-protocol diagnostics now expose a nominal feature window at the retained
+leading cursor (20ms at 8kHz), hop (10ms) and `isEventAccuracyBound: false`.
+Later frames can contribute to qualification, and overlapping-tone controls can
+have insertion errors beyond that nominal window. The rejected helper
 is absent from the runtime. The prototype's favorable error reduction is not a
 shipped improvement. Current-analysis exports retain the window provenance;
 the existing color-only fused observation-interval contract stays conservative.
@@ -260,6 +262,68 @@ contact to 8.08–8.24s. Source speed, acoustic propagation, source A/V alignmen
 electronic trigger timing are uncalibrated. These are rough source observations,
 not human independent validation or precise electronic labels. Media stays out
 of Git. H11 remains reserved until the final candidate is frozen.
+
+## Final reserved-source result
+
+H11 was released only after clean candidate `f01c5bc` was frozen. Both baseline
+and candidate produced the same unaccepted High global-audio cue at 2.650s,
+compatible with the broad 2.65–2.80s recorded-cue envelope. Existing visual-audit
+policy required review for a 0.033s visible-motion delay; this is not a physical
+false-start ruling. Neither accepted Start, ran Finish nor produced an automatic
+total. No selected-left-athlete identity was established, so the left-pad contact
+bracket cannot be used to grade another lane. Single diagnostic latencies were
+8.349/7.933s; they are excluded from the fixed four-clip speed denominator.
+The entire source/event/athlete group becomes development after this inspection.
+
+## Repeated production timings
+
+Three counterbalanced baseline/candidate pairs used fresh browser storage,
+identical file hashes, Chrome 156 and clean builds throughout. Baseline remained
+`f5d9a14`; candidate remained `f01c5bc`. No runs were excluded. The terminal state
+was an accepted total for the phone and a review result for each public clip.
+All twelve candidate clip runs preserved the baseline's accepted endpoint count.
+
+| Clip | Baseline runs (s) | Candidate runs (s) | Median reduction |
+| --- | --- | --- | ---: |
+| Phone | 6.117, 5.796, 5.664 | 5.011, 4.968, 4.906 | 14.3% |
+| Edinburgh 3160 | 15.493, 15.630, 15.276 | 14.046, 14.121, 14.242 | 8.9% |
+| Edinburgh 4103 | 13.947, 14.006, 14.105 | 12.775, 13.242, 12.927 | 7.7% |
+| Jakarta | 14.543, 14.066, 14.174 | 13.643, 13.999, 13.768 | 2.9% |
+
+Taking each clip's three-run median, then the median across four clips gives
+14.090→13.348s, a 5.27% paired reduction. The fresh paired speed grade is 5.390/10.
+Against the originally fixed 13.139s reference, the final grade is 4.886/10; the
+reference is not silently replaced to improve the score. Baseline variability
+limits app-wide claims. These desktop measurements do not establish iPhone
+speed or detection accuracy. The isolated audio/upper-scan CPU gains must not be
+presented as equivalent whole-app gains.
+
+Fixed automatic coverage stays 2/8 endpoints (2.5/10 proxy); exact precision and
+endpoint error remain unestablished. Known-invalid guard adherence is
+provisionally 10/10 on the evaluated cases, not a population false-acceptance
+rate. Evidence strength remains 5.5/10. The 30–50-attempt human validation study,
+correction-time observations, training decisions, return use and actual iPhone
+testing remain outstanding.
+
+The final local check passed 1,022 tests across 100 files, types, production
+build and server checks. Production workflows initially passed 37/38: a phone
+comparison replay paused early with a buffering message before its endpoint.
+The first trace is preserved. Three native phone diagnostic repetitions then
+reproduced two failures: `waiting` dispatched while both decoders were playing,
+not seeking, readyState 4, visible and fully buffered over 0–8s. Only startup
+seeks occurred. React's waiting handler then paused both players. The event was
+stale by dispatch, rather than current decoder starvation. A bounded fix checks
+current readiness before pausing, retaining source, active, completed-side,
+background and error guards. This is consistent with the
+[HTML media readiness model](https://html.spec.whatwg.org/multipage/media.html#ready-states),
+which queues waiting notifications when readiness drops below future-data state.
+
+The original exact-endpoint test remains intact. A separate production regression
+models a recovered notification on real native players, then controlled
+readyState 2, the required paired pause, explicit UI replay, native progress and
+exact endpoints. Controlled readiness is not evidence of real network starvation.
+Post-fix production and delivery checks remain in progress; the original failure
+is retained rather than omitted from the validation record.
 
 Local detailed evidence currently lives under ignored `test-results/detector-ten/`,
 `test-results/detection-cycles/`, and `test-results/finish-cycles/`.

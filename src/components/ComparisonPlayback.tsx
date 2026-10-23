@@ -215,7 +215,15 @@ export default function ComparisonPlayback({ baseline, candidate, preferredPhase
         {urls[side] && <div className="comparison-player-media" style={{ gridColumn: column }}>
           <video key={urls[side]} aria-label={`${side === "baseline" ? "Baseline" : "New attempt"} recording: ${sessions[side].name}`} ref={node => { if (node) players.current[side] = node; else delete players.current[side]; }} src={urls[side]} muted playsInline preload="auto"
             onLoadedData={event => { if (event.currentTarget.src === sources.current[side]?.objectUrl && event.currentTarget.readyState >= 2) setReady(value => ({ ...value, [side]: true })); }}
-            onWaiting={event => { if (event.currentTarget.src === sources.current[side]?.objectUrl && playbackActive.current && !completedSides.current.has(side)) { pause(); setMessage("Playback buffered. Replay this section when the recordings are ready."); } }}
+            onWaiting={event => {
+              // A queued waiting notice can arrive after native readiness has
+              // recovered. Pause the pair only while this decoder still lacks
+              // future data; preserve the current-stall and ownership guards.
+              if (event.currentTarget.src === sources.current[side]?.objectUrl && playbackActive.current &&
+                  !completedSides.current.has(side) && event.currentTarget.readyState < 3) {
+                pause(); setMessage("Playback buffered. Replay this section when the recordings are ready.");
+              }
+            }}
             onError={event => { if (event.currentTarget.src !== sources.current[side]?.objectUrl) return; pause(); setReady(value => ({ ...value, [side]: false })); setMessage("This attached recording could not be decoded. Choose its original file again."); }} />
         </div>}
       </div>;
