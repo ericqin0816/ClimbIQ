@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import type { RGB, StartSignalDebug } from "../types";
 import { computeColorDistance } from "./videoFrameSampler";
+import { assessStartLightArtifacts } from "./startArtifactAudit";
+import { fuseStartEvidence, requireContinuousStartScene } from "./startSignalFusion";
 import {
   adaptCalibrationToSampledZone,
   findVerifiedGreenDeparture,
@@ -16,6 +18,62 @@ const CALIBRATION: RequiredCalibration = {
 };
 
 describe("calibrated green-departure timing", () => {
+  it.each([false, true])("finds the earliest complete green-to-blue event after an initial blue state (chromatic %s)", chromatic => {
+    const samples = makeSamples([BLUE, BLUE, BLUE, GREEN, GREEN, GREEN, GREEN, GREEN,
+      BLUE, BLUE, BLUE, BLUE, GREEN, GREEN, GREEN, BLUE, BLUE, BLUE]);
+    const result = findVerifiedGreenDeparture(samples, CALIBRATION, 2, chromatic);
+    expect(result?.onsetIndex).toBe(8);
+    expect(result?.confirmationIndex).toBe(8);
+    expect(result?.confirmationFrames).toBe(4);
+  });
+
+  it("retains the original earliest valid event when later complete cycles occur", () => {
+    const samples = makeSamples([GREEN, GREEN, GREEN, BLUE, BLUE, BLUE, GREEN, GREEN, GREEN, BLUE, BLUE, BLUE]);
+    expect(findVerifiedGreenDeparture(samples, CALIBRATION, 2)?.onsetIndex).toBe(3);
+  });
+
+  it("keeps initial-blue, missing-green and later single-frame flicker controls unverified", () => {
+    for (const colors of [
+      [BLUE, BLUE, BLUE, BLUE, BLUE, BLUE],
+      [BLUE, BLUE, BLUE, GREEN, GREEN, GREEN, GREEN],
+      [BLUE, BLUE, BLUE, GREEN, GREEN, GREEN, BLUE, GREEN, GREEN],
+      [GREEN, GREEN, GREEN, GREEN, GREEN, GREEN],
+    ]) expect(findVerifiedGreenDeparture(makeSamples(colors), CALIBRATION, 2)).toBeUndefined();
+    expect(findVerifiedGreenDeparture(makeSamples([GREEN, GREEN, GREEN, BLUE, BLUE, BLUE])
+      .map(sample => ({ ...sample, distanceToBefore: undefined, distanceToAfter: undefined })), CALIBRATION, 2)).toBeUndefined();
+  });
+
+  it("retains elapsed-duration verification when a window starts blue", () => {
+    for (const fps of [30, 60, 120]) {
+      const colors = [BLUE, BLUE, BLUE, GREEN, GREEN, GREEN,
+        ...Array.from({ length: Math.ceil(fps * .1) }, () => BLUE)];
+      const samples = makeSamples(colors).map((sample, index) => ({ ...sample, time: index / fps,
+        timestampMethod: "video-frame" as const, sourceFrameDurationSeconds: 1 / fps }));
+      expect(findVerifiedGreenDeparture(samples, CALIBRATION, 2, false, 2 / 30)?.onsetIndex).toBe(6);
+      const flicker = samples.slice(0, 7);
+      expect(findVerifiedGreenDeparture(flicker, CALIBRATION, 2, false, 2 / 30)).toBeUndefined();
+    }
+  });
+
+  it("does not let a newly available light cursor bypass the camera-cut/reframe veto", () => {
+    const samples = makeSamples([BLUE, BLUE, BLUE, GREEN, GREEN, GREEN, BLUE, BLUE, BLUE]);
+    const recovered = findVerifiedGreenDeparture(samples, CALIBRATION, 2);
+    expect(recovered).toBeDefined();
+    const time = samples[recovered!.onsetIndex].time;
+    const before = { width: 72, height: 96, data: new Uint8ClampedArray(72 * 96 * 4) };
+    const after = { ...before, data: new Uint8ClampedArray(before.data.length) };
+    for (let pixel = 0; pixel < 72 * 96; pixel++) {
+      const value = pixel % 2 ? 20 : 250;
+      before.data.set([140, 140, 140, 255], pixel * 4);
+      after.data.set([value, value, value, 255], pixel * 4);
+    }
+    const audit = assessStartLightArtifacts(before, after, { id: "startLight", label: "observed patch", x1: .7, x2: .73, y1: .8, y2: .83 });
+    expect(audit.usableForAutomaticVote).toBe(false);
+    expect(audit.scene.continuous).toBe(false);
+    const decision = fuseStartEvidence([{ kind: "color", rawTime: time, confidence: "High", reason: "new review cursor" }]);
+    expect(requireContinuousStartScene(decision, [time]).autoAccept).toBe(false);
+  });
+
   it.each([60,120])("requires the same elapsed blue support at %s fps and disconnects an earlier short glitch", fps => {
     const colors = Array.from({length:fps*3},(_,i)=>(i>=fps&&i<fps+2)||i>=fps*2?BLUE:GREEN);
     const samples = makeSamples(colors).map((s,i)=>({...s,time:i/fps,timestampMethod:"video-frame" as const,sourceFrameDurationSeconds:1/fps}));

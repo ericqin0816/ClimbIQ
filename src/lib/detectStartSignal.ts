@@ -371,20 +371,32 @@ export function findVerifiedGreenDeparture(
 ): VerifiedGreenDeparture | undefined {
   const minAfterAdvantage = Math.max(0.35, calibration.colorDelta * 0.06);
   const blueDistanceLimit = calibration.colorDelta * 0.72;
-  const confirmationIndex = samples.findIndex((sample, index) => {
-    if (!isBlueConfirmation(sample,minAfterAdvantage,blueDistanceLimit)) return false;
+  for (let index = 0; index < samples.length; index++) {
+    const sample = samples[index];
+    if (!isBlueConfirmation(sample,minAfterAdvantage,blueDistanceLimit)) continue;
     const count = countBlueConfirmationFrames(samples,index,minAfterAdvantage,blueDistanceLimit);
-    if (count<requiredBlueFrames) return false;
-    if (minimumBlueDurationSeconds<=0) return true;
     const last = samples[index+count-1];
     const duration = last.timestampMethod === "video-frame" ? last.sourceFrameDurationSeconds : undefined;
     const coverage = last.time-sample.time + (duration !== undefined && Number.isFinite(duration) && duration>0 ? duration : 0);
-    return coverage+1e-6>=minimumBlueDurationSeconds;
-  });
-  if (confirmationIndex < 0) {
-    return undefined;
+    if (count >= requiredBlueFrames && (minimumBlueDurationSeconds <= 0 || coverage + 1e-6 >= minimumBlueDurationSeconds)) {
+      const verified = findDepartureBeforeBlueRun(samples, calibration, index, count, requireChromaticDeparture);
+      if (verified) return verified;
+    }
+    // A window can begin in a previous blue state before the sensor arms green.
+    // That incomplete run must not hide a later fully verified green departure.
+    // Visit each blue run once, preserving the earliest valid event and checks.
+    index += count - 1;
   }
+  return undefined;
+}
 
+function findDepartureBeforeBlueRun(
+  samples: StartSignalDebug["samples"],
+  calibration: RequiredCalibration,
+  confirmationIndex: number,
+  confirmationFrames: number,
+  requireChromaticDeparture: boolean,
+): VerifiedGreenDeparture | undefined {
   const beforeLikeDistances = samples
     .slice(0, confirmationIndex)
     .filter((sample) => (sample.distanceToBefore ?? Infinity) <= (sample.distanceToAfter ?? -Infinity))
@@ -444,12 +456,7 @@ export function findVerifiedGreenDeparture(
       return {
         onsetIndex: index,
         confirmationIndex,
-        confirmationFrames: countBlueConfirmationFrames(
-          samples,
-          confirmationIndex,
-          minAfterAdvantage,
-          blueDistanceLimit,
-        ),
+        confirmationFrames,
         departureThreshold: roundMetric(departureThreshold),
         baselineDistance: roundMetric(baselineDistance),
       };
