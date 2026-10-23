@@ -1,10 +1,23 @@
 import type { NormalizedZone, StartLightCalibration } from "../types";
 import { deduplicateAnalysisLaneCandidates, startLaneId, type AnalysisLaneCandidate } from "./startLaneEvidence";
 
+export const FINISH_LANE_HORIZONTAL_MARGIN = 0.035;
+
 /** Build the same evidence pool for Quick Analyze and the manual Finish action.
  * The fused clock bounds timing; it must not overwrite a patch's observed cue.
  */
 export function prepareFinishLaneCandidates(
+  lightZone: NormalizedZone | undefined,
+  lightCalibration: StartLightCalibration | undefined,
+  acceptedStart: number,
+  laneCandidates: AnalysisLaneCandidate[],
+  trustedBodyZone?: NormalizedZone,
+): AnalysisLaneCandidate[] {
+  return prepareFinishLaneCandidatePool(lightZone, lightCalibration, acceptedStart, laneCandidates, trustedBodyZone).slice(0, 3);
+}
+
+/** Identity assessment must see the full pool before the scanning budget. */
+export function prepareFinishLaneCandidatePool(
   lightZone: NormalizedZone | undefined,
   lightCalibration: StartLightCalibration | undefined,
   acceptedStart: number,
@@ -21,7 +34,7 @@ export function prepareFinishLaneCandidates(
   const permitted = [...primary, ...laneCandidates].filter(candidate => {
     if (!trustedBodyZone) return true;
     const center = (candidate.zone.x1 + candidate.zone.x2) / 2;
-    return center >= trustedBodyZone.x1 - 0.035 && center <= trustedBodyZone.x2 + 0.035;
+    return center >= trustedBodyZone.x1 - FINISH_LANE_HORIZONTAL_MARGIN && center <= trustedBodyZone.x2 + FINISH_LANE_HORIZONTAL_MARGIN;
   });
-  return deduplicateAnalysisLaneCandidates(permitted).slice(0, 3);
+  return deduplicateAnalysisLaneCandidates(permitted);
 }

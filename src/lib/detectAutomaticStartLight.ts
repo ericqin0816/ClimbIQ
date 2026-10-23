@@ -210,8 +210,8 @@ async function detectStartLightPass({
         refinedPairs.push({ lane, result: coarseLaneResult });
         continue;
       }
-      refined.debug.detectionMethod = "Automatically located green-to-blue start light";
-      refined.reason = `ClimbIQ found a green-to-blue lane sensor automatically. ${refined.reason}`;
+      refined.debug.detectionMethod = "Automatically located green-to-blue color-change region";
+      refined.reason = `ClimbIQ located a green-to-blue color-change region automatically. ${refined.reason}`;
       refined.candidates = refined.candidates?.map((candidate) => ({
         ...candidate,
         method: "Automatic green-to-blue light detection",
@@ -686,7 +686,7 @@ function buildCoarseResult(discovery: GreenBlueDiscovery): StartSignalDetectionR
   const candidate: DetectionCandidate = {
     rawTime,
     confidence,
-    reason: "First sustained departure from green; later blue frames verified the automatically located sensor change.",
+    reason: "First sustained departure from green; later blue-like frames verified the automatically located color change.",
     score: discovery.score,
     kind: "Automatic green-to-blue transition",
     method: "Automatic green-to-blue light detection",
@@ -697,7 +697,7 @@ function buildCoarseResult(discovery: GreenBlueDiscovery): StartSignalDetectionR
     detected: true,
     rawTime,
     confidence,
-    reason: "ClimbIQ located the sensor automatically and marked its first sustained departure from green; later blue frames verified the change. Timestamp resolution is approximately 0.20s because fine refinement was inconclusive.",
+    reason: "ClimbIQ located a green-to-blue color-change region automatically and marked its first sustained departure from green; later blue-like frames verified the change. Timestamp resolution is approximately 0.20s because fine refinement was inconclusive.",
     threshold: Math.max(1, calibration.colorDelta ?? 1),
     candidates: [candidate],
     debug: {

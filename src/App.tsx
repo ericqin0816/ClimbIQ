@@ -66,7 +66,7 @@ import {
 } from "./lib/routeAlignment";
 import { fuseStartEvidence, requireContinuousStartScene, type FusedStartDecision, type StartEvidence } from "./lib/startSignalFusion";
 import { associateStartLanes, startLaneId, type AnalysisLaneCandidate, type StartLaneEvidence } from "./lib/startLaneEvidence";
-import { prepareFinishLaneCandidates } from "./lib/finishLaneEvidence";
+import { assessFinishLaneIdentity, clearAutomaticLaneBiomechanics, clearAutomaticLaneDependentMarkers } from "./lib/finishLaneIdentity";
 import { assessAutomaticStartBodyAudit } from "./lib/startBodyAudit";
 import { deriveAutomaticStartBodyZone, resolveAnalysisBodyZone } from "./lib/startRegion";
 import { applyTimestampAcceptance, clearMarkerTimestamp, sanitizeTimestampSequence } from "./lib/timestampIntegrity";
@@ -184,6 +184,11 @@ interface AutomaticFinishOutcome {
   calibration: StartLightCalibration;
   confidence: Confidence;
   accepted: boolean;
+}
+
+interface AutomaticFinishIdentityBlocked {
+  identityBlocked: true;
+  reason: string;
 }
 
 interface PendingVideoAttachment {
@@ -2198,7 +2203,7 @@ function App() {
     preflightMovement?: FirstMovementDetectionResult,
   ): Promise<void> {
     setAutoAnalysisStatus("Start found. Checking the verified lane light for the finish…");
-    const automaticFinish = await detectAndMaybeAcceptFinish(
+    const finishAttempt = await detectAndMaybeAcceptFinish(
       video,
       acceptedStart,
       context.analysisLightZone,
@@ -2208,9 +2213,18 @@ function App() {
       setAutoAnalysisStatus,
       context.analysisLaneCandidates,
     );
-    // If two lanes started together and only the fallback lane has a valid
-    // finish, use that same lane to localize the athlete. A user-drawn body zone
-    // remains authoritative.
+    if (finishAttempt && "identityBlocked" in finishAttempt) {
+      // An entered official duration cannot choose between competing athletes.
+      // Keep the shared Start, but do not publish the preflight movement result
+      // or continue into official-time-bounded pose/route analysis.
+      setMovementResult(null);
+      setMovementPreviewFrames({});
+      setAutoAnalysisStatus(finishAttempt.reason);
+      return;
+    }
+    const automaticFinish = finishAttempt;
+    // Only compatible lane hypotheses reach this point. A user-drawn body
+    // zone remains authoritative over an automatic compatible-patch fallback.
     const trustedBodyZone = zones.startBody && !zones.startBody.label.startsWith("Automatic lane")
       ? zones.startBody
       : undefined;
@@ -2416,19 +2430,41 @@ function App() {
     signal?: AbortSignal,
     onStatus?: (message: string) => void,
     laneCandidates: AnalysisLaneCandidate[] = [],
-  ): Promise<AutomaticFinishOutcome | null> {
+  ): Promise<AutomaticFinishOutcome | AutomaticFinishIdentityBlocked | null> {
     setAutomaticFinishReview(null);
+    const trustedBodyZone = zones.startBody && !zones.startBody.label.startsWith("Automatic lane")
+      ? zones.startBody : undefined;
+    const laneIdentity = assessFinishLaneIdentity({ lightZone, lightCalibration, acceptedStart, laneCandidates, trustedBodyZone });
+    if (laneIdentity.requiresAthleteSelection) {
+      // This shared branch also handles the standalone Find Finish action.
+      // Functional updates preserve a Start just committed by Quick Analyze.
+      setTimestamps(clearAutomaticLaneDependentMarkers);
+      setMovementResult(null);
+      setMovementPreviewFrames({});
+      setBiomechanics(clearAutomaticLaneBiomechanics);
+      setRouteAlignment(null);
+      setHold10SecondPass(null);
+      setSecondPassStatus("");
+      pendingAutomaticContextRef.current = null;
+      setSuggestedStartRawTime(null);
+      setStartReviewNeeded(false);
+      // Retain the unchanged lane evidence ledger: dropping its competing
+      // patches would let a second Find Finish silently bypass this guard.
+      const reason = laneIdentity.reason;
+      setFinishResult({ detected: false, confidence: "None", reason, threshold: 0, candidates: [],
+        debug: { zoneExists: Boolean(lightZone), detectionMethod: "Finish athlete-lane identity review", framesSampled: 0,
+          maxColorDistance: 0, threshold: 0, detectedCrossings: [], samples: [], failureReason: reason } });
+      setFinishStatus(reason);
+      onStatus?.(reason);
+      return { identityBlocked: true, reason };
+    }
     const officialDuration = Number(officialTotalTime);
     const expectedFinishTime = resolveOfficialFinishRawTime({
       startRawTime: acceptedStart,
       videoDuration: video.duration,
       officialTotalSeconds: officialDuration,
     });
-    const trustedBodyZone = zones.startBody && !zones.startBody.label.startsWith("Automatic lane")
-      ? zones.startBody : undefined;
-    const candidates = prepareFinishLaneCandidates(
-      lightZone, lightCalibration, acceptedStart, laneCandidates, trustedBodyZone,
-    );
+    const candidates = laneIdentity.candidates;
     if (!candidates.length) {
       const missing = await detectFinishSignal({
         video,
