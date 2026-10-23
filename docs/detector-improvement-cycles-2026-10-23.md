@@ -1,6 +1,6 @@
 # Ten detector improvement cycles — October 22–23, 2026
 
-Status: ten review cycles complete; final delivery checks running. The requested priority is Start/Finish detection, followed by
+Status: ten review cycles and local verification complete. The requested priority is Start/Finish detection, followed by
 contact/tracking where evidence supports a change. Each cycle tests a concrete
 hypothesis, reviews the result with agents, and keeps or rejects the change.
 This improves detector code; it does not retrain the pretrained pose model.
@@ -261,7 +261,7 @@ Recorded-cue brackets combine conservatively to 2.65–2.80s, apparent left-lane
 contact to 8.08–8.24s. Source speed, acoustic propagation, source A/V alignment and
 electronic trigger timing are uncalibrated. These are rough source observations,
 not human independent validation or precise electronic labels. Media stays out
-of Git. H11 remains reserved until the final candidate is frozen.
+of Git. H11 was reserved until the final candidate was frozen.
 
 ## Final reserved-source result
 
@@ -281,7 +281,8 @@ Three counterbalanced baseline/candidate pairs used fresh browser storage,
 identical file hashes, Chrome 156 and clean builds throughout. Baseline remained
 `f5d9a14`; candidate remained `f01c5bc`. No runs were excluded. The terminal state
 was an accepted total for the phone and a review result for each public clip.
-All twelve candidate clip runs preserved the baseline's accepted endpoint count.
+All twelve candidate clip runs preserved the baseline's accepted endpoint count,
+accepted marker values and displayed total.
 
 | Clip | Baseline runs (s) | Candidate runs (s) | Median reduction |
 | --- | --- | --- | ---: |
@@ -322,8 +323,45 @@ The original exact-endpoint test remains intact. A separate production regressio
 models a recovered notification on real native players, then controlled
 readyState 2, the required paired pause, explicit UI replay, native progress and
 exact endpoints. Controlled readiness is not evidence of real network starvation.
-Post-fix production and delivery checks remain in progress; the original failure
-is retained rather than omitted from the validation record.
+The post-fix clean build `f7a6220` passed all 1,022 local tests and 40/40 production
+workflows across Chromium desktop and phone viewports. Three additional native
+phone replay repetitions passed shorter-side continuation and exact endpoints.
+None of those three emitted waiting, so the controlled regression supplies the
+recovered-notification branch evidence. The original failure remains retained.
+This identifies the reproduced practice-recording race; it does not establish
+the cause of every older unexplained playback pause.
+
+## Grades and delivery scope
+
+Independent agent assessments after the replay fix:
+
+| Area | Grade / 10 | Scope |
+| --- | ---: | --- |
+| Product practicality | 7.3–7.4 | Human correction effort, training benefit and return use remain unmeasured |
+| Functionality | 8.0–8.2 | Real browser flows and recovery; H06 tail failure remains |
+| UI | 8.9–9.2 | Browser/phone-viewport implementation; no physical-iPhone usability validation |
+| Code quality | 9.0–9.1 | Ownership, contracts, parity and regression checks; large App remains a maintenance cost |
+| Project/release readiness | 7.5 | Independent field study and actual iPhone checks outstanding |
+| Engineering delivery | 9.6 conditional | Setup, CI, docs and traceability; requires hosted Chromium/WebKit/verification green |
+| Detector evidence strength | 5.5 | Exact population accuracy and endpoint error remain unestablished |
+
+The fixed measurement rubric was not raised to meet the requested target:
+
+| Cycle | Coverage proxy | Fixed-reference speed | Interpretation |
+| --- | ---: | ---: | --- |
+| 1 | 2.5 | 5.000 carried | Helper CPU parity only; no separate app measurement |
+| 2 | 2.5 | 5.255 | Cumulative single production pass |
+| 3–4 | 2.5 carried | 5.255 carried | No additional whole-app speed credit |
+| 5 | 2.5 | 4.975 | Latest cumulative single production pass |
+| 6–9 | 2.5 carried | 4.975 carried | UI/native-clock work and rejected exposure experiment; no new qualifying speed measurement |
+| 10 | 2.5 | 4.886 | Repeated `f01c5bc` detector build; paired contemporaneous grade separately 5.390 |
+
+Known-invalid guard adherence stays provisional 10/10 and evidence strength 5.5/10
+throughout, with the limited meanings defined above. These engineering and agent
+grades are not accuracy certification. The repeated speed build predates only the
+comparison replay fix; detector and sampler source code did not change afterward.
+Hosted checks for the published commit are visible in
+[GitHub CI](https://github.com/ericqin0816/ClimbIQ/actions/workflows/ci.yml).
 
 Local detailed evidence currently lives under ignored `test-results/detector-ten/`,
 `test-results/detection-cycles/`, and `test-results/finish-cycles/`.
