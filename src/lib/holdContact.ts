@@ -8,7 +8,7 @@ import type {
 } from "../types";
 import { STANDARD_SPEED_HOLDS, type StandardSpeedHoldId } from "./standardSpeedRoute";
 import { projectImagePointToWall, validateWallCalibration } from "./wallCalibration";
-import { uniqueSourceFrameSamples } from "./sourceSampleTiming";
+import { sourceSampleTime, uniqueSourceFrameSamples } from "./sourceSampleTiming";
 
 export type ContactHand = "left" | "right";
 
@@ -188,9 +188,14 @@ export function detectHoldContact(
     return unavailable("The registered hold neighborhood is invalid or does not match the target; rerun route registration.");
   }
   const frames = uniqueSourceFrameSamples([...result.frames]
-    .filter((frame) => Number.isFinite(frame.rawTime) &&
-      frame.rawTime >= result.startRawTime - 1e-9 && frame.rawTime <= result.endRawTime + 1e-9)
-    .sort((left, right) => left.rawTime - right.rawTime));
+    .filter((frame) => Number.isFinite(frame.rawTime))
+    .sort((left, right) => left.rawTime - right.rawTime))
+    // Dwell, speeds and onset must describe the measured pixels, not the later
+    // seek cursor. Keep this normalization private; saved frame provenance and
+    // the original cursor remain intact. Legacy/invalid PTS falls back to it.
+    .map((frame) => ({ ...frame, rawTime: sourceSampleTime(frame) }))
+    .filter((frame) => frame.rawTime >= result.startRawTime - 1e-9 && frame.rawTime <= result.endRawTime + 1e-9)
+    .sort((left, right) => left.rawTime - right.rawTime);
   const episodes = HAND_ORDER.flatMap((hand) =>
     buildEpisodes(frames, hand, hold, validation.matrix!, resolved, route),
   );

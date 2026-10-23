@@ -19,6 +19,50 @@ const hold10: WallPoint = { xMeters: 1.399, yMeters: 8.334 };
 const farLeft: WallPoint = { xMeters: 0.25, yMeters: 6 };
 
 describe("hold contact detection", () => {
+  it("uses measured source times for contact, dwell and review without mutating seek cursors", () => {
+    const sourceFrames = [1, 1.1, 1.2, 1.3].map(time => frame(time, farLeft, hold10));
+    const result = makeResult(sourceFrames.map(item => ({ ...item, rawTime: item.rawTime + 0.02,
+      decodedFrameRawTime: item.rawTime, sourceFrameDurationSeconds: 1 / 30 })));
+    const original = structuredClone(result);
+    const expected = detectHoldContact(makeResult(sourceFrames), calibration, hold10, { holdLabel: "Hold 10" });
+    expect(expected.detected).toBe(true);
+    expect(detectHoldContact(result, calibration, hold10, { holdLabel: "Hold 10" })).toEqual(expected);
+    expect(result).toEqual(original);
+  });
+
+  it("does not manufacture dwell duration from changing seek offsets", () => {
+    const result = makeResult([1, 1.05, 1.1].map((time, index) => ({
+      ...frame(time + index * 0.025, farLeft, hold10), decodedFrameRawTime: time, sourceFrameDurationSeconds: 0.05,
+    })));
+    const contact = detectHoldContact(result, calibration, hold10, { holdLabel: "Hold 10" });
+    expect(contact.detected).toBe(false);
+    expect(contact.reason).toContain("not sustained long enough");
+    expect(contact.evidence?.observedDurationSeconds).toBeCloseTo(0.1, 9);
+  });
+
+  it("applies attempt boundaries to source observations rather than their later seek cursors", () => {
+    const result = makeResult([1, 1.1, 1.2, 1.3].map(time => ({
+      ...frame(time + 0.02, farLeft, hold10), decodedFrameRawTime: time, sourceFrameDurationSeconds: 1 / 30,
+    })));
+    result.startRawTime = 1.05;
+    result.endRawTime = 1.3;
+    const contact = detectHoldContact(result, calibration, hold10, { holdLabel: "Hold 10" });
+    expect(contact.detected).toBe(true);
+    expect(contact.rawTime).toBe(1.1);
+    expect(contact.candidates?.[0]).toMatchObject({ firstObservedRawTime: 1.1, lastObservedRawTime: 1.3, observedSamples: 3 });
+    expect(contact.reviewWindow).toEqual({ startRawTime: 1.05, endRawTime: 1.3 });
+  });
+
+  it.each([undefined, NaN, Infinity, -1, "future", "stale"])("keeps cursor fallback for absent or invalid PTS: %s", invalid => {
+    const frames = [1, 1.1, 1.2, 1.3].map(time => frame(time, farLeft, hold10));
+    const result = makeResult(frames.map(item => ({ ...item,
+      decodedFrameRawTime: invalid === "future" ? item.rawTime + 0.1 : invalid === "stale" ? item.rawTime - 0.1 :
+        typeof invalid === "number" ? invalid : undefined,
+      sourceFrameDurationSeconds: 1 / 30,
+    })));
+    expect(detectHoldContact(result, calibration, hold10)).toEqual(detectHoldContact(makeResult(frames), calibration, hold10));
+  });
+
   it("does not manufacture dwell from repeated seeks into one source frame", () => {
     const repeated = [1, 1.05, 1.1, 1.15].map(time => Object.assign(frame(time, farLeft, hold10), {
       decodedFrameRawTime: 1, sourceFrameDurationSeconds: 0.2,
