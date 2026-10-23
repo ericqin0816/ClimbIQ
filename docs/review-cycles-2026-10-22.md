@@ -141,8 +141,8 @@ The experience reviewer independently completed desktop, 320×740, and 320×568
 walkthroughs. At the shortest size, both replay frames end at y484 and fixed
 navigation begins at y499. The code reviewer found no remaining actionable bug
 in the reviewed ownership, serialization, focus, or memoization changes. The
-project assessment remains conditional on the final hosted WebKit rerun; the
-local Windows skips cannot supply that evidence. No reviewer reported a score
+project reviewer confirmed the 9.6 score after the final hosted WebKit run;
+local Windows skips did not supply that evidence. No reviewer reported a score
 for independent real-climber accuracy or native readiness.
 
 The first Round 3 [hosted run](https://github.com/ericqin0816/ClimbIQ/actions/runs/39873514879)
@@ -179,6 +179,22 @@ now retains an actual DOM commit with both saved rows, replacement input, and
 sampling action disabled together, then verifies enabled recovery. No application
 code, readiness timeout, or disabled-state requirement changed for these test
 adjustments.
+
+Final [hosted verification](https://github.com/ericqin0816/ClimbIQ/actions/runs/39876463932)
+completed successfully at `813f80dd739c921fc4869c893efd201da079b101`:
+
+- Verification passed: 963 tests, typecheck/build/server, production audit,
+  native source configuration, compiled-worker policy checks, existing browser
+  workflows, and all three source-frame timing repetitions.
+- Chromium passed all 36 desktop/phone workflows.
+- macOS WebKit passed all 36 desktop/phone workflows without skips, including
+  endpoint stopping, review focus, outside-export intent, calibration ownership,
+  and provenance through replacement and a new recording.
+
+All three closing reviewers confirmed no remaining actionable finding in their
+reviewed scopes. The final documentation commit records this result without
+changing the reviewed application or tests. The scores remain implementation
+assessments, subject to the evidence limits below.
 
 ## Evidence limits
 
