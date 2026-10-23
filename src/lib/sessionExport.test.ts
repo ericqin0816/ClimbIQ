@@ -72,9 +72,17 @@ describe("portable dataset and report boundary", () => {
         { rawTime: 2, confidence: "Low", reason: "Other transition", score: .1, kind: "light" }] };
     source.startResult.debug.audioTimingWindow = { startRawTime: .99, endRawTime: 1.01,
       hopSeconds: .01, isEventAccuracyBound: false };
+    source.startResult.debug.audioChannelRecovery = { selectedChannel: 0, isIndependentEvidence: false,
+      mixedResult: { found: true, confidence: "Medium", rawTime: .7, reason: "Mixed protocol inconclusive" },
+      channels: [0, 1].map(channel => ({ channel, rawTime: .99 + channel * .03,
+        timingWindow: { startRawTime: .99 + channel * .03, endRawTime: 1.01 + channel * .03,
+          hopSeconds: .01, isEventAccuracyBound: false }, sequence: [] })),
+      nominalWindowEnvelope: { startRawTime: .99, endRawTime: 1.04,
+        isContinuousObservedSupport: false, isEventAccuracyBound: false } };
     const dataset = createSessionDataset(source);
     expect(dataset.startLaneEvidenceAudit).toMatchObject({ scope: "current-analysis-only", isGroundTruthLabel: false,
-      audioTimingWindow: source.startResult.debug.audioTimingWindow });
+      audioTimingWindow: source.startResult.debug.audioTimingWindow,
+      audioChannelRecovery: source.startResult.debug.audioChannelRecovery });
     expect(dataset.candidates.startSignal).toMatchObject([{ accepted: true, rejected: false, candidateRawTime: 1 },
       { accepted: false, rejected: true, candidateRawTime: 2 }]);
     expect(dataset.detectionWarnings).toEqual(["Check light visibility", "Start Light Zone may be large for light detection."]);

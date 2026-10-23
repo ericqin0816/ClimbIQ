@@ -39,11 +39,17 @@ export function startLaneId(zone: NormalizedZone): string {
  */
 export function associateStartLanes(records: StartLaneEvidence[], decision: FusedStartDecision, searchHintTime?: number, trustedBodyZone?: NormalizedZone, recoveredVisual = false) {
   const finiteTime = decision.found && Number.isFinite(decision.rawTime) && decision.rawTime! >= 0;
+  const audioDefinesClock = decision.supportingEvidence.some(item =>
+    item.kind === "audio" && item.confidence === "High" && item.automaticVoteAllowed !== false);
   const inSelectedLane = (record: StartLaneEvidence) => !trustedBodyZone ||
     ((record.zone.x1 + record.zone.x2) / 2 >= trustedBodyZone.x1 - 0.035 &&
      (record.zone.x1 + record.zone.x2) / 2 <= trustedBodyZone.x2 + 0.035);
   const valid = records.filter(record => validLane(record) && record.automaticVoteAllowed !== false && inSelectedLane(record));
-  const labels = new Set(decision.supportingEvidence.filter(item => item.kind === "color" && item.automaticVoteAllowed !== false).map(item => item.label));
+  // A weak color patch can share the audio event's time without identifying a
+  // lane light. Keep it in the audit, but do not let its label seed spatial
+  // association or steer the Finish sensor when High audio owns the clock.
+  const labels = new Set(decision.supportingEvidence.filter(item => item.kind === "color" && item.automaticVoteAllowed !== false &&
+    (!audioDefinesClock || item.confidence !== "Low")).map(item => item.label));
   const seeds = finiteTime ? valid.filter(record => labels.has(record.label)) : [];
   const reliable = seeds.filter(record => record.confidence === "High" || record.confidence === "Medium");
   const anchors = reliable.length ? reliable : seeds;
@@ -64,7 +70,7 @@ export function associateStartLanes(records: StartLaneEvidence[], decision: Fuse
   // In a recovered pass, weak reflections are review evidence,
   // not alternate Finish sensors. A later color reversal cannot retroactively
   // prove that an uncertain patch belonged to the athlete's start light.
-  const eligible = recoveredVisual && reliableSupport.length ? reliableSupport : supported;
+  const eligible = audioDefinesClock || (recoveredVisual && reliableSupport.length) ? reliableSupport : supported;
   const candidates = deduplicateAnalysisLaneCandidates(eligible.map(record => ({ ...record, laneId: startLaneId(record.zone) })));
   const selected = eligible[0];
   const audit: StartLaneAudit[] = records.filter(validLane).map(record => ({
@@ -73,6 +79,7 @@ export function associateStartLanes(records: StartLaneEvidence[], decision: Fuse
     eligible: eligible.includes(record), selected: record === selected,
     reason: record.automaticVoteAllowed === false ? record.artifactReason ?? "Excluded start-light artifact."
       : !inSelectedLane(record) ? "Outside the user-selected athlete lane."
+      : audioDefinesClock && record.confidence === "Low" ? "Low-confidence color cue retained for review; High audio timing cannot verify a lane-light region."
       : eligible.includes(record) ? "Visual cue supports the selected start event."
         : supported.includes(record) ? "Weak patch retained for review; stronger visual lane evidence is available."
         : "Visual cue does not support the selected start event.",

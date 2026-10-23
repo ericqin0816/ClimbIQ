@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { associateStartLanes, deduplicateAnalysisLaneCandidates, startLaneId, type StartLaneEvidence } from "./startLaneEvidence";
-import type { FusedStartDecision } from "./startSignalFusion";
+import { fuseStartEvidence, type FusedStartDecision } from "./startSignalFusion";
+import { prepareFinishLaneCandidatePool } from "./finishLaneEvidence";
 
 const lane = (label: string, x: number, time = 2.85, score = 100): StartLaneEvidence => ({
   label, startRawTime: time, score, confidence: "High",
@@ -14,6 +15,63 @@ const decision = (records: StartLaneEvidence[], time = 2.85): FusedStartDecision
 });
 
 describe("independent start-lane evidence association", () => {
+  it("does not turn the known Low shoe cue into a Finish sensor when High audio recovers the Start", () => {
+    // Development IMG_9075 source inspection identified this patch as a moving
+    // shoe/floor, not a lamp. Its nearby clock is not independent identity proof.
+    const shoe: StartLaneEvidence = {
+      label: "automatic lane light 3", startRawTime: 8.835, score: 1000, confidence: "Low",
+      zone: { id: "startLight", label: "Auto-detected green-to-blue start light",
+        x1: .5888888888888889, x2: .6222222222222222, y1: .94375, y2: .9625 },
+      calibration: { beforeStartRGB: { r: 46, g: 42, b: 31 }, afterStartRGB: { r: 113, g: 117, b: 136 } },
+    };
+    const fused = fuseStartEvidence([
+      { kind: "audio", label: "changed-pitch final start beep", rawTime: 8.59, confidence: "High", reason: "Complete recorded protocol" },
+      { kind: "color", label: shoe.label, rawTime: shoe.startRawTime, confidence: "Low", reason: "Weak visual change" },
+    ]);
+    expect(fused).toMatchObject({ found: true, autoAccept: true, rawTime: 8.59, confidence: "High" });
+    expect(fused.supportingEvidence.some(item => item.label === shoe.label)).toBe(true);
+    for (const hint of [undefined, 8.59]) for (const recovered of [false, true]) {
+      const result = associateStartLanes([shoe], fused, hint, undefined, recovered);
+      expect(result.associationTime).toBe(8.59);
+      expect(result.selected).toBeUndefined();
+      expect(result.candidates).toEqual([]);
+      expect(result.audit).toEqual([expect.objectContaining({ confidence: "Low", eligible: false, selected: false,
+        reason: expect.stringContaining("High audio timing cannot verify a lane-light region") })]);
+      expect(prepareFinishLaneCandidatePool(result.selected?.zone, result.selected?.calibration,
+        fused.rawTime!, result.candidates)).toEqual([]);
+    }
+  });
+
+  it("keeps reliable visual lanes while excluding a nearer, higher-scoring Low patch from an audio-defined event", () => {
+    const weak = { ...lane("weak reflection", .8, 8.59, 1e9), confidence: "Low" as const };
+    const medium = { ...lane("medium region", .2, 8.71, 1), confidence: "Medium" as const };
+    const high = lane("high region", .3, 8.76, 1);
+    const fused = fuseStartEvidence([
+      { kind: "audio", rawTime: 8.59, confidence: "High", reason: "Complete recorded protocol" },
+      ...[weak, medium, high].map(record => ({ kind: "color" as const, label: record.label,
+        rawTime: record.startRawTime, confidence: record.confidence, reason: "Visual cue" })),
+    ]);
+    expect(fused.rawTime).toBe(8.59);
+    for (const records of [[weak, medium, high], [high, medium, weak]]) {
+      const result = associateStartLanes(records, fused, 8.59);
+      expect(result.selected?.label).toBe("medium region");
+      expect(result.candidates.map(record => record.label)).toEqual(["medium region", "high region"]);
+      expect(result.audit.find(record => record.label === weak.label)?.eligible).toBe(false);
+    }
+  });
+
+  it("preserves existing Low-lane behavior when audio is not High", () => {
+    const weak = { ...lane("faint region", .7, 8.835), confidence: "Low" as const };
+    const fused = fuseStartEvidence([
+      { kind: "audio", rawTime: 8.59, confidence: "Medium", reason: "Incomplete protocol" },
+      { kind: "color", label: weak.label, rawTime: weak.startRawTime, confidence: "Low", reason: "Weak visual change" },
+    ]);
+    expect(fused.autoAccept).toBe(false);
+    const result = associateStartLanes([weak], fused, 8.59);
+    expect(result.selected?.label).toBe(weak.label);
+    expect(result.candidates).toHaveLength(1);
+  });
+
   it("prefers verified visual support over a weak reflection closest to the beep", () => {
     const reflection = {...lane("reflection", .8), confidence:"Low" as const};
     const sensor = {...lane("sensor", .7, 2.95), confidence:"Medium" as const};

@@ -80,6 +80,7 @@ export interface StartSignalDebug {
   audioSearchHintTime?: number;
   audioConfidence?: Confidence;
   audioTimingWindow?: import("./lib/detectAudioStartSignal").AudioTimingWindow;
+  audioChannelRecovery?: import("./lib/detectAudioStartSignal").AudioStartResult["channelRecovery"];
   detailRecovery?: { attempted: boolean; selected: boolean; reason: string };
   zoneExists: boolean;
   normalizedZone?: NormalizedZone;

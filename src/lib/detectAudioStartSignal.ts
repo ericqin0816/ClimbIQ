@@ -57,6 +57,13 @@ export interface AudioStartResult {
   matchedPattern?: "two-same-then-different" | "regular-countdown" | "single-prominent-beep";
   sequence?: AudioToneSegment[];
   segments: AudioToneSegment[];
+  channelRecovery?: {
+    selectedChannel: number;
+    mixedResult: { found: boolean; confidence: Confidence; rawTime?: number; reason: string };
+    channels: Array<{ channel: number; rawTime: number; timingWindow: AudioTimingWindow; sequence: AudioToneSegment[] }>;
+    nominalWindowEnvelope: { startRawTime: number; endRawTime: number; isContinuousObservedSupport: false; isEventAccuracyBound: false };
+    isIndependentEvidence: false;
+  };
 }
 
 /** Nominal feature window at the reported leading cursor. Qualification can
@@ -119,14 +126,14 @@ export async function detectAudioStartSignal({
       return emptyAudioResult("The audio search window is too short for a countdown sequence.");
     }
     onProgress?.("Listening for two matching beeps and the different-pitch start beep…");
-    const mono = resampleMixedChannels(
+    return await analyzeAudioChannelWindow(
       Array.from({ length: decoded.numberOfChannels }, (_, index) => decoded.getChannelData(index)),
       decoded.sampleRate,
       startFrame,
       endFrame,
-      TARGET_SAMPLE_RATE,
+      searchStart,
+      signal,
     );
-    return analyzeBeepSequence(mono, TARGET_SAMPLE_RATE, searchStart);
   } catch (error) {
     checkCancelled(signal);
     return emptyAudioResult(
@@ -137,6 +144,68 @@ export async function detectAudioStartSignal({
   } finally {
     if (context) void context.close().catch(() => undefined);
   }
+}
+
+/** Preserve the normal mixed path. Mixing stereo can cancel a narrow start
+ * tone while reinforcing the preparation tones. Only two complete, agreeing
+ * original-channel protocols may recover an inconclusive mix; they remain one
+ * audio source, with an original channel clock rather than an averaged time.
+ */
+export async function analyzeAudioChannelWindow(
+  channels: Float32Array[], sourceSampleRate: number, startFrame: number, endFrame: number, timeOffset: number,
+  signal?: AbortSignal,
+): Promise<AudioStartResult> {
+  checkCancelled(signal);
+  const mixed = analyzeBeepSequence(resampleMixedChannels(channels, sourceSampleRate, startFrame, endFrame,
+    TARGET_SAMPLE_RATE), TARGET_SAMPLE_RATE, timeOffset);
+  if (mixed.confidence === "High" || channels.length !== 2) return mixed;
+  const results: AudioStartResult[] = [];
+  for (const channel of channels) {
+    // Let cancellation release the decoder before another fallback analysis.
+    await new Promise<void>(resolve => setTimeout(resolve, 0));
+    checkCancelled(signal);
+    results.push(analyzeBeepSequence(resampleMixedChannels([channel], sourceSampleRate, startFrame, endFrame,
+      TARGET_SAMPLE_RATE), TARGET_SAMPLE_RATE, timeOffset));
+  }
+  checkCancelled(signal);
+  return reconcileStereoCountdown(mixed, results);
+}
+
+/** Associate separately qualified channel observations, never channel votes. */
+export function reconcileStereoCountdown(mixed: AudioStartResult, results: AudioStartResult[]): AudioStartResult {
+  if (mixed.confidence === "High" || results.length !== 2) return mixed;
+  const strong = results.map(result => result.found && result.confidence === "High" &&
+    result.matchedPattern === "two-same-then-different" && result.sequence?.length === 3 &&
+    Number.isFinite(result.rawTime) && result.timingWindow ? result : undefined);
+  const [left, right] = strong;
+  if (!left || !right) return mixed;
+  const a = left.sequence!, b = right.sequence!;
+  for (let index = 0; index < 3; index++) {
+    const leftPitch = a[index].dominantFrequencyHz, rightPitch = b[index].dominantFrequencyHz;
+    if (!leftPitch || !rightPitch || relativeFrequencyDifference(leftPitch, rightPitch) > MAX_STRONG_PREPARATION_PITCH_ERROR) return mixed;
+    const gap = Math.max(a[index].startTime, b[index].startTime) - Math.min(a[index].endTime, b[index].endTime);
+    // These are associations between independently qualified support intervals,
+    // not permission to weaken either channel's duration or spectral checks.
+    if (index < 2 ? gap > FRAME_SECONDS + 1e-9 : gap >= 0) return mixed;
+  }
+  if (Math.abs(left.rawTime! - right.rawTime!) > FRAME_SECONDS + 2 * HOP_SECONDS + 1e-9) return mixed;
+  const selectedChannel = left.rawTime! <= right.rawTime! ? 0 : 1;
+  const selected = results[selectedChannel];
+  return { ...selected,
+    reason: `${selected.reason} The complete countdown agrees across both original audio channels; the mixed result was inconclusive.`,
+    channelRecovery: {
+      selectedChannel,
+      mixedResult: { found: mixed.found, confidence: mixed.confidence, rawTime: mixed.rawTime, reason: mixed.reason },
+      channels: results.map((result, channel) => ({ channel, rawTime: result.rawTime!,
+        timingWindow: result.timingWindow!, sequence: result.sequence! })),
+      nominalWindowEnvelope: {
+        startRawTime: Math.min(left.timingWindow!.startRawTime, right.timingWindow!.startRawTime),
+        endRawTime: Math.max(left.timingWindow!.endRawTime, right.timingWindow!.endRawTime),
+        isContinuousObservedSupport: false, isEventAccuracyBound: false,
+      },
+      isIndependentEvidence: false,
+    },
+  };
 }
 
 export function analyzeBeepSequence(

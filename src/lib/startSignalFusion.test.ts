@@ -11,6 +11,17 @@ it("does not average an excluded artifact into an otherwise accepted light clock
 });
 
 describe("start signal fusion", () => {
+  it("does not describe a weak coincident color patch as an accepted light when exact audio owns Start", () => {
+    const result = fuseStartEvidence([
+      { kind: "audio", rawTime: 8.59, confidence: "High", reason: "Complete countdown" },
+      { kind: "color", rawTime: 8.835, confidence: "Low", label: "weak foreground", reason: "Review only" },
+    ]);
+    expect(result.autoAccept).toBe(true);
+    expect(result.rawTime).toBe(8.59);
+    expect(result.reason).toContain("final beep");
+    expect(result.reason).not.toContain("green→blue light");
+    expect(result.supportingEvidence.some(item => item.label === "weak foreground")).toBe(true);
+  });
   it("does not rank a known camera cut above an eligible alternative review event", () => {
     // Reconstructed from the Edinburgh4103 development export. These are
     // observed cues, not independent labels for the true electronic Start.

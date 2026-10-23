@@ -106,7 +106,10 @@ export function fuseStartEvidence(evidence: StartEvidence[]): FusedStartDecision
   // Low motion alone cannot replace an all-artifact light/audio review cursor.
   // With an eligible clock cue, excluded patches belong in rejected diagnostics.
   const supported = eligible.some(item => item.kind !== "motion") ? eligible : visualSupported;
-  const sources = new Set(supported.map((item) => item.kind));
+  // A weak coincident patch remains diagnostic evidence; an authoritative
+  // beep does not make that patch a verified lane light in the explanation.
+  const sources = new Set(supported.filter(item =>
+    !(audioDefinesClock && item.kind === "color" && item.confidence === "Low")).map(item => item.kind));
   const strongColor = eligible.some((item) => item.kind === "color" && item.confidence !== "Low");
   const strongAudio = eligible.some((item) => item.kind === "audio" && item.confidence !== "Low");
   const strongMotion = eligible.some((item) => item.kind === "motion" && item.confidence !== "Low");

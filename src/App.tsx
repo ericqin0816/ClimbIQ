@@ -1937,6 +1937,7 @@ function App() {
         audioSearchHintTime: audioStart.searchHintTime,
         audioConfidence: audioStart.confidence,
         audioTimingWindow: audioStart.timingWindow,
+        audioChannelRecovery: audioStart.channelRecovery,
         detailRecovery: automaticLight.detailRecovery,
         selectedCandidateTime: decision.rawTime,
         selectedCandidateReason: decision.reason,
