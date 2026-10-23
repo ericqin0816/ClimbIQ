@@ -101,6 +101,7 @@ export interface StartSignalDebug {
   detectedRawTime?: number;
   failureReason?: string;
   sourceFrameSamplingFailed?: boolean;
+  partialSourceObservation?: import("./lib/videoFrameSampler").PartialSourceObservation;
   blueConfirmationRawTime?: number;
   sceneContinuity?: {
     assessable: boolean;

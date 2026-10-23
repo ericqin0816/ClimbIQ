@@ -11,10 +11,13 @@ import {
   computeColorDistance,
   roundTime,
   sampleFramesInRange,
-  sampleZoneOpponentColors,
+  seekToFrameObservation,
+  captureZoneImageData,
+  computeOpponentWeightedRgb,
+  computeDirectionalOpponentWeightedRgb,
+  type PartialSourceObservation,
 } from "./videoFrameSampler";
 import { resolveFinishSearchWindow } from "./finishSearchWindow";
-import { readDecodedVideoFrameTime } from "./decodedVideoFrame";
 import { finishObservationInterval } from "./timingEvidence";
 import { scanSourceFrames } from "./sourceFrameScan";
 
@@ -97,12 +100,12 @@ export async function detectFinishSignal({
     return emptyResult("Finish search window is too short.", zone);
   }
 
-  const coarseSamples = await sampleFinishColors(video, zone, searchStart, searchEnd, COARSE_FPS, calibration, signal, (done, total) => {
+  const coarsePass = await sampleFinishColors(video, zone, searchStart, searchEnd, COARSE_FPS, calibration, signal, (done, total) => {
     onProgress?.("coarse", done, total);
   });
-  const coarse = analyzeFinishColorSamples(coarseSamples, calibration, expectedFinishTime);
+  const coarse = analyzeFinishColorSamples(coarsePass.samples, calibration, expectedFinishTime);
   if (!coarse.detected || coarse.rawTime === undefined) {
-    return toResult(coarse, zone, calibration);
+    return markPartialFinishObservation(toResult(coarse, zone, calibration), coarsePass.partialSourceObservation);
   }
 
   // The timing unit flashes green before it settles. The coarse 5 fps pass may
@@ -110,11 +113,25 @@ export async function detectFinishSignal({
   // recover the first flash rather than timestamping the solid-green state.
   const refineStart = Math.max(searchStart, coarse.rawTime - 1.15);
   const refineEnd = Math.min(searchEnd, coarse.rawTime + 0.85);
-  const refinedSamples = await sampleFinishColors(video, zone, refineStart, refineEnd, REFINE_FPS, calibration, signal, (done, total) => {
+  const refinedPass = await sampleFinishColors(video, zone, refineStart, refineEnd, REFINE_FPS, calibration, signal, (done, total) => {
     onProgress?.("refine", done, total);
   });
-  const refined = analyzeFinishColorSamples(refinedSamples, calibration, expectedFinishTime);
-  return toResult(resolveFinishRefinement(coarse, refined), zone, calibration);
+  const refined = analyzeFinishColorSamples(refinedPass.samples, calibration, expectedFinishTime);
+  return markPartialFinishObservation(toResult(resolveFinishRefinement(coarse, refined), zone, calibration),
+    coarsePass.partialSourceObservation ?? refinedPass.partialSourceObservation);
+}
+
+/** A salvaged native frame does not verify the unobserved container tail. */
+export function markPartialFinishObservation(result: StartSignalDetectionResult,
+  partialSourceObservation?: PartialSourceObservation): StartSignalDetectionResult {
+  if (!partialSourceObservation) return result;
+  const reason = `${result.reason} ${partialSourceObservation.reason}`;
+  const candidates = result.candidates?.map(candidate => ({ ...candidate, confidence: "Low" as const,
+    reason: `${candidate.reason} ${partialSourceObservation.reason}` }));
+  return { ...result, detected: false, rawTime: undefined,
+    confidence: result.confidence === "None" ? "None" : "Low", reason, candidates,
+    debug: { ...result.debug, partialSourceObservation, selectedCandidateTime: undefined,
+      detectedRawTime: undefined, selectedCandidateReason: reason, failureReason: reason, topCandidates: candidates } };
 }
 
 /** A failed dense verification must not leave the coarse-only time authoritative. */
@@ -480,41 +497,49 @@ async function sampleFinishColors(
   calibration: StartLightCalibration,
   signal: AbortSignal | undefined,
   onProgress: (processed: number, total: number) => void,
-): Promise<FinishColorSample[]> {
+): Promise<{ samples: FinishColorSample[]; partialSourceObservation?: PartialSourceObservation }> {
   const times = sampleFramesInRange(start, end, fps);
   const samples: FinishColorSample[] = [];
   const targetDirection = hasCalibration(calibration)
     ? Math.sign(opponent(calibration.beforeStartRGB) - opponent(calibration.afterStartRGB)) || 1
     : 1;
   if (fps === REFINE_FPS) {
-    await scanSourceFrames({video,start,end,fallbackFps:fps,signal,onFrame:async frame=>{
-      const sampled = await sampleZoneOpponentColors(video,frame.cursorTime,zone,targetDirection);
+    const summary = await scanSourceFrames({video,start,end,fallbackFps:fps,signal,allowUnobservedTail:true,onFrame:frame=>{
+      const sampled = colorsAtCurrentFrame();
       appendFinishFrameSample(samples, {time:frame.rawTime,cursorTime:frame.cursorTime,
         timestampMethod:frame.decoded?"video-frame":"seek-cursor",sourceFrameDurationSeconds:frame.decoded?.durationSeconds,
         averageRgb:sampled.averageRgb,directionalRgb:sampled.directionalRgb});
       // Native frame counts need not equal the nominal 30 fps grid.
       onProgress(samples.length,Math.max(samples.length,times.length));
     }});
-    return samples;
+    return { samples, partialSourceObservation: summary.partialSourceObservation };
   }
   for (let index = 0; index < times.length; index += 1) {
     throwIfCancelled(signal);
-    const sampled = await sampleZoneOpponentColors(video, times[index], zone, targetDirection);
-    const decoded = readDecodedVideoFrameTime(video);
+    const observation = await seekToFrameObservation(video, times[index], { allowUnobservedTail: true, signal });
+    const sampled = colorsAtCurrentFrame();
+    const decoded = observation.decoded;
     appendFinishFrameSample(samples, {
-      time: decoded?.mediaTime ?? sampled.time,
-      cursorTime: sampled.time,
+      time: decoded?.mediaTime ?? observation.cursorTime,
+      cursorTime: observation.cursorTime,
       timestampMethod: decoded ? "video-frame" : "seek-cursor",
       sourceFrameDurationSeconds: decoded?.durationSeconds,
       averageRgb: sampled.averageRgb,
       directionalRgb: sampled.directionalRgb,
     });
     onProgress(index + 1, times.length);
+    if (observation.partialSourceObservation) return { samples, partialSourceObservation: observation.partialSourceObservation };
     if (index % 8 === 7) {
       await new Promise<void>((resolve) => setTimeout(resolve, 0));
     }
   }
-  return samples;
+  return { samples };
+
+  function colorsAtCurrentFrame() {
+    const { imageData } = captureZoneImageData(video, zone);
+    return { averageRgb: computeOpponentWeightedRgb(imageData),
+      directionalRgb: computeDirectionalOpponentWeightedRgb(imageData, targetDirection) };
+  }
 }
 
 /** Oversampling a low-frame-rate clip must not count one flash frame twice. */

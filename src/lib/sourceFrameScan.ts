@@ -1,8 +1,5 @@
-import {
-  readDecodedVideoFrameTime,
-  type DecodedVideoFrameTime,
-} from "./decodedVideoFrame";
-import { seekTo } from "./videoFrameSampler";
+import type { DecodedVideoFrameTime } from "./decodedVideoFrame";
+import { seekToFrameObservation, type PartialSourceObservation } from "./videoFrameSampler";
 import { sanitizeSourceSampleTiming } from "./sourceSampleTiming";
 
 export interface SourceFrameObservation {
@@ -16,6 +13,7 @@ export interface SourceFrameScanSummary {
   duplicateFramesSkipped: number;
   usedDurationSteps: number;
   isAccuracyBound: false;
+  partialSourceObservation?: PartialSourceObservation;
 }
 
 /** Visit native frames in a short refinement window. Source duration drives
@@ -30,6 +28,8 @@ export async function scanSourceFrames(options: {
   fallbackFps?: number;
   maxFrames?: number;
   signal?: AbortSignal;
+  /** Explicitly incomplete/review-only; ordinary dense verification stays strict. */
+  allowUnobservedTail?: boolean;
   onFrame: (frame: SourceFrameObservation) => void | Promise<void>;
 }): Promise<SourceFrameScanSummary> {
   const { video, start, end, signal, onFrame } = options;
@@ -76,9 +76,12 @@ export async function scanSourceFrames(options: {
       throw new Error(
         "Source-frame refinement exceeded its bounded frame budget.",
       );
-    await seekTo(video, cursor, { exact: true });
+    const observation = await seekToFrameObservation(video, cursor, {
+      exact: true, allowUnobservedTail: options.allowUnobservedTail, signal,
+    });
     check();
-    let decoded = readDecodedVideoFrameTime(video);
+    let decoded = observation.decoded;
+    if (observation.partialSourceObservation) summary.partialSourceObservation = observation.partialSourceObservation;
     if (
       decoded &&
       sanitizeSourceSampleTiming(video.currentTime, {
@@ -96,6 +99,7 @@ export async function scanSourceFrames(options: {
     const rawTime = decoded?.mediaTime ?? video.currentTime;
     if (decoded && seen.has(rawTime)) {
       summary.duplicateFramesSkipped++;
+      if (summary.partialSourceObservation) break;
       // A duration can land just short of the next PTS in variable-rate media.
       // Small bounded forward retries are not additional observations.
       const durationAvailable = decoded.durationSeconds !== undefined;
@@ -114,6 +118,7 @@ export async function scanSourceFrames(options: {
     await onFrame({ cursorTime: video.currentTime, rawTime, decoded });
     check();
     summary.observations++;
+    if (summary.partialSourceObservation) break;
     const duration = decoded?.durationSeconds;
     if (
       decoded &&

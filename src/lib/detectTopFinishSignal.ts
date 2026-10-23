@@ -11,14 +11,19 @@ import {
   roundTime,
   sampleFramesInRange,
   sampleZoneAverageColor,
-  seekTo,
+  seekToFrameObservation,
+  type PartialSourceObservation,
 } from "./videoFrameSampler";
+import { markPartialFinishObservation } from "./detectFinishSignal";
 import { resolveFinishSearchWindow } from "./finishSearchWindow";
 import { scanSourceFrames } from "./sourceFrameScan";
 import { lightObservationInterval } from "./timingEvidence";
 
 export interface TopFinishFrame {
   time: number;
+  cursorTime?: number;
+  timestampMethod?: "video-frame" | "seek-cursor";
+  sourceFrameDurationSeconds?: number;
   width: number;
   height: number;
   data: Uint8ClampedArray;
@@ -78,7 +83,13 @@ const UNLOCALIZED_TARGET_REASON = "The upper color change did not retain localiz
  * patch. The broad search makes no assumption that the top and bottom of an
  * angled wall share the same x coordinate.
  */
-export async function detectTopFinishSignal({
+export async function detectTopFinishSignal(options: DetectTopFinishSignalOptions): Promise<TopFinishSignalOutcome> {
+  let partialSourceObservation: PartialSourceObservation | undefined;
+  const outcome = await detectTopFinishSignalPass(options, observation => { partialSourceObservation ??= observation; });
+  return { ...outcome, result: markPartialFinishObservation(outcome.result, partialSourceObservation) };
+}
+
+async function detectTopFinishSignalPass({
   video,
   startSignalRawTime,
   laneHintZone,
@@ -87,7 +98,7 @@ export async function detectTopFinishSignal({
   maximumClimbSeconds = 30,
   signal,
   onProgress,
-}: DetectTopFinishSignalOptions): Promise<TopFinishSignalOutcome> {
+}: DetectTopFinishSignalOptions, onPartial: (observation: PartialSourceObservation) => void): Promise<TopFinishSignalOutcome> {
   const { start: searchStart, end: searchEnd } = resolveFinishSearchWindow(
     startSignalRawTime,
     video.duration,
@@ -99,7 +110,7 @@ export async function detectTopFinishSignal({
   }
 
   const times = sampleFramesInRange(searchStart, searchEnd, COARSE_FPS);
-  const frames = await captureFrames(video, times, signal, (done, total) => onProgress?.("coarse", done, total));
+  const frames = await captureFrames(video, times, signal, (done, total) => onProgress?.("coarse", done, total), onPartial);
   // Physical top tracking needs the camera view from immediately after the
   // accepted start as its structural reference. If a broadcast cuts or zooms
   // to a different camera during the climb, comparing only with the first
@@ -107,7 +118,7 @@ export async function detectTopFinishSignal({
   // A fixed phone view remains comparable; a scene change is rejected by the
   // frame-wide structural guard inside analyzeTopContactFrames.
   const referenceTime = Math.min(searchStart, Math.max(0, startSignalRawTime + 0.35));
-  const referenceFrames = await captureFrames(video, [referenceTime], signal, () => undefined);
+  const referenceFrames = await captureFrames(video, [referenceTime], signal, () => undefined, onPartial);
   const physicalReference = referenceFrames[0] ?? frames[0];
   const laneHintX = laneHintZone ? (laneHintZone.x1 + laneHintZone.x2) / 2 : undefined;
   const indicatorDiscovery = analyzeTopFinishFrames(frames, laneHintX, expectedFinishTime);
@@ -123,7 +134,7 @@ export async function detectTopFinishSignal({
       Math.min(searchEnd, topPresence.rawTime + 1.15),
       REFINE_FPS,
     );
-    const refineFrames = await captureFrames(video, refineTimes, signal, (done, total) => onProgress?.("refine", done, total));
+    const refineFrames = await captureFrames(video, refineTimes, signal, (done, total) => onProgress?.("refine", done, total), onPartial);
     const refinedPresenceDiscovery = analyzeTopContactFrames([physicalReference, ...refineFrames], laneHintX);
     const refinedPresence = refinedPresenceDiscovery.candidates.find((candidate) =>
       candidate.kind === "Unverified top presence" || candidate.kind === "Physical top reach",
@@ -147,7 +158,7 @@ export async function detectTopFinishSignal({
       Math.min(searchEnd, contactDiscovery.rawTime! + 1.35),
       REFINE_FPS,
     );
-    const refineFrames = await captureFrames(video, refineTimes, signal, (done, total) => onProgress?.("refine", done, total));
+    const refineFrames = await captureFrames(video, refineTimes, signal, (done, total) => onProgress?.("refine", done, total), onPartial);
     const refinedContact = analyzeTopContactFrames([physicalReference, ...refineFrames], laneHintX);
     const selectedContact = refinedContact.found ? refinedContact : contactDiscovery;
     return {
@@ -183,7 +194,7 @@ export async function detectTopFinishSignal({
   const estimatedFrames = Math.ceil((refineEnd - refineStart) * REFINE_FPS);
   const refinedSamples: TopFinishColorSample[] = [];
   const indicatorZone = discovery.zone;
-  await scanSourceFrames({ video, start: refineStart, end: refineEnd, fallbackFps: REFINE_FPS, signal,
+  const refinedScan = await scanSourceFrames({ video, start: refineStart, end: refineEnd, fallbackFps: REFINE_FPS, signal, allowUnobservedTail: true,
     onFrame: async frame => {
       const sampled = await sampleZoneAverageColor(video, frame.cursorTime, indicatorZone, "cover");
       refinedSamples.push({ time: frame.rawTime, cursorTime: frame.cursorTime,
@@ -192,6 +203,7 @@ export async function detectTopFinishSignal({
       onProgress?.("refine", refinedSamples.length, Math.max(estimatedFrames, refinedSamples.length));
     },
   });
+  if (refinedScan.partialSourceObservation) onPartial(refinedScan.partialSourceObservation);
 
   const refined = analyzeTopFinishColorSamples(refinedSamples, discovery.calibration, expectedFinishTime);
   let result = refined.detected
@@ -927,6 +939,7 @@ async function captureFrames(
   times: number[],
   signal: AbortSignal | undefined,
   onProgress: (processed: number, total: number) => void,
+  onPartial: (observation: PartialSourceObservation) => void,
 ): Promise<TopFinishFrame[]> {
   const scale = Math.min(1, MAX_SCAN_WIDTH / video.videoWidth, MAX_SCAN_HEIGHT / video.videoHeight);
   const width = Math.max(8, Math.round(video.videoWidth * scale));
@@ -939,10 +952,17 @@ async function captureFrames(
   const frames: TopFinishFrame[] = [];
   for (let index = 0; index < times.length; index += 1) {
     throwIfCancelled(signal);
-    await seekTo(video, times[index]);
-    context.drawImage(video, 0, 0, width, height);
-    frames.push({ time: roundTime(video.currentTime), width, height, data: context.getImageData(0, 0, width, height).data });
+    const observation = await seekToFrameObservation(video, times[index], { allowUnobservedTail: true, signal });
+    const time = observation.decoded?.mediaTime ?? observation.cursorTime;
+    if (!frames.length || time > frames[frames.length - 1].time + 0.000001) {
+      context.drawImage(video, 0, 0, width, height);
+      frames.push({ time, cursorTime: observation.cursorTime,
+        timestampMethod: observation.decoded ? "video-frame" : "seek-cursor",
+        sourceFrameDurationSeconds: observation.decoded?.durationSeconds,
+        width, height, data: context.getImageData(0, 0, width, height).data });
+    }
     onProgress(index + 1, times.length);
+    if (observation.partialSourceObservation) { onPartial(observation.partialSourceObservation); break; }
     if (index % 6 === 5) await new Promise<void>((resolve) => setTimeout(resolve, 0));
   }
   return frames;

@@ -13,17 +13,18 @@ describe("upper finish discovery-to-refinement pipeline", () => {
     { official: true, rejectRefinement: false, nativeFps: 30, eventTime: 49 / 30, dropNativeTiming: true },
     { official: true, rejectRefinement: false, nativeFps: undefined, eventTime: 1.6, unlocalized: true },
     { official: false, rejectRefinement: false, nativeFps: undefined, eventTime: 1.6, unlocalized: true },
-  ])("checks upper evidence with official=$official, rejected refinement=$rejectRefinement, source fps=$nativeFps, native failure=$dropNativeTiming, unlocalized=$unlocalized", async ({ official, rejectRefinement, nativeFps, eventTime, dropNativeTiming, unlocalized }) => {
+    { official: true, rejectRefinement: false, nativeFps: 30, eventTime: 49 / 30, partialTail: true },
+  ])("checks upper evidence with official=$official, rejected refinement=$rejectRefinement, source fps=$nativeFps, native failure=$dropNativeTiming, unlocalized=$unlocalized, partial tail=$partialTail", async ({ official, rejectRefinement, nativeFps, eventTime, dropNativeTiming, unlocalized, partialTail }) => {
     vi.stubGlobal("window", { setTimeout, clearTimeout });
     const video = Object.assign(new EventTarget(), {
-      src: "blob:upper-finish", videoWidth: 20, videoHeight: 20, duration: 5, readyState: 2, seeking: false,
+      src: "blob:upper-finish", videoWidth: 20, videoHeight: 20, duration: partialTail ? 5.228254 : 5, readyState: 2, seeking: false,
     }) as unknown as HTMLVideoElement;
     let cursor = 0;
     Object.defineProperty(video, "currentTime", {
       get: () => cursor,
       set: (value: number) => { cursor = value; queueMicrotask(() => video.dispatchEvent(new Event("seeked"))); },
     });
-    const sourceTime = () => nativeFps ? Math.floor((cursor + 1e-9) * nativeFps) / nativeFps : cursor;
+    const sourceTime = () => nativeFps ? Math.min(partialTail ? 154 / 30 : Infinity, Math.floor((cursor + 1e-9) * nativeFps) / nativeFps) : cursor;
     vi.stubGlobal("VideoFrame", nativeFps ? class {
       timestamp = Math.round(sourceTime() * 1e6);
       duration = Math.round(1e6 / nativeFps!);
@@ -84,6 +85,15 @@ describe("upper finish discovery-to-refinement pipeline", () => {
       expect(outcome.result.confidence).toBe("Medium");
       expect(outcome.result.reason).toContain("finer scan did not confirm");
       expect(outcome.result.candidates?.every(candidate => candidate.confidence !== "High")).toBe(true);
+    } else if (partialTail) {
+      expect(outcome.result.detected).toBe(false);
+      expect(outcome.result.rawTime).toBeUndefined();
+      expect(outcome.result.confidence).toBe("Low");
+      expect(outcome.result.candidates?.[0].rawTime).toBeCloseTo(eventTime, 3);
+      expect(outcome.result.candidates?.every(candidate => candidate.confidence === "Low")).toBe(true);
+      expect(outcome.result.debug.partialSourceObservation?.requestedTime).toBe(5.2);
+      expect(outcome.result.debug.partialSourceObservation?.lastFrameRawTime).toBeCloseTo(154 / 30, 6);
+      expect(outcome.result.reason).toContain("tail");
     } else if (official) {
       expect(outcome.result.debug.detectionMethod).toBe("Perspective-aware upper finish-indicator discovery and refinement");
       expect(outcome.result.detected).toBe(true);

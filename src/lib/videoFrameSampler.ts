@@ -1,6 +1,80 @@
 import type { FrameSample, NormalizedZone, RGB, ZonePixelRect } from "../types";
+import { readDecodedVideoFrameTime, type DecodedVideoFrameTime } from "./decodedVideoFrame";
 
 const SEEK_EPSILON_SECONDS = 0.004;
+const MAX_UNOBSERVED_TAIL_SECONDS = 0.15;
+
+export interface PartialSourceObservation {
+  requestedTime: number;
+  observedThroughTime: number;
+  lastFrameRawTime: number;
+  lastFrameDurationSeconds: number;
+  containerDuration: number;
+  reason: string;
+  isEventAccuracyBound: false;
+}
+
+class DecodedFrameNotReadyError extends Error {
+  constructor(readonly source: string, readonly cursorTime: number,
+    readonly mediaTime: number, readonly durationSeconds: number) {
+    super("Decoded video frame did not catch up to the seek cursor.");
+    this.name = "DecodedFrameNotReadyError";
+  }
+}
+
+/** Strict seeking remains the default. A finish scan may explicitly salvage a
+ * bounded container tail by re-seeking INSIDE an exposed native interval. This
+ * proves only that interval's pixels, never the requested tail or track end.
+ */
+export async function seekToFrameObservation(video: HTMLVideoElement, time: number, options?: {
+  exact?: boolean; allowUnobservedTail?: boolean; signal?: AbortSignal;
+}): Promise<{ requestedTime: number; cursorTime: number; decoded?: DecodedVideoFrameTime;
+  partialSourceObservation?: PartialSourceObservation }> {
+  const source = video.src;
+  const check = () => {
+    if (options?.signal?.aborted || video.src !== source) {
+      const error = new Error("Video frame observation cancelled.");
+      error.name = "AbortError";
+      throw error;
+    }
+  };
+  check();
+  try {
+    await seekTo(video, time, { exact: options?.exact });
+  } catch (error) {
+    check();
+    if (!options?.allowUnobservedTail || !(error instanceof DecodedFrameNotReadyError)) throw error;
+    const { mediaTime, durationSeconds, cursorTime } = error;
+    const observedThroughTime = mediaTime + durationSeconds;
+    // These bounds limit salvage, not a claim that this is the final video
+    // frame. Interior stale frames and larger missing regions still fail.
+    if (error.source !== source || Math.abs(video.currentTime - cursorTime) > 1e-7 ||
+      time > video.duration || video.duration - cursorTime > MAX_UNOBSERVED_TAIL_SECONDS ||
+      video.duration - observedThroughTime > MAX_UNOBSERVED_TAIL_SECONDS ||
+      durationSeconds < 0.0001 || cursorTime < observedThroughTime + 0.005 ||
+      cursorTime - observedThroughTime > MAX_UNOBSERVED_TAIL_SECONDS ||
+      observedThroughTime >= video.duration) throw error;
+    const inside = mediaTime + durationSeconds / 2;
+    await seekTo(video, inside, { exact: true });
+    check();
+    const decoded = readDecodedVideoFrameTime(video);
+    if (!decoded || decoded.durationSeconds === undefined ||
+      Math.abs(decoded.mediaTime - mediaTime) > 0.000001 ||
+      Math.abs(decoded.durationSeconds - durationSeconds) > 0.000001 ||
+      video.currentTime < decoded.mediaTime || video.currentTime >= decoded.mediaTime + decoded.durationSeconds) {
+      throw new Error("The exposed tail frame could not be independently re-seeked inside its native interval.");
+    }
+    return { requestedTime: time, cursorTime: video.currentTime, decoded,
+      partialSourceObservation: {
+        requestedTime: time, observedThroughTime, lastFrameRawTime: decoded.mediaTime,
+        lastFrameDurationSeconds: decoded.durationSeconds, containerDuration: video.duration,
+        reason: `The requested container tail at ${time.toFixed(3)}s was not observed. Native pixels were verified only through ${observedThroughTime.toFixed(6)}s; the final video-track boundary is unknown. Finish requires frame review.`,
+        isEventAccuracyBound: false,
+      } };
+  }
+  check();
+  return { requestedTime: time, cursorTime: video.currentTime, decoded: readDecodedVideoFrameTime(video) };
+}
 // One private crop surface per decoder. No frames, URLs or sampling decisions
 // are retained, and the surface becomes collectible with its video element.
 const zoneSurfaces = new WeakMap<HTMLVideoElement, { canvas: HTMLCanvasElement; context: CanvasRenderingContext2D }>();
@@ -111,17 +185,21 @@ export async function waitForDecodedSeek(video: HTMLVideoElement): Promise<void>
     let frame: VideoFrame;
     try { frame = new VideoFrame(video); } catch { return; }
     let ready: boolean;
+    let observedTime: number;
+    let observedDuration: number;
     try {
       const timestamp = frame.timestamp / 1e6;
       const duration = frame.duration === null ? undefined : frame.duration / 1e6;
       if (!Number.isFinite(timestamp) || timestamp < 0 || duration === undefined ||
           !Number.isFinite(duration) || duration <= 0 || duration > 1) return;
+      observedTime = timestamp;
+      observedDuration = duration;
       // VFR metadata can end a few milliseconds before the next PTS. The
       // native walker resolves those small gaps with deduplicated forward seeks.
       ready = timestamp <= cursor + 0.0001 && cursor < timestamp + duration + 0.005;
     } finally { frame.close(); }
     if (ready) return;
-    if (Date.now() >= deadline) throw new Error("Decoded video frame did not catch up to the seek cursor.");
+    if (Date.now() >= deadline) throw new DecodedFrameNotReadyError(source, cursor, observedTime, observedDuration);
     await new Promise<void>(resolve => setTimeout(resolve, 5));
   }
 }
