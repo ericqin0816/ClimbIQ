@@ -311,9 +311,11 @@ export function selectTrackedPose(
 ): PoseSelectionResult {
   const anchored = candidates
     .map((landmarks) => ({ landmarks, center: poseAnchor(landmarks) }))
-    .filter((candidate): candidate is { landmarks: NormalizedLandmark[]; center: NormalizedPoint } => Boolean(candidate.center));
+    .filter((candidate): candidate is { landmarks: NormalizedLandmark[]; center: NormalizedPoint } =>
+      Boolean(candidate.center && candidate.center.x >= 0 && candidate.center.x <= 1 &&
+        candidate.center.y >= 0 && candidate.center.y <= 1));
   if (!anchored.length) {
-    return { warning: "No pose with a usable hip or shoulder anchor was detected." };
+    return { warning: "No pose with a usable hip or shoulder anchor inside the image was detected." };
   }
 
   // Calibration describes the selected 3 m lane, not the whole two-lane

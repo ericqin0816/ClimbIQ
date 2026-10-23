@@ -884,7 +884,7 @@ function extractTargetedOctaveFinalSegments(
   return deduplicateToneCandidates(candidates, 120);
 }
 
-function estimateSpectralBand(
+export function estimateSpectralBand(
   frame: Float32Array,
   sampleRate: number,
   minFrequency: number,
@@ -907,7 +907,15 @@ function estimateSpectralBand(
     const power = spectralPower(frame, bin, basis);
     powers.push(power);
     totalPower += power;
-    if (bin >= bandMinBin && bin <= bandMaxBin && power > bestBandPower) {
+  }
+  // A restricted band edge can be a shoulder of a stronger outside peak.
+  // Search every in-band bin; equal neighbors retain half-bin plateaus.
+  for (let bin = bandMinBin; bin <= bandMaxBin; bin += 1) {
+    const index = bin - fullMinBin;
+    const power = powers[index];
+    const left = index > 0 ? powers[index - 1] : spectralPower(frame, bin - 1);
+    const right = index + 1 < powers.length ? powers[index + 1] : spectralPower(frame, bin + 1);
+    if (power >= left && power >= right && power > bestBandPower) {
       bestBandPower = power;
       bestBandBin = bin;
     }

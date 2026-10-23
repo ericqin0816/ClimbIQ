@@ -81,6 +81,7 @@ export interface StartSignalDebug {
   audioConfidence?: Confidence;
   audioTimingWindow?: import("./lib/detectAudioStartSignal").AudioTimingWindow;
   audioChannelRecovery?: import("./lib/detectAudioStartSignal").AudioStartResult["channelRecovery"];
+  startBodyAudit?: import("./lib/startBodyAudit").StartBodyAudit;
   detailRecovery?: { attempted: boolean; selected: boolean; reason: string };
   zoneExists: boolean;
   normalizedZone?: NormalizedZone;

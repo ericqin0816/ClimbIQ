@@ -79,8 +79,10 @@ describe("portable dataset and report boundary", () => {
           hopSeconds: .01, isEventAccuracyBound: false }, sequence: [] })),
       nominalWindowEnvelope: { startRawTime: .99, endRawTime: 1.04,
         isContinuousObservedSupport: false, isEventAccuracyBound: false } };
+    source.startResult.debug.startBodyAudit = { safeToAutoAccept: false, reason: "No verified launch in the selected body region" };
     const dataset = createSessionDataset(source);
     expect(dataset.startLaneEvidenceAudit).toMatchObject({ scope: "current-analysis-only", isGroundTruthLabel: false,
+      bodyAudit: source.startResult.debug.startBodyAudit,
       audioTimingWindow: source.startResult.debug.audioTimingWindow,
       audioChannelRecovery: source.startResult.debug.audioChannelRecovery });
     expect(dataset.candidates.startSignal).toMatchObject([{ accepted: true, rejected: false, candidateRawTime: 1 },

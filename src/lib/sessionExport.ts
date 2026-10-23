@@ -95,6 +95,7 @@ export function createSessionDataset(input: SessionExportInput) {
       audioSearchHintTime: startResult?.debug.audioSearchHintTime ?? null, audioConfidence: startResult?.debug.audioConfidence ?? null,
       audioTimingWindow: startResult?.debug.audioTimingWindow ?? null,
       audioChannelRecovery: startResult?.debug.audioChannelRecovery ?? null,
+      bodyAudit: startResult?.debug.startBodyAudit ?? null,
       associationTime: startResult?.debug.laneAssociationTime ?? null, entries: startResult?.debug.laneEvidence ?? [],
       activeLightLaneId: zones.startLight ? startLaneId(zones.startLight) : null },
     finishEvidenceAudit: { scope: "current-analysis-only", isGroundTruthLabel: false, isEventAccuracyBound: false,

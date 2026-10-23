@@ -1,0 +1,1796 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-10-23",
+  "title": "Detection expansion: ten sequential experiments",
+  "status": "In progress: rounds 1-9 completed, including retained failures and a separately registered partial audio follow-up. Round 10 whole-app evidence pending.",
+  "baselineCommitSha": "e088ffd47b0617a723b38ae08b5221e7e8181bbe",
+  "isModelWeightTraining": false,
+  "isIndependentHumanStudy": false,
+  "isPopulationAccuracyEstimate": false,
+  "purpose": "Improve observable Start and Finish localization and correctly accepted endpoints. Implementation, test coverage and additional abstentions do not by themselves establish better detection.",
+  "ownership": "Independent evaluator maintains this summary; runtime changes and native processing belong to their assigned agents.",
+  "baseline": {
+    "recordingCount": 6,
+    "endpointSlots": 12,
+    "acceptedEndpoints": 4,
+    "completeAutomaticPairs": 1,
+    "split": "development",
+    "groupingLimit": "The six existing phone recordings do not establish six independent climbers or sessions.",
+    "suppliedBaselineIdentity": "e088ffd47b0617a723b38ae08b5221e7e8181bbe",
+    "observationSource": "benchmarks/stereo-start-recovery-2026-10-23.json",
+    "observationBuildSha": "320733c41871597b3aa7a4c6dfcb0c52cd7b60b0",
+    "newExpansionBaselineRun": null,
+    "identityLimit": "The existing published measurements are retained as historical baseline evidence; this scaffold does not invent a new native run on e088.",
+    "recordedCueControl": {
+      "sourceId": "IMG_9075",
+      "sourceSha256": "12a1189c069d832b6bcb1f38176786a7abd0cbb88da234bc9c0d1e53881602e5",
+      "eventDefinition": "recorded final acoustic tone after two matching preparation tones",
+      "reviewCursorSeconds": 8.59,
+      "observerUnionSeconds": [
+        8.58,
+        8.625
+      ],
+      "signedDisagreementIntervalSeconds": [
+        -0.035,
+        0.01
+      ],
+      "automaticallyAccepted": false,
+      "selection": "Targeted development source selected after prior predictions.",
+      "limit": "Decoded recorded-audio clock; no electronic trigger, sound-travel or A/V-origin calibration."
+    },
+    "localizationEvidenceOutOf10": null,
+    "automaticEndpointEvidenceOutOf10": null,
+    "scoreStatus": "A new round is scored only after its designated actual evidence is supplied."
+  },
+  "fixedEvaluation": {
+    "frozenAtStage": "Before any candidate result in this new expansion sequence is scored.",
+    "referenceEligibility": [
+      "Match original source hash, physical event definition and observed lane or athlete region.",
+      "Retain two separately frozen prediction-blind observer worksheets and their conservative union where available; agent observation is not a human study.",
+      "Do not substitute body launch for recorded cue arrival, apparent pad contact for indicator reversal, or either for calibrated electronic timing.",
+      "A known wrong physical patch fails identity qualification even if its timestamp happens to be close.",
+      "Freeze source group, target attempt, search window, settings, intended inputs and one primary result before candidate predictions; keep guided reruns separate.",
+      "Keep disputed, unobservable, missing, failed and automatically accepted but unverified events visible."
+    ],
+    "comparisonPolicySeconds": 0.1,
+    "policyMeaning": "A prospective comparison policy, not a physical measurement-error guarantee.",
+    "disagreement": "For prediction p and reference union [L,U], report signed interval [p-U,p-L].",
+    "verifiedWithinPolicy": "The matching-event signed interval must lie entirely within [-0.100,+0.100]. A straddling interval is indeterminate.",
+    "localizationEvidenceScore": {
+      "range": [
+        0,
+        10
+      ],
+      "formula": "10 * correctPrimaryLocalizations / qualifyingReferenceEvents",
+      "numerator": "Designated displayed or proposed primary cue matches the physical event and its entire disagreement interval satisfies policy; acceptance is not required.",
+      "denominator": "All prospectively qualifying reference events in the declared stratum, including missing proposals and failures.",
+      "noQualifyingReference": "null, with a reason; never fabricate an accuracy value.",
+      "interpretation": "Scoped benchmark localization performance, not general detector accuracy or overall evidence strength."
+    },
+    "automaticEndpointEvidenceScore": {
+      "range": [
+        0,
+        10
+      ],
+      "formula": "10 * verifiedCorrectAutomaticallyAcceptedEndpoints / qualifyingReferenceEvents",
+      "numerator": "Original automatic output, matching physical event and lane, satisfying the same full-interval policy.",
+      "denominator": "The same qualifying-reference events, including reviews, failures and missing outputs.",
+      "noQualifyingReference": "null, with a reason; raw coverage cannot supply the missing labels.",
+      "interpretation": "Scoped verified automatic yield. A review-only improvement receives no automatic recovery credit."
+    },
+    "strata": [
+      "Start and Finish reported separately, with counts and reference definitions.",
+      "Default whole-app automatic runs separate from guided search, manually selected lane and manually supplied Start.",
+      "Conditional automatic Finish given a reviewed Start/lane is not an end-to-end automatic pair.",
+      "Real original recordings separate from synthetic controls and correlated derivatives; copies do not add attempts.",
+      "Previously exposed development sources separate from any genuinely untouched whole-source holdout."
+    ],
+    "safetyGate": {
+      "passCondition": "No newly known wrong-event, wrong-lane or beyond-policy automatic acceptance in the frozen controls; preserve existing invalid-cue, cancellation and source-ownership rejection.",
+      "consequence": "Reject or retain as research-only a variant that violates the gate regardless of its average score.",
+      "limit": "A finite control pass is not a population false-acceptance estimate."
+    },
+    "latency": {
+      "metric": "Selection of Run to the first useful accepted result or actual review/error terminal.",
+      "requiredForSpeedClaim": "At least three counterbalanced baseline/candidate passes with exclusive queue, matching browser/build/source/settings and equivalent work.",
+      "notEquivalentWork": "Skipping Finish or returning earlier because a new guard blocks work cannot establish faster detector throughput.",
+      "helperTimings": "Report separately as helper CPU measurements; never substitute for whole-app latency."
+    },
+    "decisionRule": "Complete each round using actual retained evidence, assess safety and scoped outcome, then record feedback before the next round. Rejected and no-gain experiments are valid recorded outcomes; proposed work is not a completed round.",
+    "amendmentRule": "Keep initial plans and failed evidence. Record a dated amendment and reason before any amended candidate result; do not silently replace primary denominators."
+  },
+  "primarySources": [
+    {
+      "id": "world-climbing-rules-2026",
+      "title": "World Climbing competition rules linked from the official resources page",
+      "url": "https://images.ifsc-climbing.org/ifsc/image/private/t_q_good/prd/jaq7awz9jmqwpddwnbpr.pdf",
+      "discoveryUrl": "https://www1.ifsc-climbing.org/resources/competitions",
+      "accessedOn": "2026-10-23",
+      "sections": [
+        "7.2-7.3",
+        "8.4",
+        "Definitions: Reaction Time and Starting Signal"
+      ],
+      "finding": "The rules distinguish the starting signal from starting-pad force release and define a successful speed Finish by stopping the timer through a hand strike on the pad.",
+      "application": "Recorded light, acoustic arrival, visible body motion and apparent pad contact retain distinct event labels. The official electronic reaction rule does not calibrate visible body-motion delay."
+    },
+    {
+      "id": "w3c-web-audio",
+      "title": "W3C Web Audio API 1.1",
+      "url": "https://www.w3.org/TR/webaudio/",
+      "versionUrl": "https://www.w3.org/TR/2026/WD-webaudio-1.1-20260922/",
+      "publicationStatus": "Working Draft, 22 September 2026",
+      "accessedOn": "2026-10-23",
+      "sections": [
+        "4.5 Down Mixing Speaker Layouts",
+        "1.1.2 decodeAudioData"
+      ],
+      "finding": "Stereo-to-mono speaker mixing averages left and right samples. Decoding may resample PCM to the context rate.",
+      "application": "Frequency-local cancellation is a plausible mechanism, not independent timing truth. Preserve native channel hashes, actual sample rate, extraction frames and clock origin; do not count channels as separate evidence sources."
+    },
+    {
+      "id": "scipy-short-time-fft",
+      "title": "SciPy ShortTimeFFT documentation",
+      "url": "https://docs.scipy.org/doc/scipy/reference/generated/scipy.signal.ShortTimeFFT.html",
+      "accessedOn": "2026-10-23",
+      "finding": "Window length, hop, FFT size and centered time labels are distinct parameters; boundary windows can extend beyond input support.",
+      "application": "Smaller hops or extra zero-padding do not establish precise event onset. Record leading versus centered timestamps, window support, padding and fallback uncertainty before comparing clocks."
+    },
+    {
+      "id": "video-frame-callback-spec",
+      "title": "WICG requestVideoFrameCallback draft specification",
+      "url": "https://wicg.github.io/video-rvfc/",
+      "publicationStatus": "Draft Community Group Report; not a W3C Standard",
+      "accessedOn": "2026-10-23",
+      "finding": "mediaTime identifies the presented frame's media PTS. Callback delivery is best effort and can lag or miss frames.",
+      "application": "Associate pixels with native PTS and available duration, not requested seek time or callback wall time. Retain duplicate, missing-frame and incomplete-tail limitations."
+    },
+    {
+      "id": "google-pose-web",
+      "title": "Google MediaPipe Pose Landmarker for Web",
+      "url": "https://developers.google.com/edge/mediapipe/solutions/vision/pose_landmarker/web_js",
+      "accessedOn": "2026-10-23",
+      "finding": "The task outputs pose landmarks, supports a configurable number of poses, and its image/video detection calls run synchronously.",
+      "application": "A pose is not named-athlete identity. Compare full-frame and cropped results on the same native pixels, map crops back correctly, retain multiple-person ambiguity and measure actual processing cost."
+    },
+    {
+      "id": "scipy-spectral-peaks",
+      "title": "SciPy find_peaks documentation",
+      "url": "https://docs.scipy.org/doc/scipy/reference/generated/scipy.signal.find_peaks.html",
+      "accessedOn": "2026-10-23",
+      "finding": "A local peak depends on neighboring sample values; plateau handling and prominence are distinct from selecting the largest value within a restricted band.",
+      "application": "A target-band edge can be the shoulder of an out-of-band peak. Prospective research should inspect adjacent spectral bins outside the band and preserve legitimate plateau cases; documentation alone does not validate a detector change."
+    }
+  ],
+  "preexistingReferenceControls": [
+    {
+      "id": "IMG_9075-audio",
+      "split": "development",
+      "sourceUrl": null,
+      "sourceSha256": "12a1189c069d832b6bcb1f38176786a7abd0cbb88da234bc9c0d1e53881602e5",
+      "event": "recorded-final-acoustic-tone",
+      "lane": "shared recorded cue; does not identify a climber",
+      "bracketSeconds": [
+        8.58,
+        8.625
+      ],
+      "referenceArtifact": "stereo-source-reference-frozen.json",
+      "referenceSha256": "1c21f3c974fdf0b5c83786635ede3b38ff5743c286eff9c215d7a1faa65ef965"
+    },
+    {
+      "id": "P07-start",
+      "split": "development",
+      "cohort": "panning spectator recording; source speed and A/V calibration unverified",
+      "sourceUrl": "https://www.youtube.com/watch?v=1EpzcLV0NtM",
+      "sourceSha256": "05b6ec8b546372cea84fc16a21086357a768e66ddea1f6a395f7f4ce0b2857c1",
+      "event": "visible-lower-start-light-red-to-green",
+      "lane": "screen-right",
+      "bracketSeconds": [
+        18.585233,
+        18.651967
+      ],
+      "referenceArtifact": "p07-reference-frozen.json",
+      "referenceSha256": "821ddcdc8c58177ae9736be45fa7b4f2fec3b7d9cb7b040618c5452dea021589"
+    },
+    {
+      "id": "P07-finish-indicator",
+      "split": "development",
+      "sourceUrl": "https://www.youtube.com/watch?v=1EpzcLV0NtM",
+      "sourceSha256": "05b6ec8b546372cea84fc16a21086357a768e66ddea1f6a395f7f4ce0b2857c1",
+      "event": "visible-upper-finish-indicator-green-to-red",
+      "lane": "screen-right",
+      "bracketSeconds": [
+        25.8258,
+        25.9259
+      ],
+      "referenceArtifact": "p07-reference-frozen.json",
+      "referenceSha256": "821ddcdc8c58177ae9736be45fa7b4f2fec3b7d9cb7b040618c5452dea021589"
+    },
+    {
+      "id": "P07-contact",
+      "split": "development",
+      "sourceUrl": "https://www.youtube.com/watch?v=1EpzcLV0NtM",
+      "sourceSha256": "05b6ec8b546372cea84fc16a21086357a768e66ddea1f6a395f7f4ce0b2857c1",
+      "event": "apparent-first-hand-pad-contact",
+      "lane": "screen-right",
+      "bracketSeconds": [
+        25.7257,
+        25.892533
+      ],
+      "restriction": "Do not use this contact bracket to score a light-reversal detector or claim a stopped electronic timer.",
+      "referenceArtifact": "p07-reference-frozen.json",
+      "referenceSha256": "821ddcdc8c58177ae9736be45fa7b4f2fec3b7d9cb7b040618c5452dea021589"
+    }
+  ],
+  "rounds": [
+    {
+      "round": 1,
+      "title": "Full-frame native body baseline",
+      "status": "completed",
+      "predecessorFeedbackRequired": false,
+      "question": "Measure actual pose availability and multi-person ambiguity near the recorded cue on original native frames.",
+      "requiredEvidence": [
+        "Hash source bytes and native frame PTS/pixels; retain all requested frames, landmark outputs and failures.",
+        "Freeze an independent raw-image observation of visible people before exposing pose proposals; availability is not user intent."
+      ],
+      "decisionCriterion": "Keep this as a baseline; do not authorize athlete identity or Start from the mere presence of a pose.",
+      "nextFeedback": "Use the observed failure mode to predeclare crop geometry for round 2.",
+      "primarySourceIds": [
+        "google-pose-web",
+        "video-frame-callback-spec"
+      ],
+      "concreteConditionRegistration": null,
+      "baselineResult": {
+        "buildSha": "e088ffd47b0617a723b38ae08b5221e7e8181bbe",
+        "browser": "156.0.8078.47",
+        "sourceId": "IMG_9075",
+        "sourceSha256": "12a1189c069d832b6bcb1f38176786a7abd0cbb88da234bc9c0d1e53881602e5",
+        "sourceRequests": 22,
+        "uniqueSourcePts": 18,
+        "poseFrameCount": 4,
+        "poseInputDimensions": {
+          "width": 432,
+          "height": 768
+        },
+        "nativeSourceDimensions": {
+          "width": 1080,
+          "height": 1920
+        },
+        "modelSha256": "4eaa5eb7a98365221087693fcc286334cf0858e2eb6e15b506aa4a7ecdcec4ad",
+        "modelOptions": {
+          "runningMode": "VIDEO",
+          "numPoses": 2,
+          "minPoseDetectionConfidence": 0.2,
+          "minPosePresenceConfidence": 0.2,
+          "minTrackingConfidence": 0.25,
+          "outputSegmentationMasks": false
+        },
+        "backend": "main-thread",
+        "nativeErrors": [],
+        "bodyObservations": [
+          {
+            "sourcePngSha256": "8af9ccb403d6fe89a8883ea241b60dfef8fe80015fa626c6adb49aa36d2cd783",
+            "requestedCursorSeconds": 8.39,
+            "sourcePtsSeconds": 8.368333,
+            "sourceFrameDurationSeconds": 0.033333,
+            "visibleWallFigureTorsoAndHips": true,
+            "bothFeetConfirmed": false,
+            "returnedPoseCount": 1,
+            "selectedAnchor": {
+              "x": 0.35326051712036133,
+              "y": -0.2658705711364746
+            },
+            "wallFigurePoseRecovered": false,
+            "interpretation": "Foreground face fragment with predicted lower body outside source image."
+          },
+          {
+            "sourcePngSha256": "df1cf93e17f71a278c5df6ee09d592deff7c7c3290ddb74a3974c8bc26791bf5",
+            "requestedCursorSeconds": 8.59,
+            "sourcePtsSeconds": 8.568333,
+            "sourceFrameDurationSeconds": 0.033333,
+            "visibleWallFigureTorsoAndHips": true,
+            "bothFeetConfirmed": false,
+            "returnedPoseCount": 1,
+            "selectedAnchor": {
+              "x": 0.21129775047302246,
+              "y": -0.278567373752594
+            },
+            "wallFigurePoseRecovered": false,
+            "interpretation": "Foreground face fragment with predicted lower body outside source image."
+          },
+          {
+            "sourcePngSha256": "19a54c1096c3b97ef91e5be779ec635a6af65143291c97f9b127d719cfd0dcb3",
+            "requestedCursorSeconds": 8.89,
+            "sourcePtsSeconds": 8.868333,
+            "sourceFrameDurationSeconds": 0.033333,
+            "visibleWallFigureTorsoAndHips": true,
+            "bothFeetConfirmed": false,
+            "returnedPoseCount": 0,
+            "selectedAnchor": null,
+            "wallFigurePoseRecovered": false,
+            "interpretation": "No pose returned despite a visible wall figure."
+          },
+          {
+            "sourcePngSha256": "6192605103e4e656a4c0f9d0f09111d104a089254355d233b97581ceb760dbe5",
+            "requestedCursorSeconds": 9.29,
+            "sourcePtsSeconds": 9.268333,
+            "sourceFrameDurationSeconds": 0.033333,
+            "visibleWallFigureTorsoAndHips": true,
+            "bothFeetConfirmed": true,
+            "returnedPoseCount": 0,
+            "selectedAnchor": null,
+            "wallFigurePoseRecovered": false,
+            "interpretation": "No pose returned despite a visible wall figure."
+          }
+        ]
+      },
+      "candidateResult": null,
+      "sourceArtifactHashes": {
+        "source-frames-frozen.json": "a798f6c5739ccc6f210a84ae550489124d872bcd7060ba12d4cb3edea7f9dcda",
+        "pose-results-frozen.json": "c3e016fe686b3a24af90423628d63542376f8275e914d6034bdd39068d17f477",
+        "blind-body-observer-frozen.json": "83d2f72b87ed0a8583c82861969ce5944298351ef823398b1d1f492e4167292b"
+      },
+      "counts": {
+        "distinctSourceRecordings": 1,
+        "visibleWallFigureTorsoAndHips": 4,
+        "poseFrames": 4,
+        "wallFigurePoseRecovered": 0,
+        "foregroundFragmentOnlyPoses": 2,
+        "noReturnedPose": 2,
+        "bothFeetConfidentlyVisibleFrames": 1,
+        "qualifyingEndpointEventsTested": 0
+      },
+      "localizationEvidenceOutOf10": null,
+      "automaticEndpointEvidenceOutOf10": null,
+      "scoreReason": "Endpoint scores are N/A: this round measures body availability, not event timing. Separate visible-wall-figure pose recovery is 0/4 (0/10 on this narrow body task); no keypoint accuracy or intended-athlete identity is established.",
+      "safetyGate": {
+        "runtimeChanged": false,
+        "newAutomaticAcceptanceTested": false,
+        "result": null,
+        "reason": "Baseline observation only; no automatic endpoint decision was changed or validated."
+      },
+      "decision": "Baseline exposes a real body-localization failure. No runtime change or endpoint gain.",
+      "feedbackAfterActualResult": "In round 2 compare a prospectively registered raw-observation crop and generic tiles on the identical source frames. Keep inverse coordinate mapping, foreground-fragment and no-person controls, all proposals and crop-selection provenance. A returned pose must match the visible wall figure; confidence alone is insufficient.",
+      "amendments": [],
+      "bodyLocalizationScore": {
+        "correct": 0,
+        "eligibleFrames": 4,
+        "outOf10": 0,
+        "scope": "Recovery of a visible wall figure with torso and hips. This is not full-body keypoint accuracy, athlete intent or endpoint accuracy."
+      },
+      "referenceAssessment": {
+        "observerCount": 1,
+        "observerType": "AI visual observer",
+        "predictionExposure": false,
+        "referenceWasFrozenBeforeBaselineInference": false,
+        "timingMeaning": "Observer independently inspected only raw PNGs without pose proposals. This is blinded adjudication of a development baseline, not a prospectively unseen source test.",
+        "boundsArePixelExact": false,
+        "intendedAthleteIdentified": false
+      }
+    },
+    {
+      "round": 2,
+      "title": "Cropped native body recovery",
+      "status": "completed",
+      "predecessorFeedbackRequired": true,
+      "question": "Test whether a registered lower-wall crop improves usable body localization on the identical source frames.",
+      "requiredEvidence": [
+        "Register crop and inverse coordinate mapping before results; compare against the same full-frame outputs.",
+        "Retain false person, partial-body, no-person and different-lane controls with original image coordinates."
+      ],
+      "decisionCriterion": "Require verified improved localization without invented athlete identity, coordinate drift or newly accepted unrelated people.",
+      "nextFeedback": "Separate genuine body localization gains from missing or incorrect scene continuity.",
+      "primarySourceIds": [
+        "google-pose-web",
+        "video-frame-callback-spec"
+      ],
+      "concreteConditionRegistration": {
+        "frozenAt": "2026-10-23T22:24:04.548Z",
+        "sourceSha256": "12a1189c069d832b6bcb1f38176786a7abd0cbb88da234bc9c0d1e53881602e5",
+        "fixedVariants": [
+          {
+            "id": "full-replay-control",
+            "origin": "unchanged-source-wide-control",
+            "region": {
+              "left": 0,
+              "top": 0,
+              "right": 1,
+              "bottom": 1
+            },
+            "eligibleBodyProposalCountsPerFrame": [
+              0,
+              0,
+              0,
+              0
+            ]
+          },
+          {
+            "id": "observer-wall-hull",
+            "origin": "conditional-manual-observer-region-not-automatic",
+            "region": {
+              "left": 0.45,
+              "top": 0.738,
+              "right": 0.66,
+              "bottom": 0.999
+            },
+            "eligibleBodyProposalCountsPerFrame": [
+              1,
+              1,
+              1,
+              1
+            ]
+          },
+          {
+            "id": "observer-foreground-hull",
+            "origin": "conditional-manual-partial-foreground-control",
+            "region": {
+              "left": 0,
+              "top": 0,
+              "right": 0.9,
+              "bottom": 0.56
+            },
+            "eligibleBodyProposalCountsPerFrame": [
+              0,
+              0,
+              0,
+              0
+            ]
+          },
+          {
+            "id": "fixed-grid-0-0",
+            "origin": "predeclared-source-independent-generic-grid",
+            "region": {
+              "left": 0,
+              "top": 0.25,
+              "right": 0.6,
+              "bottom": 0.75
+            },
+            "eligibleBodyProposalCountsPerFrame": [
+              0,
+              0,
+              0,
+              0
+            ]
+          },
+          {
+            "id": "fixed-grid-0-1",
+            "origin": "predeclared-source-independent-generic-grid",
+            "region": {
+              "left": 0,
+              "top": 0.5,
+              "right": 0.6,
+              "bottom": 1
+            },
+            "eligibleBodyProposalCountsPerFrame": [
+              0,
+              0,
+              0,
+              1
+            ]
+          },
+          {
+            "id": "fixed-grid-1-0",
+            "origin": "predeclared-source-independent-generic-grid",
+            "region": {
+              "left": 0.4,
+              "top": 0.25,
+              "right": 1,
+              "bottom": 0.75
+            },
+            "eligibleBodyProposalCountsPerFrame": [
+              0,
+              0,
+              0,
+              0
+            ]
+          },
+          {
+            "id": "fixed-grid-1-1",
+            "origin": "predeclared-source-independent-generic-grid",
+            "region": {
+              "left": 0.4,
+              "top": 0.5,
+              "right": 1,
+              "bottom": 1
+            },
+            "eligibleBodyProposalCountsPerFrame": [
+              1,
+              1,
+              1,
+              1
+            ]
+          }
+        ],
+        "eligibility": {
+          "landmarkIndices": [
+            11,
+            12,
+            15,
+            16,
+            23,
+            24,
+            27,
+            28
+          ],
+          "minVisibility": 0.2,
+          "allNamedLandmarksInsideSourceAndTile": true,
+          "torsoCenterInsideSourceAndTile": true,
+          "duplicateAnchorDistance": 0.06,
+          "persistence": "Exactly one spatial hypothesis in ALL4frames and existing pose continuity distance bound. No confidence votes, intended-athlete selection or marker acceptance."
+        },
+        "prospectiveRelativeToCropResults": true
+      },
+      "baselineResult": {
+        "fullReplayEligibleWallBodyFrames": 0,
+        "frames": 4
+      },
+      "candidateResult": {
+        "browser": "156.0.8078.47",
+        "sourceParityAllFour": true,
+        "manualObservedCropEligibleFrames": 4,
+        "manualCropFrameCount": 4,
+        "partialForegroundControlEligibleFrames": 0,
+        "partialForegroundControlFrameCount": 4,
+        "genericGridPersistentUnique": true,
+        "genericUniqueCentersWithinBlindWallFigureBounds": [
+          {
+            "sourcePngSha256": "8af9ccb403d6fe89a8883ea241b60dfef8fe80015fa626c6adb49aa36d2cd783",
+            "center": {
+              "x": 0.615178045630455,
+              "y": 0.9058512896299362
+            },
+            "insideBlindVisibleWallFigureBounds": true,
+            "uniqueHypothesis": true,
+            "proposalCount": 1
+          },
+          {
+            "sourcePngSha256": "df1cf93e17f71a278c5df6ee09d592deff7c7c3290ddb74a3974c8bc26791bf5",
+            "center": {
+              "x": 0.6337533265352249,
+              "y": 0.9114985167980194
+            },
+            "insideBlindVisibleWallFigureBounds": true,
+            "uniqueHypothesis": true,
+            "proposalCount": 1
+          },
+          {
+            "sourcePngSha256": "19a54c1096c3b97ef91e5be779ec635a6af65143291c97f9b127d719cfd0dcb3",
+            "center": {
+              "x": 0.6226868450641632,
+              "y": 0.8957189619541168
+            },
+            "insideBlindVisibleWallFigureBounds": true,
+            "uniqueHypothesis": true,
+            "proposalCount": 1
+          },
+          {
+            "sourcePngSha256": "6192605103e4e656a4c0f9d0f09111d104a089254355d233b97581ceb760dbe5",
+            "center": {
+              "x": 0.5479577295482159,
+              "y": 0.8264916464686394
+            },
+            "insideBlindVisibleWallFigureBounds": true,
+            "uniqueHypothesis": true,
+            "proposalCount": 2
+          }
+        ],
+        "runtimeChanged": false,
+        "automaticTimingRecovery": false,
+        "errors": []
+      },
+      "sourceArtifactHashes": {
+        "plan-frozen.json": "24f636806987834cbda9a622d8e5dae196c47c4cc7d49e5baa92de54d82107b1",
+        "results-frozen.json": "852b1a42be14f3ca692a74578d070acef618f4950bbb374f6094d339ab12ce72"
+      },
+      "counts": {
+        "distinctSourceRecordings": 1,
+        "originalFrames": 4,
+        "fullReplayWallBodyFrames": 0,
+        "manualObservedCropWallBodyFrames": 4,
+        "genericGridUniqueWallBodyFrames": 4,
+        "foregroundControlEligibleFrames": 0,
+        "qualifyingEndpointEventsTested": 0
+      },
+      "localizationEvidenceOutOf10": null,
+      "automaticEndpointEvidenceOutOf10": null,
+      "scoreReason": "Endpoint scores are N/A. Both conditional manual crop and registered generic grid produce body-center proposals in the visible wall-figure bounds on 4/4 known-source frames. The subsequent automatic-body audit can still fail because the landmark extent is not anatomically validated; no automatic Start or Finish was tested here.",
+      "safetyGate": {
+        "result": null,
+        "partialForegroundControlRejected": 4,
+        "partialForegroundControlTotal": 4,
+        "reason": "No endpoint acceptance policy was changed. Body search still needs broader source, two-person and no-person controls."
+      },
+      "decision": "Useful research body-localization improvement; retain for broader controls, with no automatic endpoint or population accuracy claim.",
+      "feedbackAfterActualResult": "Retain full source coordinate and tile mapping, reject off-image anchors, require a persistent unique body hypothesis, and test two people, no person and clipped fragments before integration. Keep continuity as an independent blocker.",
+      "amendments": [],
+      "bodyLocalizationScore": {
+        "correct": 4,
+        "eligibleFrames": 4,
+        "outOf10": 10,
+        "scope": "Recovery of a unique persistent body-center proposal inside the blind observer's coarse visible wall-figure bounds on these same four known-source frames. This 10/10 is not anatomical/keypoint accuracy, a validated full-body extent, intended-athlete identity, or endpoint accuracy."
+      },
+      "comparabilityLimit": "Native source PNGs and PTS match round 1. PNG-to-model resizing is replayed independently; round 1 and round 2 full-frame model-input hashes are not identical. The controlled crop comparison uses round 2 full-replay results rather than asserting byte-identical model inputs across rounds."
+    },
+    {
+      "round": 3,
+      "title": "Native scene and foreground continuity audit",
+      "status": "completed",
+      "predecessorFeedbackRequired": true,
+      "question": "Determine why the existing IMG_9075 scene audit reports a large structural discontinuity.",
+      "requiredEvidence": [
+        "Capture the exact native before/after frame pair, PTS, zone and current audit output.",
+        "Independently inspect wall, camera motion, foreground and timing; preserve real cuts as negative controls."
+      ],
+      "decisionCriterion": "Classify the observed mechanism without lowering the existing threshold or assuming an obstruction proves continuity.",
+      "nextFeedback": "Choose a bounded continuity hypothesis only if source evidence supports one.",
+      "primarySourceIds": [
+        "video-frame-callback-spec",
+        "world-climbing-rules-2026"
+      ],
+      "concreteConditionRegistration": null,
+      "baselineResult": {
+        "sourceId": "IMG_9075",
+        "originalSceneChangedRatio": 0.7952835648148148,
+        "nativeBeforePtsSeconds": 8.401667,
+        "nativeAfterPtsSeconds": 8.768333
+      },
+      "candidateResult": {
+        "runtimeChanged": false,
+        "observed": {
+          "exactOriginalRatio": 0.7952835648148148,
+          "medianMechanismProbeRatio": 0.3893229166666667,
+          "actualNativeChainLinksPassed": 15,
+          "developmentPositivePass": 48,
+          "developmentPositiveTotal": 60,
+          "developmentNegativeReject": 132,
+          "developmentNegativeTotal": 132,
+          "reservedPositivePass": 48,
+          "reservedPositiveTotal": 60,
+          "reservedNegativeReject": 132,
+          "reservedNegativeTotal": 132,
+          "postProspectiveDissolveFalsePositives": 3,
+          "postProspectiveDissolveControls": 3
+        },
+        "researchStatus": "research-hypothesis-rejected-no-runtime-change"
+      },
+      "sourceArtifactHashes": {
+        "round03-rejected-evidence.json": "86d498caae2fadc70956de099cb503047ce04e43e42a15fc6190f42c75ec63bd",
+        "prospective-plan.json": "a47a58cdf67f90a306ad343cdd2a0283ffb0c94d4e3f66f212a616924fd43572",
+        "prototype.mjs": "0ce2527c316128ed1fe904e6f5d1e56fb7e6aa9e1c873214e29a04c16f515a81",
+        "controls-development.json": "ebf6afca1c2a867407d59709b1d18ebb3305be33c2594f7b1b0f5fd8e102c975",
+        "controls-reserved.json": "203ec8e78b5efcc170dfa707b24961f7db9e71995964af68aa28adbbd5566085",
+        "native-png-grids.json": "ff0243003a0fe94dfad20fc4433adab89719bcb1c62ed04cf27edef716d3fdc1",
+        "native-prototype-result.json": "7ea0bad0f8d9235640a34cd6f22f5ef10383c1e6f2da0a08675ae063c83bede8",
+        "counterexample-dissolve.json": "7adc91d79ab7ea61114b3d4ffa00c02e4bb78297f0eb4729d5c2b84fdfc6a447"
+      },
+      "counts": {
+        "distinctRealSourceRecordings": 1,
+        "qualifyingEndpointEventsTested": 0
+      },
+      "localizationEvidenceOutOf10": null,
+      "automaticEndpointEvidenceOutOf10": null,
+      "scoreReason": "Endpoint scores are N/A: continuity proxies and generated scene controls do not independently label or accept a Start or Finish event.",
+      "safetyGate": {
+        "result": false,
+        "knownDissolveFalseAccepts": 3,
+        "knownDissolveControls": 3,
+        "interpretation": "The adjacent-only chain accepts all three additional gradual-dissolve controls despite rejecting the original synthetic negative cohorts. This disqualifies an acceptance override."
+      },
+      "decision": "Rejected research variant; no runtime change and no automatic endpoint gain.",
+      "feedbackAfterActualResult": "Round 4 must require persistent original descriptors and fresh dissolve controls while retaining numerical thresholds; do not equate adjacent-frame similarity with original-scene continuity.",
+      "amendments": [],
+      "mechanismProbe": {
+        "medianRgbShiftChangedRatio": 0.3893229166666667,
+        "interpretation": "A median RGB-shift probe still fails the original continuity policy; this does not establish genuine camera continuity."
+      }
+    },
+    {
+      "round": 4,
+      "title": "Bounded continuity prototype",
+      "status": "completed",
+      "predecessorFeedbackRequired": true,
+      "question": "Test a source-supported continuity method while retaining real cut and wrong-event rejection.",
+      "requiredEvidence": [
+        "Register method, parameters, scene controls and raw before/after outputs before candidate scoring.",
+        "Test actual scene pixels plus camera-cut, pan, exposure, occlusion and no-reference cases."
+      ],
+      "decisionCriterion": "A useful variant must preserve known discontinuity rejection and improve the audited genuine-continuity case; otherwise reject it.",
+      "nextFeedback": "Only combine a successful variant with independently supported body localization in round 5.",
+      "primarySourceIds": [
+        "video-frame-callback-spec"
+      ],
+      "concreteConditionRegistration": null,
+      "baselineResult": {
+        "sourceId": "IMG_9075",
+        "originalSceneChangedRatio": 0.7952835648148148,
+        "nativeBeforePtsSeconds": 8.401667,
+        "nativeAfterPtsSeconds": 8.768333
+      },
+      "candidateResult": {
+        "runtimeChanged": false,
+        "observed": {
+          "development": {
+            "positivePass": 48,
+            "positiveTotal": 60,
+            "negativeReject": 144,
+            "negativeTotal": 144,
+            "dissolveReject": 12,
+            "dissolveTotal": 12
+          },
+          "reserved": {
+            "positivePass": 48,
+            "positiveTotal": 60,
+            "negativeReject": 144,
+            "negativeTotal": 144,
+            "dissolveReject": 12,
+            "dissolveTotal": 12
+          },
+          "actualKnown9075": {
+            "continuous": false,
+            "originalFeatures": 46,
+            "retainedAtFirstFractionFailure": 17,
+            "firstFailurePTS": 8.435,
+            "retainedAt8_768333": 3,
+            "supportQuadrantsAt8_768333": 1
+          }
+        },
+        "researchStatus": "research-hypothesis-rejected-no-runtime-change"
+      },
+      "sourceArtifactHashes": {
+        "round04-rejected-evidence.json": "685ae60ad106cb3c632dbffb2acd27bd6f663f7adefe0aab19bcd39685a83f93",
+        "prospective-plan-v2.json": "fce229cb2606b15f9399d74e67caeca5ee7224e1635377a0f0a6d7cf4932d167",
+        "prototype-v2.mjs": "02188b500b1f50e32231c307dd4adc74be5cb036bb2b5b036cc8d6ca98cc8e3d",
+        "controls-v2.mjs": "1eea8df6ede1d4c8764646b287a4e7d98d1d931536af1e4359316414cf7d840f",
+        "controls-v2-development.json": "bd1fa18b303e483283238a0bc0de72e3923deb392fb8b62932568c699d14920d",
+        "controls-v2-reserved.json": "0d57da372cd089d12e8435cb8a93c0b2ba6c812b10b05d828e7558f69269c7a7",
+        "native-png-grids.json": "ff0243003a0fe94dfad20fc4433adab89719bcb1c62ed04cf27edef716d3fdc1",
+        "native-prototype-v2-result.json": "8c27caf7fab1ba72f71409b90ebd41d9971207c11cfb11decbeef70bacdc3363"
+      },
+      "counts": {
+        "distinctRealSourceRecordings": 1,
+        "qualifyingEndpointEventsTested": 0
+      },
+      "localizationEvidenceOutOf10": null,
+      "automaticEndpointEvidenceOutOf10": null,
+      "scoreReason": "Endpoint scores are N/A: continuity proxies and generated scene controls do not independently label or accept a Start or Finish event.",
+      "safetyGate": {
+        "result": true,
+        "scope": "Only the registered generated controls: 144/144 negatives rejected in each of two cohorts, including 12/12 dissolves per cohort. Not field false-acceptance evidence."
+      },
+      "decision": "Rejected research variant; no runtime change and no automatic endpoint gain.",
+      "feedbackAfterActualResult": "Original descriptor persistence closes the known dissolve controls but leaves only 3/46 original features at the actual final frame. Do not lower retention to fit this clip or remove the scene gate; report the unresolved blocker in the round 5 whole-app evaluation.",
+      "amendments": [],
+      "practicalTargetRecovered": false
+    },
+    {
+      "round": 5,
+      "title": "Whole-app recorded-cue recovery",
+      "status": "completed",
+      "predecessorFeedbackRequired": true,
+      "question": "Test whether the cumulative body and continuity work yields a genuinely correct new automatic Start.",
+      "requiredEvidence": [
+        "Pair clean baseline/candidate on original recordings with source hashes, same settings and unchanged reference union.",
+        "Retain original automatic outputs, matched acoustic event, body region, scene evidence, errors and blockers."
+      ],
+      "decisionCriterion": "Claim recovery only if a formerly reviewed event becomes automatically accepted with matching cue and athlete evidence within policy and no new known false acceptance. A better review cursor alone is not a pass.",
+      "nextFeedback": "Freeze the accepted or rejected cumulative candidate before audio robustness testing.",
+      "primarySourceIds": [
+        "world-climbing-rules-2026",
+        "w3c-web-audio"
+      ],
+      "concreteConditionRegistration": null,
+      "baselineResult": {
+        "id": "existing-full-source-fallback",
+        "motionDetected": true,
+        "motionRawTimeSeconds": 8.357,
+        "motionConfidence": "Low",
+        "bodyAuditSafe": false,
+        "bodyAuditReason": "The selected lane did not show a reliable launch after the proposed start, so the timestamp requires review.",
+        "safeToAutoAccept": false
+      },
+      "candidateResult": {
+        "bodyAuditVariant": {
+          "id": "generic-automatic-body-candidate",
+          "motionDetected": true,
+          "motionRawTimeSeconds": 8.357,
+          "motionConfidence": "Low",
+          "bodyAuditSafe": false,
+          "bodyAuditReason": "The selected lane did not show a reliable launch after the proposed start, so the timestamp requires review.",
+          "safeToAutoAccept": false
+        },
+        "proposedZoneHeightFractionOfImage": 0.041786402463912964,
+        "blindVisibleWallFigureHeightFractionOfImage": 0.187,
+        "sceneContinuous": false,
+        "sceneStructuralChangeRatio": 0.7953,
+        "errors": []
+      },
+      "sourceArtifactHashes": {
+        "automatic-body/plan-frozen.json": "b956a91e8ad2578a20ffc5dcf7f13385c521caea4862f0d9408c9735df38c9d4",
+        "automatic-body/results-frozen.json": "42e1733078f25b0cf506b8cea0540869d0ce26cae663e393c68403872cad2649",
+        "heavy-secondary/plan-frozen.json": "8c8b65d94901d6cd795b2fddc2902e0b7c8dea940cc85e877c8b523dd14d2ec6",
+        "heavy-secondary/results-frozen.json": "898ab01366ef92dad9f5f20e9bea3070caab52677e16ed8761ffc08770cce4aa",
+        "heavy-secondary/anatomy-diagnostic-frozen.json": "04e0fb0629352601e29c7c9dec0e0182d3fc5b291a726751b73216d88570a1c4"
+      },
+      "counts": {
+        "underlyingSources": 1,
+        "suppliedCueAudited": 1,
+        "qualifiedAutomaticBodyAndSceneAudits": 0,
+        "newAutomaticallyAcceptedEndpoints": 0,
+        "newEndpointPredictionsTested": 0
+      },
+      "localizationEvidenceOutOf10": null,
+      "automaticEndpointEvidenceOutOf10": null,
+      "scoreReason": "Endpoint scores are N/A: the cue was supplied to component audits, not newly predicted or accepted by a whole-app run. Both old fallback and new proposed zone return Low motion at 8.357 s and fail; scene continuity also fails.",
+      "safetyGate": {
+        "result": true,
+        "scope": "The existing body and scene guards correctly retain review in this audit; no bypass or tolerance relaxation.",
+        "newAutomaticGain": false
+      },
+      "decision": "No automatic Start recovery. Reject integration of the proposed body extent and Heavy model substitution.",
+      "feedbackAfterActualResult": "Do not turn round2 center persistence into anatomical validity. Test source-conditioned audio robustness next, keeping body and scene blockers independent and all failures visible.",
+      "amendments": [],
+      "actualScope": "Native component audit of an automatically proposed body zone at a supplied recorded-cue timestamp; stopped before whole-app integration because qualification failed. A heavier-model secondary experiment is included separately.",
+      "componentQualificationScore": {
+        "qualified": 0,
+        "attempted": 1,
+        "outOf10": 0,
+        "scope": "Body-plus-scene precondition audit at the supplied 8.590 s cue; this is not an end-to-end automatic endpoint score."
+      },
+      "secondaryHeavyModel": {
+        "decision": "Rejected; no app model replacement.",
+        "modelBytes": {
+          "Full": 9398198,
+          "Heavy": 30664242
+        },
+        "genericPersistentUnique": false,
+        "perFrameUnique": [
+          false,
+          false,
+          true,
+          true
+        ],
+        "newBodyAuditRun": false,
+        "reason": "No eligible generic body hypothesis in the first two frames, so no persistent automatic zone exists and no Heavy-derived body audit was run.",
+        "coarseAnatomyDiagnostics": [
+          {
+            "model": "Full",
+            "category": "generic-fixed-lower-right-tile",
+            "hits": [
+              2,
+              5,
+              6,
+              7
+            ],
+            "knownRegions": [
+              7,
+              7,
+              7,
+              8
+            ]
+          },
+          {
+            "model": "Full",
+            "category": "MANUAL-observer-hull-diagnostic",
+            "hits": [
+              7,
+              7,
+              6,
+              7
+            ],
+            "knownRegions": [
+              7,
+              7,
+              7,
+              8
+            ]
+          },
+          {
+            "model": "Heavy",
+            "category": "generic-fixed-lower-right-tile",
+            "hits": [
+              2,
+              6,
+              6,
+              7
+            ],
+            "knownRegions": [
+              7,
+              7,
+              7,
+              8
+            ]
+          },
+          {
+            "model": "Heavy",
+            "category": "MANUAL-observer-hull-diagnostic",
+            "hits": [
+              7,
+              7,
+              6,
+              7
+            ],
+            "knownRegions": [
+              7,
+              7,
+              7,
+              8
+            ]
+          }
+        ],
+        "anatomyLimit": "Single blinded AI visible-region overlap; approximate clothed regions, unknown anatomy excluded, not human keypoint truth or PCK. A correct center does not validate body extent.",
+        "referenceObserverSha256": "b46962b98ec1660b7bce102b9509ac512361f9597bd5362d983e7cef669423c9"
+      }
+    },
+    {
+      "round": 6,
+      "title": "Audio gain and noise robustness",
+      "status": "completed",
+      "predecessorFeedbackRequired": true,
+      "question": "Measure stability under registered amplitude and background-noise perturbations of hashed native PCM.",
+      "requiredEvidence": [
+        "Freeze deterministic gains, noise seeds, noise levels, peak/clipping policy and original clock mapping.",
+        "Report source-by-condition outcomes; include wrong-protocol and no-cue negative controls and retain raw baseline behavior."
+      ],
+      "decisionCriterion": "Preserve correct cue identity and clocks where signal remains qualified; added noise or clipping must not create a new wrong automatic protocol.",
+      "nextFeedback": "Use failures to define a separate channel, phase and sample-rate experiment without retuning this grid after results.",
+      "primarySourceIds": [
+        "w3c-web-audio",
+        "scipy-short-time-fft"
+      ],
+      "concreteConditionRegistration": null,
+      "baselineResult": {
+        "detectorSha256": "6c2a92abd963021af2e52b449f387b787d8e0c67e687c960b7062bca91133e10",
+        "runtimeAudioChangedDuringInitialStudy": false,
+        "underlyingReferenceSource": "IMG_9075",
+        "referenceUnionSeconds": [
+          8.58,
+          8.625
+        ]
+      },
+      "candidateResult": {
+        "profiles": [
+          {
+            "profile": "gain",
+            "allSourceConditionRows": 30,
+            "underlyingExistingSources": 6,
+            "targetConditionRows": 5,
+            "targetWithinRecordedCuePolicy": 5,
+            "localizationOutOf10": 10.0,
+            "targetOutcomes": [
+              {
+                "variant": "gain-0.1",
+                "sourceSampleRate": 8000,
+                "audioConfidence": "High",
+                "rawTimeSeconds": 8.59,
+                "signedDisagreementIntervalSeconds": [
+                  -0.03500000000000014,
+                  0.009999999999999787
+                ],
+                "withinPolicy": true
+              },
+              {
+                "variant": "gain-0.25",
+                "sourceSampleRate": 8000,
+                "audioConfidence": "High",
+                "rawTimeSeconds": 8.59,
+                "signedDisagreementIntervalSeconds": [
+                  -0.03500000000000014,
+                  0.009999999999999787
+                ],
+                "withinPolicy": true
+              },
+              {
+                "variant": "gain-0.5",
+                "sourceSampleRate": 8000,
+                "audioConfidence": "High",
+                "rawTimeSeconds": 8.59,
+                "signedDisagreementIntervalSeconds": [
+                  -0.03500000000000014,
+                  0.009999999999999787
+                ],
+                "withinPolicy": true
+              },
+              {
+                "variant": "gain-1",
+                "sourceSampleRate": 8000,
+                "audioConfidence": "High",
+                "rawTimeSeconds": 8.59,
+                "signedDisagreementIntervalSeconds": [
+                  -0.03500000000000014,
+                  0.009999999999999787
+                ],
+                "withinPolicy": true
+              },
+              {
+                "variant": "gain-2",
+                "sourceSampleRate": 8000,
+                "audioConfidence": "High",
+                "rawTimeSeconds": 8.59,
+                "signedDisagreementIntervalSeconds": [
+                  -0.03500000000000014,
+                  0.009999999999999787
+                ],
+                "withinPolicy": true
+              }
+            ]
+          },
+          {
+            "profile": "noise",
+            "allSourceConditionRows": 18,
+            "underlyingExistingSources": 6,
+            "targetConditionRows": 3,
+            "targetWithinRecordedCuePolicy": 0,
+            "localizationOutOf10": 0.0,
+            "targetOutcomes": [
+              {
+                "variant": "independent-uniform-noise-0.005",
+                "sourceSampleRate": 8000,
+                "audioConfidence": "Medium",
+                "rawTimeSeconds": 7.23,
+                "signedDisagreementIntervalSeconds": [
+                  -1.3949999999999996,
+                  -1.3499999999999996
+                ],
+                "withinPolicy": false
+              },
+              {
+                "variant": "independent-uniform-noise-0.02",
+                "sourceSampleRate": 8000,
+                "audioConfidence": "Medium",
+                "rawTimeSeconds": 7.24,
+                "signedDisagreementIntervalSeconds": [
+                  -1.3849999999999998,
+                  -1.3399999999999999
+                ],
+                "withinPolicy": false
+              },
+              {
+                "variant": "independent-uniform-noise-0.05",
+                "sourceSampleRate": 8000,
+                "audioConfidence": "Medium",
+                "rawTimeSeconds": 7.24,
+                "signedDisagreementIntervalSeconds": [
+                  -1.3849999999999998,
+                  -1.3399999999999999
+                ],
+                "withinPolicy": false
+              }
+            ]
+          }
+        ],
+        "newAutomaticallyAcceptedEndpoints": null,
+        "runtimeChangeShippedFromThisRound": false
+      },
+      "sourceArtifactHashes": {
+        "round06-gain.json": "45eec21ce984d602f14dc675a13a452c8f01b45450a943c9205c2120f2965d7e",
+        "round06-noise.json": "e4311202ac0aa77f0194c7ead50d6ca59cde6f0569b4c38ce4c3c4b335c30fdb"
+      },
+      "counts": {
+        "underlyingExistingSources": 6,
+        "underlyingQualifyingReferenceSources": 1,
+        "qualifyingDerivedConditionRows": 8,
+        "correctDerivedLocalizations": 5,
+        "failedDerivedLocalizations": 3,
+        "wholeAppAutomaticEndpointOutputsTested": 0
+      },
+      "localizationEvidenceOutOf10": 6.25,
+      "automaticEndpointEvidenceOutOf10": null,
+      "scoreReason": "Localization score is a correlated source-condition robustness score on one development recording, not accuracy across distinct attempts. Automatic-endpoint score is N/A because these reports exercise the audio kernel, not app acceptance.",
+      "safetyGate": null,
+      "decision": "Retain unchanged audio and record robustness limitations; no automatic recovery or general accuracy gain.",
+      "feedbackAfterActualResult": "All five gain conditions retain 8.590 s, but all three additive-noise conditions fall back to Medium at 7.230-7.240 s outside the recorded-cue bracket. Next stress channel balance, phase and resampling, with no threshold relaxation or new channel votes.",
+      "amendments": [],
+      "actualScope": "Audio-kernel robustness on transformed copies of six existing native-PCM sources. Timing score is confined to derived conditions of the one source with an eligible recorded-cue bracket; High is not whole-app automatic acceptance."
+    },
+    {
+      "round": 7,
+      "title": "Audio channel, phase and sample-rate robustness",
+      "status": "completed",
+      "predecessorFeedbackRequired": true,
+      "question": "Test stereo association, phase cancellation and resampling boundaries without fabricated extra evidence.",
+      "requiredEvidence": [
+        "Register channel permutations, cancellation variants, channel conflict, mono, multichannel and sample-rate settings.",
+        "Retain actual rates, extraction-frame origins and PCM hashes; distinguish constructed controls from additional attempts."
+      ],
+      "decisionCriterion": "Keep one audio source and one original clock, preserve mono and existing High behavior, and reject incomplete or conflicting protocols; no blanket onset offset.",
+      "nextFeedback": "Carry only measured improvements into the frozen Finish-localization experiments.",
+      "primarySourceIds": [
+        "w3c-web-audio",
+        "scipy-short-time-fft",
+        "scipy-spectral-peaks"
+      ],
+      "concreteConditionRegistration": null,
+      "baselineResult": {
+        "detectorSha256": "6c2a92abd963021af2e52b449f387b787d8e0c67e687c960b7062bca91133e10",
+        "runtimeAudioChangedDuringInitialStudy": false,
+        "underlyingReferenceSource": "IMG_9075",
+        "referenceUnionSeconds": [
+          8.58,
+          8.625
+        ]
+      },
+      "candidateResult": {
+        "profiles": [
+          {
+            "profile": "phase",
+            "allSourceConditionRows": 30,
+            "underlyingExistingSources": 6,
+            "targetConditionRows": 5,
+            "targetWithinRecordedCuePolicy": 4,
+            "localizationOutOf10": 8.0,
+            "targetOutcomes": [
+              {
+                "variant": "right-gain-1",
+                "sourceSampleRate": 8000,
+                "audioConfidence": "High",
+                "rawTimeSeconds": 8.59,
+                "signedDisagreementIntervalSeconds": [
+                  -0.03500000000000014,
+                  0.009999999999999787
+                ],
+                "withinPolicy": true
+              },
+              {
+                "variant": "right-gain-0.5",
+                "sourceSampleRate": 8000,
+                "audioConfidence": "High",
+                "rawTimeSeconds": 8.41,
+                "signedDisagreementIntervalSeconds": [
+                  -0.21499999999999986,
+                  -0.16999999999999993
+                ],
+                "withinPolicy": false
+              },
+              {
+                "variant": "right-gain-0",
+                "sourceSampleRate": 8000,
+                "audioConfidence": "High",
+                "rawTimeSeconds": 8.59,
+                "signedDisagreementIntervalSeconds": [
+                  -0.03500000000000014,
+                  0.009999999999999787
+                ],
+                "withinPolicy": true
+              },
+              {
+                "variant": "right-gain--0.5",
+                "sourceSampleRate": 8000,
+                "audioConfidence": "High",
+                "rawTimeSeconds": 8.59,
+                "signedDisagreementIntervalSeconds": [
+                  -0.03500000000000014,
+                  0.009999999999999787
+                ],
+                "withinPolicy": true
+              },
+              {
+                "variant": "right-gain--1",
+                "sourceSampleRate": 8000,
+                "audioConfidence": "High",
+                "rawTimeSeconds": 8.59,
+                "signedDisagreementIntervalSeconds": [
+                  -0.03500000000000014,
+                  0.009999999999999787
+                ],
+                "withinPolicy": true
+              }
+            ]
+          },
+          {
+            "profile": "rate",
+            "allSourceConditionRows": 24,
+            "underlyingExistingSources": 6,
+            "targetConditionRows": 4,
+            "targetWithinRecordedCuePolicy": 1,
+            "localizationOutOf10": 2.5,
+            "targetOutcomes": [
+              {
+                "variant": "linear-resample-8000",
+                "sourceSampleRate": 8000,
+                "audioConfidence": "High",
+                "rawTimeSeconds": 8.59,
+                "signedDisagreementIntervalSeconds": [
+                  -0.03500000000000014,
+                  0.009999999999999787
+                ],
+                "withinPolicy": true
+              },
+              {
+                "variant": "linear-resample-16000",
+                "sourceSampleRate": 16000,
+                "audioConfidence": "High",
+                "rawTimeSeconds": 8.41,
+                "signedDisagreementIntervalSeconds": [
+                  -0.21499999999999986,
+                  -0.16999999999999993
+                ],
+                "withinPolicy": false
+              },
+              {
+                "variant": "linear-resample-44100",
+                "sourceSampleRate": 44100,
+                "audioConfidence": "High",
+                "rawTimeSeconds": 8.41,
+                "signedDisagreementIntervalSeconds": [
+                  -0.21499999999999986,
+                  -0.16999999999999993
+                ],
+                "withinPolicy": false
+              },
+              {
+                "variant": "linear-resample-48000",
+                "sourceSampleRate": 48000,
+                "audioConfidence": "High",
+                "rawTimeSeconds": 8.41,
+                "signedDisagreementIntervalSeconds": [
+                  -0.21499999999999986,
+                  -0.16999999999999993
+                ],
+                "withinPolicy": false
+              }
+            ]
+          }
+        ],
+        "newAutomaticallyAcceptedEndpoints": null,
+        "runtimeChangeShippedFromThisRound": false,
+        "authoredConflictControls": {
+          "labelledControls": 6,
+          "passed": 6,
+          "ambiguousUnlabelledCases": [
+            {
+              "id": "two-displaced-protocols",
+              "confidence": "High",
+              "rawTimeSeconds": 2.79
+            }
+          ],
+          "isFieldFalseAcceptanceEstimate": false
+        },
+        "knownHighWrongClockCases": 4,
+        "wrongClockSeconds": 8.41,
+        "wrongClockSignedDisagreementIntervalSeconds": [
+          -0.215,
+          -0.17
+        ]
+      },
+      "sourceArtifactHashes": {
+        "round07-phase.json": "efaa41e7c5a92f28537c7134118312f939041ba8cc5b69b7d88fb46226320198",
+        "round07-rate.json": "d9e653fbbd916ab382e57acf8f8c4e90f20b2834a2d7434c80a9916818878297",
+        "round07-conflict.json": "8bf5e38a01dea39669b3a73dd30d5e14cddfabf03ee5b83073f1093131ca8220",
+        "round07-channel-diagnostic.json": "bca8e5bcc6489944383428bfe190e4810877913d096667d2845a74cf338f31f0",
+        "round07-local-peak-candidate-plan-frozen.json": "72501a57b0df4c3b7b2abfb4ca065009f811eee64a89edcbb31b6d847ade5783",
+        "round07-local-peak-candidate-results-frozen.json": "ba9a92fbc7262f531e83fe9aa6fbcd21eeeb1269708e1db137185210dc2ce0ae",
+        "round07-local-peak-reserved-plan-frozen.json": "0fe33ae43312edcc6a904c77eb40332f0c58ee9b4a6a814e2bb55c4c6b288c70",
+        "round07-local-peak-reserved-results-frozen.json": "d93fd8c77c05a35bd0db232b6ed4f9511718c0275a8e90e73f65e6d77d6f974d",
+        "round07-local-peak-unit-validation-frozen.json": "b7c274281d5a6d57844d8294af87f85a41e44050c6245fd76da7c152f1a044c9",
+        "round07-local-peak-baseline-frozen.ts": "6c2a92abd963021af2e52b449f387b787d8e0c67e687c960b7062bca91133e10",
+        "round07-local-peak-candidate-frozen.ts": "e478126c893a413753089b76c6caa2849c0e015a33242db53e89d45685e4c35f"
+      },
+      "counts": {
+        "underlyingExistingSources": 6,
+        "underlyingQualifyingReferenceSources": 1,
+        "qualifyingDerivedConditionRows": 8,
+        "correctDerivedLocalizations": 4,
+        "failedDerivedLocalizations": 4,
+        "wholeAppAutomaticEndpointOutputsTested": 0
+      },
+      "localizationEvidenceOutOf10": 5.0,
+      "automaticEndpointEvidenceOutOf10": null,
+      "scoreReason": "Localization score is a correlated source-condition robustness score on one development recording, not accuracy across distinct attempts. Automatic-endpoint score is N/A because these reports exercise the audio kernel, not app acceptance.",
+      "safetyGate": {
+        "result": false,
+        "scope": "Kernel timing-authority evidence only: four correlated target conditions return High outside policy. No new whole-app automatic endpoint was tested or accepted."
+      },
+      "decision": "A separately registered spectral-peak follow-up gives partial controlled localization gains. Preserve initial failures and await round10 whole-app regression; no automatic endpoint gain is established.",
+      "feedbackAfterActualResult": "The local-peak guard corrects right gains 0.5 and 0.67 to 8.590 s and preserves the original 8.590 s. Five resampled conditions move from definitely early 8.410 s to indeterminate 8.500 s; retain all five unresolved cases. Finish localization remains a separate target, and full-app automatic output must be measured in round 10.",
+      "amendments": [],
+      "actualScope": "Audio-kernel robustness on transformed copies of six existing native-PCM sources. Timing score is confined to derived conditions of the one source with an eligible recorded-cue bracket; High is not whole-app automatic acceptance.",
+      "conditionDeduplication": "The native 8 kHz linear-resample identity and right-gain 1 identity are the same unmodified source condition. Both raw rows remain; the combined score counts that baseline once: phase 4/5 plus rate 1/4 becomes 4/8 unique conditions, rather than 5/9 independent events.",
+      "rejectedFollowupPolicy": {
+        "hypothesis": "Replace a disagreeing mixed High clock with an agreeing pair of original-channel High clocks.",
+        "decision": "Rejected before runtime implementation.",
+        "reason": "Channel agreement can select a later real protocol or loud body while the mix correctly reveals an earlier protocol or quiet same-pitch lead. Agreement alone does not identify the physically correct onset.",
+        "runtimeChanged": false
+      },
+      "pendingFollowupResearch": {
+        "status": "Completed controlled candidate and once-reserved evaluation; superseded by localPeakFollowup, not retroactively substituted for initial round7 results.",
+        "hypothesis": "Require an actual full-spectrum local peak rather than accepting an in-band boundary shoulder in targeted final-tone search.",
+        "constraints": "Keep existing protocol/pitch/SNR/time thresholds, inspect neighbors outside the target band, preserve half-bin plateaus, and retain quiet-leading/early-mixed/later-distractor controls.",
+        "unseenReservedConditions": [
+          "right gains 0.33 and 0.67",
+          "linear resampling at 22050 Hz and 32000 Hz"
+        ]
+      },
+      "initialDecision": "Retain unchanged audio and record robustness limitations; no automatic recovery or general accuracy gain.",
+      "localPeakFollowup": {
+        "hypothesis": "Require a true full-spectrum local maximum within the targeted final-tone band instead of accepting an outside peak's in-band shoulder.",
+        "prospectiveCandidatePlanFrozenAt": "2026-10-23T22:46:18.313Z",
+        "allExistingNumericThresholdsAndChannelPolicyUnchanged": true,
+        "currentNormalizedRuntimeAudioSha256": "e478126c893a413753089b76c6caa2849c0e015a33242db53e89d45685e4c35f",
+        "registeredSha256BeforeOnlyTestExport": "be7d7317aa46752f9aa2c74014fbb0e68a16a437eef7be4d31ef8f67b5adae5e",
+        "sourceReview": "Current source matches the reserved candidate hash exactly; removing only the helper test-export keyword matches the original registered candidate hash.",
+        "strata": [
+          {
+            "stratum": "registered-development-subset",
+            "conditionRows": 5,
+            "beforeQualified": 1,
+            "afterQualified": 2,
+            "beforeLocalizationOutOf10": 2.0,
+            "afterLocalizationOutOf10": 4.0,
+            "outcomes": [
+              {
+                "id": "original-8k",
+                "sourceSampleRate": 8000,
+                "rightGain": 1,
+                "before": {
+                  "confidence": "High",
+                  "rawTimeSeconds": 8.59,
+                  "classification": "within-policy"
+                },
+                "after": {
+                  "confidence": "High",
+                  "rawTimeSeconds": 8.59,
+                  "signedDisagreementIntervalSeconds": [
+                    -0.035,
+                    0.01
+                  ],
+                  "classification": "within-policy"
+                }
+              },
+              {
+                "id": "right-gain-half-8k",
+                "sourceSampleRate": 8000,
+                "rightGain": 0.5,
+                "before": {
+                  "confidence": "High",
+                  "rawTimeSeconds": 8.41,
+                  "classification": "definitely-outside-policy"
+                },
+                "after": {
+                  "confidence": "High",
+                  "rawTimeSeconds": 8.59,
+                  "signedDisagreementIntervalSeconds": [
+                    -0.035,
+                    0.01
+                  ],
+                  "classification": "within-policy"
+                }
+              },
+              {
+                "id": "linear-resample-16000",
+                "sourceSampleRate": 16000,
+                "rightGain": 1,
+                "before": {
+                  "confidence": "High",
+                  "rawTimeSeconds": 8.41,
+                  "classification": "definitely-outside-policy"
+                },
+                "after": {
+                  "confidence": "High",
+                  "rawTimeSeconds": 8.5,
+                  "signedDisagreementIntervalSeconds": [
+                    -0.125,
+                    -0.08
+                  ],
+                  "classification": "indeterminate-straddles-policy"
+                }
+              },
+              {
+                "id": "linear-resample-44100",
+                "sourceSampleRate": 44100,
+                "rightGain": 1,
+                "before": {
+                  "confidence": "High",
+                  "rawTimeSeconds": 8.41,
+                  "classification": "definitely-outside-policy"
+                },
+                "after": {
+                  "confidence": "High",
+                  "rawTimeSeconds": 8.5,
+                  "signedDisagreementIntervalSeconds": [
+                    -0.125,
+                    -0.08
+                  ],
+                  "classification": "indeterminate-straddles-policy"
+                }
+              },
+              {
+                "id": "linear-resample-48000",
+                "sourceSampleRate": 48000,
+                "rightGain": 1,
+                "before": {
+                  "confidence": "High",
+                  "rawTimeSeconds": 8.41,
+                  "classification": "definitely-outside-policy"
+                },
+                "after": {
+                  "confidence": "High",
+                  "rawTimeSeconds": 8.5,
+                  "signedDisagreementIntervalSeconds": [
+                    -0.125,
+                    -0.08
+                  ],
+                  "classification": "indeterminate-straddles-policy"
+                }
+              }
+            ]
+          },
+          {
+            "stratum": "once-reserved-conditions",
+            "conditionRows": 4,
+            "beforeQualified": 1,
+            "afterQualified": 2,
+            "beforeLocalizationOutOf10": 2.5,
+            "afterLocalizationOutOf10": 5.0,
+            "outcomes": [
+              {
+                "id": "RESERVED-right-gain-.33",
+                "sourceSampleRate": 8000,
+                "rightGain": 0.33,
+                "before": {
+                  "confidence": "High",
+                  "rawTimeSeconds": 8.59,
+                  "classification": "within-policy"
+                },
+                "after": {
+                  "confidence": "High",
+                  "rawTimeSeconds": 8.59,
+                  "signedDisagreementIntervalSeconds": [
+                    -0.035,
+                    0.01
+                  ],
+                  "classification": "within-policy"
+                }
+              },
+              {
+                "id": "RESERVED-right-gain-.67",
+                "sourceSampleRate": 8000,
+                "rightGain": 0.67,
+                "before": {
+                  "confidence": "High",
+                  "rawTimeSeconds": 8.41,
+                  "classification": "definitely-outside-policy"
+                },
+                "after": {
+                  "confidence": "High",
+                  "rawTimeSeconds": 8.59,
+                  "signedDisagreementIntervalSeconds": [
+                    -0.035,
+                    0.01
+                  ],
+                  "classification": "within-policy"
+                }
+              },
+              {
+                "id": "RESERVED-linear-resample-22050",
+                "sourceSampleRate": 22050,
+                "rightGain": 1,
+                "before": {
+                  "confidence": "High",
+                  "rawTimeSeconds": 8.41,
+                  "classification": "definitely-outside-policy"
+                },
+                "after": {
+                  "confidence": "High",
+                  "rawTimeSeconds": 8.5,
+                  "signedDisagreementIntervalSeconds": [
+                    -0.125,
+                    -0.08
+                  ],
+                  "classification": "indeterminate-straddles-policy"
+                }
+              },
+              {
+                "id": "RESERVED-linear-resample-32000",
+                "sourceSampleRate": 32000,
+                "rightGain": 1,
+                "before": {
+                  "confidence": "High",
+                  "rawTimeSeconds": 8.41,
+                  "classification": "definitely-outside-policy"
+                },
+                "after": {
+                  "confidence": "High",
+                  "rawTimeSeconds": 8.5,
+                  "signedDisagreementIntervalSeconds": [
+                    -0.125,
+                    -0.08
+                  ],
+                  "classification": "indeterminate-straddles-policy"
+                }
+              }
+            ]
+          }
+        ],
+        "retainedControls": {
+          "pureBandCases": 7,
+          "pureBandPasses": 7,
+          "quietLeadCases": 8,
+          "quietLeadPasses": 8,
+          "earlyMixedOnlyProtocolPreserved": true,
+          "earlyMixedWholeClockSeconds": 2.79,
+          "individualLaterChannelClocksSeconds": [
+            7.79,
+            7.79
+          ]
+        },
+        "remainingLimit": "All five resampled candidate clocks are 8.500 s: signed [-.125,-.080] s straddles the frozen .100 s comparison policy. They are not fully qualified; the interval does not prove every possible event time is beyond policy. No complete sample-rate fix or whole-app automatic gain.",
+        "denominatorLimit": "The registered five and reserved four conditions are correlated derivatives of ONE development source, not nine independent recordings or a new whole-source holdout. The initial eight-condition score remains archived separately.",
+        "runtimeSourceImplemented": true,
+        "wholeAppCandidateRegression": "Pending round10.",
+        "automaticEndpointEvidenceOutOf10": null
+      }
+    },
+    {
+      "round": 8,
+      "title": "Finish indicator localization",
+      "status": "completed",
+      "predecessorFeedbackRequired": true,
+      "question": "Test the real P07 screen-right upper light against its frozen physical-event bracket.",
+      "requiredEvidence": [
+        "Predeclare reviewed Start, right-lane region, search window and whether detection is review-only or conditional automatic Finish.",
+        "Compare source PTS and actual indicator pixels to the frozen green-to-red bracket; keep apparent contact as a separate event."
+      ],
+      "decisionCriterion": "Require a matching right-lane indicator localization, not a nearby hand, body peak, official-total arithmetic or another lane. Conditional Finish is not end-to-end automatic success.",
+      "nextFeedback": "Use actual failed or recovered indicator evidence to choose temporal and geometric controls.",
+      "primarySourceIds": [
+        "world-climbing-rules-2026",
+        "video-frame-callback-spec"
+      ],
+      "concreteConditionRegistration": null,
+      "baselineResult": {
+        "suppliedStartSeconds": 18.585233,
+        "suppliedStartMeaning": "Lower bound of the frozen visible lower-light bracket, supplied only to bound the search; never exact electronic Start.",
+        "suppliedRightLaneX": 0.515625,
+        "observed": {
+          "browser": "156.0.8078.47",
+          "elapsedMs": 2163.2000000476837,
+          "detected": false,
+          "confidence": "None",
+          "candidates": 0,
+          "errors": [],
+          "reason": "No persistent localized color change was found in the upper timing-indicator band. The athlete did not produce a continuous, occlusion-free upper-wall trajectory."
+        }
+      },
+      "candidateResult": null,
+      "sourceArtifactHashes": {
+        "round08-conditioned-finish/evidence-summary.json": "1ef6c50b60e36cf74f6480f5c6988517e2df748a6f55b1eb18caddc878e36829",
+        "round08-conditioned-finish/native-existing-result.json": "db04db443ea4bd978de2e04a0ba55df81d01d14934507dfe2768cd3ae53fa4fd"
+      },
+      "counts": {
+        "underlyingSourceRecordings": 1,
+        "qualifyingMatchingFinishEvents": 1,
+        "correctPrimaryLocalizations": 0,
+        "newWholeAppAutomaticEndpointOutputsTested": 0
+      },
+      "localizationEvidenceOutOf10": 0,
+      "automaticEndpointEvidenceOutOf10": null,
+      "scoreReason": "Conditional component localization0/1. Whole-app automatic-endpoint score is N/A because no application acceptance decision was tested.",
+      "safetyGate": {
+        "result": true,
+        "scope": "No candidate or automatic Finish was produced; this is not evidence of general false-acceptance performance."
+      },
+      "decision": "No Finish localization recovery, despite manually supplied Start window and right-lane hint.",
+      "feedbackAfterActualResult": "Investigate the observed sensor position relative to detector search geometry, then isolate temporal behavior on explicitly supplied native sensor pixels. Do not replace missing discovery with official-total arithmetic or broad threshold relaxation.",
+      "amendments": [],
+      "measurementStratum": "Conditional Finish component on one known P07 development recording; reviewed Start/lane or sensor geometry is supplied. Not an end-to-end automatic attempt.",
+      "referenceEventDefinition": "visible-upper-finish-indicator-green-to-red",
+      "referenceLane": "screen-right",
+      "referenceUnionSeconds": [
+        25.8258,
+        25.9259
+      ],
+      "sourceSha256": "05b6ec8b546372cea84fc16a21086357a768e66ddea1f6a395f7f4ce0b2857c1",
+      "runtimeFinishChanged": false
+    },
+    {
+      "round": 9,
+      "title": "Finish temporal and geometric robustness",
+      "status": "completed",
+      "predecessorFeedbackRequired": true,
+      "question": "Test the registered Finish method under known pulse, exposure, camera and lane ambiguities.",
+      "requiredEvidence": [
+        "Use actual known light observations plus predeclared synthetic cut, foreground, repeated-flash and competing-lane controls.",
+        "Freeze event-selection policy and preserve earliest qualifying event, incomplete-tail uncertainty and rejected alternatives."
+      ],
+      "decisionCriterion": "Improve or retain matching-event localization without accepting moving holds, wrong-lane flashes or unobserved contact; reject unsafe variants regardless of recall gain.",
+      "nextFeedback": "Freeze a cumulative candidate and all original denominators for round 10.",
+      "primarySourceIds": [
+        "world-climbing-rules-2026",
+        "video-frame-callback-spec"
+      ],
+      "concreteConditionRegistration": null,
+      "baselineResult": {
+        "primaryTrackingWindow": {
+          "passed": false,
+          "requestedNativeWindow": [
+            25.3,
+            26.75
+          ],
+          "stoppedAtNativePts": 26.493133,
+          "reason": "21 inliers did not meet the frozen minimum24. No missing pixels, source clocks or track positions were invented."
+        },
+        "manuallyConditionedGeometry": {
+          "referenceFrame": "0040.png",
+          "referenceNativePts": 25.8258,
+          "manuallySeededRightSensorRoi": [
+            946,
+            202,
+            974,
+            212
+          ],
+          "normalizedRoi": [
+            0.7390625,
+            0.28055555555555556,
+            0.7609375,
+            0.29444444444444445
+          ],
+          "currentDetectorHorizontalBounds": [
+            0.2965625,
+            0.7165625
+          ],
+          "currentDetectorVerticalBounds": [
+            0.015,
+            0.22
+          ],
+          "entireSensorRoiOutsideBothBounds": true
+        }
+      },
+      "candidateResult": {
+        "secondaryPosthocDiagnosticOnly": true,
+        "verifiedPrefix": {
+          "status": "Posthoc diagnostic authorized after preserving the failed primary window; it cannot replace primary failure or denominator.",
+          "firstNativePts": 25.3253,
+          "lastNativePts": 26.459767,
+          "observations": 35,
+          "calibration": "Mean first8 actual green-side samples and last8 actual target-side samples, explicitly conditioned, not automatic discovery."
+        },
+        "temporalHelperProposalSeconds": 25.692,
+        "internalConfidence": "High",
+        "matchingIndicatorSignedDisagreementIntervalSeconds": [
+          -0.2339,
+          -0.1338
+        ],
+        "classification": "definitely-outside-policy",
+        "secondaryTemporalOutcomes": [
+          {
+            "case": "actual-right",
+            "detected": true,
+            "rawTime": 25.692,
+            "internalConfidence": "High",
+            "insideMatchingIndicatorReference": false
+          },
+          {
+            "case": "actual-left-wrong-lane",
+            "detected": false
+          },
+          {
+            "case": "reverse-rgb-order",
+            "synthetic": true,
+            "detected": false
+          },
+          {
+            "case": "constant-neutral",
+            "synthetic": true,
+            "detected": false
+          },
+          {
+            "case": "brief-red-occlusion",
+            "synthetic": true,
+            "detected": false
+          }
+        ],
+        "primaryFailureWasNotReplaced": true,
+        "noFullApplicationAcceptanceRun": true
+      },
+      "sourceArtifactHashes": {
+        "round09-evidence-summary.json": "3e23e5e1e0dff5fb7fe762d25b7bf0ede3415a5df6fa3b7dcc74326273162c2c",
+        "round09-finish-conditions.json": "fa69a75115474ff87325cc74a82dc00012d6c7b685ec3dd58dae7a352698fb11",
+        "round09-conditioned-sensor-samples.json": "5529c83142d72b71273187b82d2af2a1c8c0acd9aa4f5adb16cd61347063d645",
+        "round09-temporal-prefix-results.json": "4136a7a087a55969f163f006459beb344623d2b81e67b051dddc895ceb2bf1fb"
+      },
+      "counts": {
+        "underlyingSourceRecordings": 1,
+        "qualifyingMatchingFinishEvents": 1,
+        "correctPrimaryLocalizations": 0,
+        "newWholeAppAutomaticEndpointOutputsTested": 0
+      },
+      "localizationEvidenceOutOf10": 0,
+      "automaticEndpointEvidenceOutOf10": null,
+      "scoreReason": "Conditional component localization0/1. Whole-app automatic-endpoint score is N/A because no application acceptance decision was tested.",
+      "safetyGate": {
+        "result": false,
+        "scope": "The isolated temporal helper returns an early High clock on the supplied real sensor samples. Four bounded negatives rejecting does not validate the positive; no new whole-app accepted endpoint occurred.",
+        "negativeControlsRejected": 4,
+        "negativeControls": 4
+      },
+      "decision": "No usable Finish recovery. Primary tracking fails; the retained posthoc prefix also exposes an early temporal proposal. No Finish runtime patch is justified by these results.",
+      "feedbackAfterActualResult": "Preserve the failed full tracking window, the separate 35-observation verified prefix, and the early 25.692 s proposal. Analyze actual hue and occlusion support before any geometry expansion; freeze the cumulative candidate and evaluate real whole-app outputs in round 10.",
+      "amendments": [],
+      "measurementStratum": "Conditional Finish component on one known P07 development recording; reviewed Start/lane or sensor geometry is supplied. Not an end-to-end automatic attempt.",
+      "referenceEventDefinition": "visible-upper-finish-indicator-green-to-red",
+      "referenceLane": "screen-right",
+      "referenceUnionSeconds": [
+        25.8258,
+        25.9259
+      ],
+      "sourceSha256": "05b6ec8b546372cea84fc16a21086357a768e66ddea1f6a395f7f4ce0b2857c1",
+      "runtimeFinishChanged": false
+    },
+    {
+      "round": 10,
+      "title": "Cumulative clean-source evaluation",
+      "status": "pending",
+      "predecessorFeedbackRequired": true,
+      "question": "Evaluate the final candidate on the original development matrix and any genuinely untouched source group qualified before predictions.",
+      "requiredEvidence": [
+        "Retain clean build/browser/source identities, primary default and guided strata, failures, reference eligibility and all automatic outputs.",
+        "Run equivalent-work paired latency only with an exclusive queue and repeated counterbalanced passes; obtain final independent code/evidence review."
+      ],
+      "decisionCriterion": "Report separate localization and verified automatic endpoint scores with denominators. If no untouched qualified group exists, state development-only; never invent generalization or accuracy.",
+      "nextFeedback": "Prioritize supported fixed-camera attempts with human prediction-blind references and meaningful verified endpoint recovery.",
+      "primarySourceIds": [
+        "world-climbing-rules-2026",
+        "w3c-web-audio",
+        "video-frame-callback-spec"
+      ],
+      "concreteConditionRegistration": null,
+      "baselineResult": null,
+      "candidateResult": null,
+      "sourceArtifactHashes": {},
+      "counts": null,
+      "localizationEvidenceOutOf10": null,
+      "automaticEndpointEvidenceOutOf10": null,
+      "scoreReason": "Pending actual evidence.",
+      "safetyGate": null,
+      "decision": null,
+      "feedbackAfterActualResult": null,
+      "amendments": []
+    }
+  ],
+  "privacy": {
+    "mediaCommitted": false,
+    "privatePixelsOrPCMIncluded": false,
+    "absoluteLocalPathsIncluded": false,
+    "sourceRights": "Public availability does not establish redistribution rights."
+  },
+  "limitations": [
+    "All existing six-phone and previously inspected public sources are development data.",
+    "Human correction burden, return use, actual iPhone field behavior and general endpoint accuracy remain unmeasured.",
+    "No scalar evidence score substitutes for physical-event identity, denominators, disagreement intervals or false-acceptance review.",
+    "No new holdout or real detection improvement has occurred merely by registering this scaffold."
+  ],
+  "sourceDiscovery": {
+    "status": "No new supported fixed-camera recording has been qualified.",
+    "method": "Public source-index discovery followed by direct YouTube oEmbed title/uploader verification; metadata only, no media download, decoder call or predictions.",
+    "discoveryUrl": "https://www.speed-climbing.com/p/beta-and-record-videos.html",
+    "primaryUploader": "World Climbing",
+    "uploaderUrl": "https://www.youtube.com/@worldclimbing",
+    "prospects": [
+      {
+        "url": "https://www.youtube.com/watch?v=ilKcezCgwAU",
+        "verifiedTitle": "Speed finals || Salt Lake City 2022",
+        "status": "unqualified metadata prospect",
+        "expectedCohort": "competition broadcast, not supported fixed-phone evidence",
+        "selectionRule": "Choose first chronologically qualifying uninterrupted attempt only after independent raw-source qualification; do not select by detector result."
+      },
+      {
+        "url": "https://www.youtube.com/watch?v=Qa4e9y3z79Q",
+        "verifiedTitle": "Speed finals || Seoul 2022",
+        "status": "unqualified metadata prospect",
+        "expectedCohort": "competition broadcast, not supported fixed-phone evidence",
+        "selectionRule": "Verify previously unseen event/uploader/climber grouping and normal-speed continuous source-clock segment before predictions."
+      }
+    ],
+    "rejectedLead": {
+      "url": "https://www.youtube.com/watch?v=nbz7V8GcAHg",
+      "verifiedTitle": "Kiromal Katibin's 🇮🇩 5-second record in slo-mo! 🤯",
+      "reason": "The primary uploader explicitly identifies slow motion; do not treat this as an ordinary-speed timing recording."
+    },
+    "limits": [
+      "Uploader metadata does not prove visible cue identity, uninterrupted footage, source speed or normal-speed A/V mapping.",
+      "Novelty versus all prior cached broadcast groups remains unverified; neither prospect is declared held out.",
+      "Freeze two separate source-observation worksheets and run conditions before predictions if a prospect qualifies.",
+      "No download or media redistribution rights are asserted."
+    ]
+  }
+}

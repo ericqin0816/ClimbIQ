@@ -380,6 +380,24 @@ describe("moving pose search region", () => {
   });
 });
 
+describe("observed image bounds for athlete identity", () => {
+  it.each([[.5, -.27], [.5, 1.2], [-.1, .5], [1.1, .5]])("does not seed a torso outside the image at %j", (x, y) => {
+    expect(selectTrackedPose([poseAt(x, y)]).selected).toBeUndefined();
+    const visible = poseAt(.55, .85);
+    expect(selectTrackedPose([poseAt(x, y), visible]).selected?.landmarks).toBe(visible);
+  });
+
+  it("keeps visible torso centers when peripheral landmarks cross an image edge", () => {
+    const partial = poseAt(.01, .95);
+    partial[0].y = -0.2;
+    partial[27].y = 1.1;
+    expect(partial[23].x).toBeLessThan(0);
+    expect(selectTrackedPose([partial]).selected?.landmarks).toBe(partial);
+    expect(selectTrackedPose([poseAt(.5, 0)]).selected).toBeDefined();
+    expect(selectTrackedPose([poseAt(.5, 1)]).selected).toBeDefined();
+  });
+});
+
 function poseAt(x: number, y: number): NormalizedLandmark[] {
   const landmarks = Array.from({ length: 33 }, () => ({
     x,

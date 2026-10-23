@@ -1473,7 +1473,7 @@ function App() {
             );
             setStartResult({
               ...automaticStart,
-              debug: { ...automaticStart.debug, sceneContinuity: startAudit.scene },
+              debug: { ...automaticStart.debug, sceneContinuity: startAudit.scene, startBodyAudit: startAudit.bodyAudit },
             });
             if (analysisScope === "full") setMovementResult(startAudit.movement);
             setStartEvidenceStatus(`${decision.reason} ${startAudit.reason} Audio: ${audioReason}`);
@@ -2162,7 +2162,7 @@ function App() {
           const preflightMovement = startAudit.movement;
           setStartResult({
             ...automaticStart,
-            debug: { ...automaticStart.debug, sceneContinuity: startAudit.scene },
+            debug: { ...automaticStart.debug, sceneContinuity: startAudit.scene, startBodyAudit: startAudit.bodyAudit },
           });
           // Motion still validates Start in both scopes. Publishing this result
           // also schedules preview seeks, so only the full workflow publishes it.
@@ -2171,7 +2171,7 @@ function App() {
           if (!startAudit.safeToAutoAccept) {
             restorePreviousAnalysis();
             closeTimestampReview();
-            setStartResult({ ...automaticStart, debug: { ...automaticStart.debug, sceneContinuity: startAudit.scene } });
+            setStartResult({ ...automaticStart, debug: { ...automaticStart.debug, sceneContinuity: startAudit.scene, startBodyAudit: startAudit.bodyAudit } });
             if (!hadPreviousAnalysis && requestedScope === "full") setMovementResult(preflightMovement);
             setStartEvidenceStatus(`${decision.reason} ${startAudit.reason} Audio: ${audioReason}`);
             pendingAutomaticContextRef.current = {
