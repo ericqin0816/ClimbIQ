@@ -6,6 +6,7 @@ import "./TimestampReviewPanel.css";
 
 export interface TimestampReviewPanelProps {
   label: string;
+  instruction?: string;
   confidence?: Confidence;
   suggestedRawTime: number;
   currentTime: number;
@@ -56,7 +57,7 @@ export default function TimestampReviewPanel(props: TimestampReviewPanelProps) {
       <button disabled={props.busy} onClick={props.onReturn}>Return to suggestion</button>
       <button onClick={props.onClose}>Close review</button>
     </div>
-    <p id="timestamp-review-instruction" className="review-instruction">Check the visible event before accepting.</p>
+    <p id="timestamp-review-instruction" className="review-instruction">{props.instruction ?? "Check the visible event before accepting."}</p>
     <p id="timestamp-review-frame-source" className="muted review-frame-source" data-frame-time-source={source}>
       {source === "presentation" ? "Using the presented frame’s timestamp."
         : source === "pending" ? "Waiting for the displayed frame…"

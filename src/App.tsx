@@ -196,10 +196,11 @@ interface PendingVideoAttachment {
 interface TimestampReviewTarget {
   kind?: "finish";
   label: string;
+  instruction?: string;
   suggestedRawTime: number;
   confidence?: Confidence;
   acceptLabel: string;
-  onAccept: (rawTime: number, frameTimeNote?: string) => void;
+  onAccept: (rawTime: number, frameTimeNote?: string) => void | boolean;
   secondPassBasis?: Hold10SecondPassResult;
 }
 
@@ -311,6 +312,7 @@ function App() {
   const [autoAnalysisStatus, setAutoAnalysisStatus] = useState("");
   const [startEvidenceStatus, setStartEvidenceStatus] = useState("");
   const [timestampReview, setTimestampReview] = useState<TimestampReviewTarget | null>(null);
+  const [reviewAcceptanceRejected, setReviewAcceptanceRejected] = useState(false);
   const [routeAlignment, setRouteAlignment] = useState<RouteAlignmentResult | null>(null);
   const [hold10SecondPass, setHold10SecondPass] = useState<{
     sourceResult: BiomechanicsResult; calibration: WallCalibration; targetKey: string; result: Hold10SecondPassResult;
@@ -915,6 +917,7 @@ function App() {
       return;
     }
     video.pause();
+    setReviewAcceptanceRejected(false);
     finishReviewAbortRef.current?.abort();
     cancelPendingReviewSeek();
     const source = video.src;
@@ -938,9 +941,13 @@ function App() {
       ? ` Reviewed with user-marked finish-pad area ${JSON.stringify(zones.finishPad)}. Local appearance changes are navigation aids, not verified contact.` : "";
     const frameDurationNote = (decodedTime !== undefined && framePresentation.status === "available" && framePresentation.durationSeconds !== undefined
       ? ` Source frame duration ${framePresentation.durationSeconds.toFixed(6)}s; not an event-error bound.` : "") + padNote;
-    visibleTimestampReview.onAccept(decodedTime ?? video.currentTime, decodedTime !== undefined
+    const accepted = visibleTimestampReview.onAccept(decodedTime ?? video.currentTime, decodedTime !== undefined
       ? `Used browser presented-frame timestamp ${decodedTime.toFixed(6)}s (cursor ${video.currentTime.toFixed(6)}s).${frameDurationNote}`
       : `Frame timestamp unavailable; used paused cursor ${video.currentTime.toFixed(6)}s.${padNote}`);
+    if (accepted === false) {
+      setReviewAcceptanceRejected(true);
+      return;
+    }
     closeTimestampReview();
   }
 
@@ -968,6 +975,26 @@ function App() {
     cancelPendingReviewSeek();
     finishReviewAbortRef.current?.abort();
     setTimestampReview(null);
+  }
+
+  function openManualStartReview() {
+    if (videoAnalysisRunning || !isCurrentVideoReady(videoRef.current)) return;
+    reviewTimestamp({ label: "Manual start signal", suggestedRawTime: startSignalRaw ?? currentTime,
+      instruction: "Locate the visible or audible start signal, then accept its frame. Athlete movement alone does not establish the signal. Leave Start unset if the signal is missing.",
+      confidence: "Medium", acceptLabel: "Accept start",
+      onAccept: (time, note) => acceptManualTimestamp("startSignal", time, { frameReviewed: true, note }),
+    });
+  }
+
+  function openManualHold10Review() {
+    const finish = getTimestamp(timestamps, "finishPad").rawTime;
+    if (videoAnalysisRunning || !isCurrentVideoReady(videoRef.current) || startSignalRaw === null || finish === null) return;
+    const cursor = currentTime > startSignalRaw && currentTime < finish ? currentTime : (startSignalRaw + finish) / 2;
+    reviewTimestamp({ label: "Manual Hold 10 contact", suggestedRawTime: cursor,
+      instruction: "Find the first hand contact with the actual Hold 10. This starting cursor is only a navigation aid. If the hold or contact is obscured, close review and compare totals instead.",
+      confidence: "Medium", acceptLabel: "Accept Hold 10",
+      onAccept: (time, note) => acceptManualTimestamp("hold10", time, { frameReviewed: true, note }),
+    });
   }
 
   function openGuidedFinishReview() {
@@ -3455,10 +3482,7 @@ function App() {
           label: "Quick Analyze start", suggestedRawTime: Math.max(0, roundTime(suggestedStartRawTime + startSignalOffset)),
           confidence: startResult?.confidence ?? "Medium", acceptLabel: "Accept start",
           onAccept: (rawTime, frameTimeNote) => { void acceptSuggestedStart(rawTime, frameTimeNote); },
-        }) : startReviewNeeded ? () => reviewTimestamp({
-          label: "Start signal", suggestedRawTime: currentTime, confidence: "Medium", acceptLabel: "Accept start",
-          onAccept: (rawTime, frameTimeNote) => acceptTimestamp("startSignal", rawTime, "Manual", "High", { frameReviewed: true, note: frameTimeNote }),
-        }) : startSignalRaw !== null ? openGuidedFinishReview : undefined}
+        }) : startReviewNeeded ? openManualStartReview : startSignalRaw !== null ? openGuidedFinishReview : undefined}
       />}
 
       <section className="layout-grid">
@@ -3557,6 +3581,9 @@ function App() {
               {autoAnalysisRunning && (
                 <button onClick={() => analysisRuns.automatic?.abort()}>Cancel</button>
               )}
+              {hasLoadedVideo && startSignalRaw === null && suggestedStartRawTime === null && (
+                <button disabled={videoAnalysisRunning} onClickCapture={focusReviewOpener} onClick={openManualStartReview}>Review timing manually</button>
+              )}
               {!autoAnalysisRunning && suggestedStartRawTime !== null && (
                 <button
                   className="primary"
@@ -3573,6 +3600,7 @@ function App() {
                 </button>
               )}
             </div>
+            <p className="muted">Use an unedited, normal-speed recording. Leave missing signals or contacts unset.</p>
             {autoAnalysisStatus && <p className="status-message" aria-live="polite">{autoAnalysisStatus}</p>}
             {startEvidenceStatus && <p className="evidence-message">{startEvidenceStatus}</p>}
           </div>
@@ -3604,6 +3632,10 @@ function App() {
           <div className="summary-footer">
             {calculatedClimbTime !== null && <p className="timing-precision-note"><span>{finishPrecisionNote(acceptedFinish)}</span></p>}
             <p><strong>{hasLoadedVideo ? "Review the analysis" : "Saved measurements"}</strong><span>{hasLoadedVideo ? "Check the video against the detected timestamps, then open insights for pace and center-of-mass details." : "You can edit notes, export, and review this saved run here. Attach its original recording for frame review."}</span></p>
+            {hasLoadedVideo && calculatedClimbTime !== null && acceptedHold10.rawTime === null && <div className="summary-contact-review">
+              <p><strong>Want to compare sections?</strong><span>Review the actual Hold 10 contact in each attempt. If contact is obscured, compare totals instead.</span></p>
+              <button className="button-link" disabled={videoAnalysisRunning} onClickCapture={focusReviewOpener} onClick={openManualHold10Review}>Review Hold 10 contact</button>
+            </div>}
           </div>
         </section>
         )}
@@ -3776,13 +3808,14 @@ function App() {
           </div>
           {visibleTimestampReview ? <TimestampReviewPanel
             label={visibleTimestampReview.label} confidence={visibleTimestampReview.confidence}
+            instruction={visibleTimestampReview.instruction}
             suggestedRawTime={visibleTimestampReview.suggestedRawTime} currentTime={currentTime}
             decodedRawTime={decodedReviewTime} frameStatus={framePresentation.status}
             sourceFrameDurationSeconds={decodedReviewTime !== undefined && framePresentation.status === "available" ? framePresentation.durationSeconds : undefined}
             frameReady={reviewFrameReady} busy={videoAnalysisRunning} acceptLabel={visibleTimestampReview.acceptLabel}
             onReturn={() => reviewTimestamp(visibleTimestampReview)} onAccept={acceptReviewedTimestamp}
             onClose={closeTimestampReview}
-          >{visibleTimestampReview.kind === "finish" && <Suspense fallback={<p>Preparing finish close-up…</p>}><FinishReviewPanel key={`${videoUrl}:${startSignalRaw}`}
+          >{reviewAcceptanceRejected && <p role="alert">{timestampStatus || "That frame was not accepted. Check the event order and choose a frame within this attempt."}</p>}{visibleTimestampReview.kind === "finish" && <Suspense fallback={<p>Preparing finish close-up…</p>}><FinishReviewPanel key={`${videoUrl}:${startSignalRaw}`}
             video={videoRef.current} currentTime={currentTime} frameReady={reviewFrameReady}
             busy={videoAnalysisRunning} scanning={finishReviewRunning} progress={finishReviewProgress}
             zone={zones.finishPad} contextZone={zones.finishLight}

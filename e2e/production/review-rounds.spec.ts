@@ -6,6 +6,48 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { createSessionLibraryBackup } from "../../src/lib/sessionLibrary";
 
+test("manual timing reaches native review without preaccepting missing markers", async ({ page }, testInfo) => {
+  test.skip(process.platform === "win32" && testInfo.project.name.startsWith("webkit"), "macOS CI exercises media under WebKit; the local Windows decoder is unavailable.");
+  await page.goto("/");
+  await page.getByLabel("Choose video", { exact: true }).setInputFiles(path.resolve("public/samples/climbiq-practice-a.mp4"));
+  await expect(page.locator(".video-meta-line")).toContainText("Ready");
+  const start = page.locator("#timing-markers tbody tr").filter({ hasText: "Start Signal" });
+  const hold = page.locator("#timing-markers tbody tr").filter({ hasText: "Hold 10" });
+  // Native controls are browser-owned; seek the real decoder and wait for its
+  // presented frame rather than forcing a review clock or hidden mobile input.
+  const seek = (time: number) => page.locator("#video-review video").evaluate((video: HTMLVideoElement, target) => { video.pause(); video.currentTime = target; }, time);
+  const manual = page.getByRole("button", { name: "Review timing manually", exact: true });
+  await manual.click();
+  await expect(page.locator(".timestamp-review")).toContainText("Leave Start unset if the signal is missing");
+  await expect(start).toContainText("Not set");
+  await page.getByRole("button", { name: "Close review", exact: true }).click();
+  await expect(start).toContainText("Not set");
+  await manual.click();
+  await seek(1);
+  const acceptStart = page.getByRole("button", { name: /^Accept start at 1\.000s/ });
+  await expect(acceptStart).toBeEnabled();
+  await acceptStart.click();
+  await page.getByRole("button", { name: "Review finish", exact: true }).click();
+  await seek(6.6);
+  const acceptFinish = page.getByRole("button", { name: /^Set reviewed finish at 6\.600s/ });
+  await expect(acceptFinish).toBeEnabled();
+  await acceptFinish.click();
+  await expect(page.locator("#results .summary-primary-metric strong")).toHaveText("5.600s");
+  await page.getByRole("button", { name: "Review Hold 10 contact", exact: true }).click();
+  await expect(page.locator(".timestamp-review")).toContainText("compare totals instead");
+  await expect(hold).toContainText("Not set");
+  await seek(7.5);
+  const invalidContact = page.getByRole("button", { name: /^Accept Hold 10 at 7\.500s/ });
+  await expect(invalidContact).toBeEnabled();
+  await invalidContact.click();
+  await expect(page.locator(".timestamp-review [role=alert]")).toContainText("before the accepted Finish Pad");
+  await expect(hold).toContainText("Not set");
+  await page.getByRole("button", { name: "Close review", exact: true }).click();
+  await expect(hold).toContainText("Not set");
+  await page.getByRole("button", { name: "Save Session", exact: true }).click();
+  await expect(page.locator(".attempt-library-list > button")).toHaveCount(1);
+});
+
 test("the shipped policy and source identity are visible without claiming analysis provenance", async ({ page, request }) => {
   const response = await page.goto("/");
   expect(response?.headers()["content-security-policy"]).toContain("worker-src 'self' blob:");

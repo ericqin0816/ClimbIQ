@@ -12,6 +12,9 @@
 .session-save-summary > button { flex-shrink: 0; }
 .session-card > .status-message { margin: 0 20px 14px; }
 
+.run-summary .summary-contact-review { display: grid; gap: 10px; min-width: 0; }
+.run-summary .summary-contact-review button { justify-self: start; white-space: normal; }
+
 @media (max-width: 540px) {
   .session-save-summary { align-items: stretch; flex-direction: column; }
 }

@@ -22,6 +22,7 @@ export function RecordingGuide() {
         <div className="recording-guide-notes">
           <p><strong>Your video stays on your device.</strong> Video analysis runs locally. Saved attempts contain analysis data; keep the original recording for future frame review.</p>
           <p><strong>Training estimates.</strong> Video timing is limited by the recording and detected frames. It does not replace official race timing. Independent timing accuracy has not been established.</p>
+          <p><strong>Use normal-speed originals.</strong> Slow-motion edits change the video clock; a five-second climb can take much longer on screen. ClimbIQ cannot recover race time from an unknown editing speed. Broadcast cuts and pans can also hide the start signal or Hold 10 contact. Leave unobservable markers unset.</p>
         </div>
       </div>
     </details>
