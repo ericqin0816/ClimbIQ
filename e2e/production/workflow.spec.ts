@@ -257,15 +257,30 @@ test("calibration owns its decoder task and blocks overlapping session changes",
   await page.evaluate(() => {
     const state = window as any;
     state.originalCalibrationVideoFrame = state.VideoFrame;
-    // Hold decoded-frame readback at a different timestamp until ownership is
-    // observed. No real video or detector output is fabricated by this fixture.
+    // Exercise a pending readback without fabricating video pixels or detector
+    // output. Its readiness timeout can be shorter than a WebKit trace RPC.
     state.VideoFrame = class { timestamp = 10_000_000; duration = 33_333; close() {} };
+    const probe = { blocked: false, lastObserved: {} };
+    const inspect = () => {
+      const rows = Array.from(document.querySelectorAll<HTMLButtonElement>(".attempt-library-list > button"));
+      const replace = document.querySelector<HTMLInputElement>('input[aria-label="Replace video"]');
+      const sample = Array.from(document.querySelectorAll("button")).find(button => button.textContent === "Use current frame as green");
+      const blocked = rows.length === 2 && rows.every(row => row.disabled) && replace?.disabled === true && sample?.disabled === true;
+      probe.lastObserved = { rowsDisabled: rows.map(row => row.disabled), replaceDisabled: replace?.disabled, sampleDisabled: sample?.disabled };
+      probe.blocked ||= blocked;
+    };
+    const observer = new MutationObserver(inspect);
+    observer.observe(document.querySelector("main")!, { attributes: true, childList: true, subtree: true });
+    state.calibrationOwnershipProbe = probe;
+    state.stopCalibrationOwnershipProbe = () => observer.disconnect();
   });
   await sample.click();
-  await expect(page.locator(".attempt-library-list > button").first()).toBeDisabled();
-  await expect(page.getByLabel("Replace video", { exact: true })).toBeDisabled();
+  // Retain one real DOM commit where all overlapping operations are blocked;
+  // remote assertions may run after the 200ms readback has already completed.
+  await expect.poll(() => page.evaluate(() => (window as any).calibrationOwnershipProbe)).toMatchObject({ blocked: true });
   await page.evaluate(() => {
     const state = window as any;
+    state.stopCalibrationOwnershipProbe();
     if (state.originalCalibrationVideoFrame) state.VideoFrame = state.originalCalibrationVideoFrame;
     else delete state.VideoFrame;
   });

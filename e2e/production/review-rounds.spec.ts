@@ -164,6 +164,10 @@ test("a pending practice landing yields to an outside export action", async ({ p
   await exportButton.click();
   const downloaded = await (await downloadPromise).path();
   expect(JSON.parse(await readFile(downloaded!, "utf8")).analysisBuild).toBeNull();
+  // Safari pointer/download handling may blur the activating button. Establish
+  // explicit outside keyboard focus before testing the later readiness event.
+  await exportButton.focus();
+  await expect(exportButton).toBeFocused();
   await page.evaluate(() => (window as any).__releaseVisibleMediaReadiness());
   await expect(page.locator(".video-meta-line")).toContainText("Ready");
   await expect(exportButton).toBeFocused();

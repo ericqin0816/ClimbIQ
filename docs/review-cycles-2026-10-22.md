@@ -169,6 +169,17 @@ decoding and an actual downloaded export; only visible-player readiness
 notifications are delayed to exercise the race. The provenance workflow also
 waits for its intended one-shot landing before initiating its next action.
 
+The next [hosted run](https://github.com/ericqin0816/ClimbIQ/actions/runs/39875543547)
+passed those previous product regressions, but exposed two test portability
+assumptions. Safari may blur a pointer-activated download button, so the intent
+test now explicitly re-establishes and verifies outside keyboard focus after the
+real download and before releasing readiness. A calibration readback lasts about
+200 ms and can finish before a remote assertion; an in-page mutation observer
+now retains an actual DOM commit with both saved rows, replacement input, and
+sampling action disabled together, then verifies enabled recovery. No application
+code, readiness timeout, or disabled-state requirement changed for these test
+adjustments.
+
 ## Evidence limits
 
 The product rubric assesses the implemented experience. Overall product readiness
