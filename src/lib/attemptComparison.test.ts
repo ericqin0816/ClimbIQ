@@ -1,11 +1,91 @@
 import { describe, expect, it } from "vitest";
 import type { Confidence, SavedAnalysisSession, TimestampMarker } from "../types";
-import { compareAttempts, hasComparableTiming, summarizeAttempt } from "./attemptComparison";
+import { attemptComparisonContextKey, compareAttempts, hasComparableTiming, summarizeAttempt } from "./attemptComparison";
 import { compactBiomechanicsSession, sanitizeBiomechanicsSession } from "./biomechanicsSession";
 import { sanitizeTimestampSequence } from "./timestampIntegrity";
 import { buildSectionReview } from "./coachingSections";
 
+function compareReviewedAttempts(a: SavedAnalysisSession, b: SavedAnalysisSession, options: Parameters<typeof compareAttempts>[2] = {}) {
+  return compareAttempts(a, b, { comparisonContextConfirmed: true, ...options });
+}
+
 describe("attempt comparison", () => {
+  it("keeps unknown manual observations numerical until the recording context is reviewed", () => {
+    const a = makeSession("baseline", { start: 2, hold10: 6, finish: 12 });
+    const b = makeSession("candidate", { start: 2, hold10: 5.8, finish: 11.7 });
+    const result = compareAttempts(a, b);
+    expect(row(result, "total")).toMatchObject({ deltaSeconds: -.3, outcome: "context-review" });
+    expect(row(result, "bottom-phase")).toMatchObject({ deltaSeconds: -.2, outcome: "context-review" });
+    expect(result.performanceComparisonAllowed).toBe(false);
+    expect(result.comparableMetricCount).toBe(0);
+    expect(result.primaryInsight).toContain("Review the climber, route, video clocks, and physical events");
+    expect(result.primaryInsight).not.toMatch(/faster|slower|gained|lost|largest measured/);
+    expect(row(compareReviewedAttempts(a, b), "total")).toMatchObject({ outcome: "gained", deltaSeconds: -.3 });
+  });
+  it.each([
+    ["Manual", "Finish light detection"],
+    ["Fused start detection", "Official total time"],
+    ["Motion-based estimate", "Manual"],
+    ["Start light detection", "Finish light detection"],
+  ] as const)("does not infer comparable events or video clocks from %s and %s sources", (startSource, finishSource) => {
+    const a = makeSession("a", { start: 1, finish: 11 }), b = makeSession("b", { start: 1, finish: 10.5 });
+    b.timestamps[0].source = startSource;
+    b.timestamps[5].source = finishSource;
+    b.climberName = "Another athlete";
+    b.notes = "Recording playback speed unknown";
+    expect(row(compareAttempts(a, b), "total")).toMatchObject({ outcome: "context-review", deltaSeconds: -.5 });
+  });
+  it("context review cannot override lineage, confidence, contact review, or coarse observed intervals", () => {
+    const a = makeSession("a", { start: 1, hold10: 5, finish: 11 });
+    const b = makeSession("b", { start: 1, hold10: 4.8, finish: 10.7 });
+    b.attemptLineageId = a.id;
+    expect(row(compareReviewedAttempts(a, b, { distinctAttemptsConfirmed: true }), "total")?.outcome).toBe("identity-review");
+    delete b.attemptLineageId;
+    b.timestamps[5].confidence = "Low";
+    expect(row(compareReviewedAttempts(a, b), "total")?.outcome).toBe("review");
+    expect(row(compareReviewedAttempts(a, b), "total")?.deltaSeconds).toBeUndefined();
+    b.timestamps[5].confidence = "Medium";
+    b.timestamps[4].acceptanceMode = "automatic";
+    expect(row(compareReviewedAttempts(a, b), "bottom-phase")?.outcome).toBe("unavailable");
+    b.timestamps[5].observationIntervalSeconds = .5;
+    expect(row(compareReviewedAttempts(a, b), "total")).toMatchObject({ outcome: "similar", comparisonFloorSeconds: 1, deltaSeconds: -.3 });
+  });
+  it("cannot turn mixed bundled practice and personal timing into a performance claim", () => {
+    const a = makeSession("a", { start: 1, finish: 11 }), b = makeSession("b", { start: 1, finish: 10.7 });
+    a.attemptLineageId = "climbiq-practice-v1-a";
+    for (const [baseline, candidate] of [[a, b], [b, a]]) {
+      const result = compareReviewedAttempts(baseline, candidate, { distinctAttemptsConfirmed: true });
+      expect(result.performanceComparisonAllowed).toBe(false);
+      expect(row(result, "total")?.outcome).toBe("context-review");
+      expect(Math.abs(row(result, "total")!.deltaSeconds!)).toBe(.3);
+      expect(result.primaryInsight).toContain("bundled synthetic practice and a personal recording");
+    }
+    b.attemptLineageId = "climbiq-practice-v1-b";
+    expect(compareReviewedAttempts(a, b).performanceComparisonAllowed).toBe(true);
+    expect(row(compareReviewedAttempts(a, b), "total")?.outcome).toBe("gained");
+  });
+  it("scopes context review to the ordered pair and current observations and climber context", () => {
+    const a = makeSession("a", { start: 1, finish: 11 }), b = makeSession("b", { start: 1, finish: 10.7 });
+    const key = attemptComparisonContextKey(a, b);
+    expect(attemptComparisonContextKey(a, structuredClone(b))).toBe(key);
+    expect(attemptComparisonContextKey(b, a)).not.toBe(key);
+    const changes: ((session: SavedAnalysisSession) => void)[] = [
+      s => { s.timestamps[5].rawTime = 10.8; },
+      s => { s.timestamps[5].source = "Finish light detection"; },
+      s => { s.timestamps[5].acceptanceMode = "frame-review"; },
+      s => { s.timestamps[5].observationIntervalSeconds = .5; },
+      s => { s.timestamps[5].confidence = "Medium"; },
+      s => { s.timestamps[5].note = "Selected finish light rather than pad contact"; },
+      s => { s.climberName = "Other climber"; },
+      s => { s.location = "Another route"; },
+      s => { s.notes = "Slow-motion playback"; },
+      s => { s.settings.firstMovementDefinition = "committed"; },
+    ];
+    for (const change of changes) {
+      const changed = structuredClone(b); change(changed);
+      expect(attemptComparisonContextKey(a, changed)).not.toBe(key);
+    }
+  });
   it("links the longest reliable wall third and withholds stale or interrupted tracking", () => {
     const s = withRouteTracking(makeSession("sections", { start: 2, finish: 6 }), 2, 6);
     const result = s.biomechanics!.result!;
@@ -29,7 +109,7 @@ describe("attempt comparison", () => {
   it("retains diagnostic timing but withholds gain claims for annotation copies", () => {
     const original = makeSession("original", { start: 1, finish: 11 });
     const copy = makeSession("copy", { start: 1, finish: 10.6 }); copy.attemptLineageId = original.id;
-    const result = compareAttempts(original, copy, { distinctAttemptsConfirmed: true });
+    const result = compareReviewedAttempts(original, copy, { distinctAttemptsConfirmed: true });
     expect(result.performanceComparisonAllowed).toBe(false);
     expect(result.comparableMetricCount).toBe(0);
     expect(row(result, "total")).toMatchObject({ deltaSeconds: -.4, outcome: "identity-review", baseline: { valueSeconds: 10 }, candidate: { valueSeconds: 9.6 } });
@@ -38,17 +118,17 @@ describe("attempt comparison", () => {
   it("needs explicit distinct-attempt confirmation for overlapping recording details", () => {
     const a = makeSession("a", { start: 1, finish: 11 }), b = makeSession("b", { start: 1, finish: 10.6 });
     a.videoMetadata = b.videoMetadata = { fileName: "meet.mp4", duration: 120, videoWidth: 640, videoHeight: 480, metadataLoaded: true };
-    expect(row(compareAttempts(a, b), "total")?.outcome).toBe("identity-review");
-    expect(row(compareAttempts(a, b, { distinctAttemptsConfirmed: true }), "total")?.outcome).toBe("gained");
+    expect(row(compareReviewedAttempts(a, b), "total")?.outcome).toBe("identity-review");
+    expect(row(compareReviewedAttempts(a, b, { distinctAttemptsConfirmed: true }), "total")?.outcome).toBe("gained");
     b.timestamps.find(marker => marker.id === "startSignal")!.rawTime = 31;
     b.timestamps.find(marker => marker.id === "finishPad")!.rawTime = 40.6;
-    expect(compareAttempts(a, b).performanceComparisonAllowed).toBe(true);
+    expect(compareReviewedAttempts(a, b).performanceComparisonAllowed).toBe(true);
   });
   it("does not call a 150 ms difference a gain when finish observations were 200 ms apart", () => {
     const baseline=makeSession("baseline",{start:1,finish:11});
     const candidate=makeSession("candidate",{start:1,finish:10.85});
     baseline.timestamps.find(marker=>marker.id==="finishPad")!.observationIntervalSeconds=.2;
-    const total=row(compareAttempts(baseline,candidate),"total");
+    const total=row(compareReviewedAttempts(baseline,candidate),"total");
     expect(total).toMatchObject({outcome:"similar",comparisonFloorSeconds:.4});
     expect(total?.deltaSeconds).toBe(-.15);
   });
@@ -56,7 +136,7 @@ describe("attempt comparison", () => {
     const baseline = makeSession("baseline", { start: 2, movement: 2.2, hold10: 6.5, finish: 12 });
     const candidate = makeSession("candidate", { start: 3, movement: 3.18, hold10: 7.2, finish: 12.7 });
 
-    const comparison = compareAttempts(baseline, candidate);
+    const comparison = compareReviewedAttempts(baseline, candidate);
 
     expect(comparison.comparableMetricCount).toBe(4);
     expect(row(comparison, "total")).toMatchObject({ deltaSeconds: -0.3, outcome: "gained" });
@@ -70,7 +150,7 @@ describe("attempt comparison", () => {
     const baseline = makeSession("baseline", { start: 1, finish: 11 });
     const candidate = makeSession("candidate", { start: 1, finish: 10.8 }, "Low");
 
-    const total = row(compareAttempts(baseline, candidate), "total");
+    const total = row(compareReviewedAttempts(baseline, candidate), "total");
     expect(total).toMatchObject({ outcome: "review" });
     expect(total?.deltaSeconds).toBeUndefined();
   });
@@ -130,7 +210,7 @@ describe("attempt comparison", () => {
     const baseline = makeSession("baseline", { start: 1, finish: 11 });
     const candidate = makeSession("candidate", { start: 2, finish: 11.8 });
 
-    expect(compareAttempts(baseline, candidate).primaryInsight).toBe("candidate was 0.200s faster overall.");
+    expect(compareReviewedAttempts(baseline, candidate).primaryInsight).toBe("candidate was 0.200s faster overall.");
   });
 
   it("derives trustworthy wall-third splits from matching saved COM ranges", () => {
@@ -151,7 +231,7 @@ describe("attempt comparison", () => {
   });
 
   it.each([0.006, 0.05, 0.1])("withholds tiny timing gain claims for a %ss difference", (delta) => {
-    const result = compareAttempts(makeSession("a", { start: 2, finish: 5 }), makeSession("b", { start: 2, finish: 5 - delta }));
+    const result = compareReviewedAttempts(makeSession("a", { start: 2, finish: 5 }), makeSession("b", { start: 2, finish: 5 - delta }));
     expect(row(result, "total")).toMatchObject({ outcome: "similar", comparisonFloorSeconds: 0.1 });
     expect(result.primaryInsight).toContain("no overall gain or loss");
   });
@@ -160,7 +240,7 @@ describe("attempt comparison", () => {
     const a = makeSession("a", { start: 2, movement: 2.3 });
     const b = makeSession("b", { start: 2, movement: 2.15 });
     b.timestamps[1].source = "Body motion detection";
-    expect(row(compareAttempts(a, b), "reaction")).toMatchObject({ outcome: "similar", comparisonFloorSeconds: 0.2 });
+    expect(row(compareReviewedAttempts(a, b), "reaction")).toMatchObject({ outcome: "similar", comparisonFloorSeconds: 0.2 });
   });
 
   it.each(["start", "finish", "athlete", "calibration"])("withholds tracking and its quality after changing %s", (change) => {
@@ -188,13 +268,13 @@ describe("attempt comparison", () => {
   it("leads with the overall slowdown even if reaction is unchanged", () => {
     const a = makeSession("a", { start: 2, movement: 2.2, finish: 5 });
     const b = makeSession("b", { start: 2, movement: 2.2, finish: 6 });
-    expect(compareAttempts(a, b).primaryInsight).toBe("b was 1.000s slower overall.");
+    expect(compareReviewedAttempts(a, b).primaryInsight).toBe("b was 1.000s slower overall.");
   });
 
   it("shows a faster bottom and slower top alongside the overall loss", () => {
     const a = makeSession("a", { start: 2, hold10: 6, finish: 12 });
     const b = makeSession("b", { start: 2, hold10: 5.5, finish: 13 });
-    const result = compareAttempts(a, b);
+    const result = compareReviewedAttempts(a, b);
     expect(result.primaryInsight).toContain("1.000s slower overall");
     expect(result.primaryInsight).toContain("lost 1.500s in hold 10 → finish");
     expect(row(result, "bottom-phase")?.outcome).toBe("gained");
@@ -210,12 +290,12 @@ describe("attempt comparison", () => {
     const a = withRouteTracking(makeSession("a", { start: 2, finish: 5 }), 2, 5);
     const b = structuredClone(a);
     b.timestamps[5].confidence = "Low";
-    expect(row(compareAttempts(a, b), "lower-third")?.outcome).toBe("review");
+    expect(row(compareReviewedAttempts(a, b), "lower-third")?.outcome).toBe("review");
   });
 
   it("uses pose sample spacing for the COM comparison floor", () => {
     const a = withRouteTracking(makeSession("a", { start: 2, finish: 5 }), 2, 5);
-    const result = compareAttempts(a, { ...structuredClone(a), id: "another-recording" });
+    const result = compareReviewedAttempts(a, { ...structuredClone(a), id: "another-recording" });
     expect(row(result, "lower-third")).toMatchObject({ outcome: "similar", comparisonFloorSeconds: 0.4 });
   });
 
@@ -224,12 +304,12 @@ describe("attempt comparison", () => {
     const saved = JSON.parse(JSON.stringify({ ...session, biomechanics: compactBiomechanicsSession(session.biomechanics!) }));
     saved.biomechanics = sanitizeBiomechanicsSession(saved.biomechanics);
     saved.timestamps = sanitizeTimestampSequence(saved.timestamps);
-    const before = compareAttempts(session, saved);
+    const before = compareReviewedAttempts(session, saved);
     expect(row(before, "total")?.deltaSeconds).toBe(0);
     expect(row(before, "bottom-phase")?.deltaSeconds).toBe(0);
     expect(summarizeAttempt(saved).metrics.filter((m) => m.evidence === "COM wall estimate")).toHaveLength(3);
     saved.timestamps.find((m: TimestampMarker) => m.id === "finishPad").rawTime = 4.95;
-    const after = compareAttempts(session, saved);
+    const after = compareReviewedAttempts(session, saved);
     expect(row(after, "total")?.deltaSeconds).toBe(-0.05);
     expect(row(after, "lower-third")?.outcome).toBe("unavailable");
   });
@@ -241,7 +321,7 @@ describe("attempt comparison", () => {
     shifted.biomechanics!.result!.startRawTime += offset;
     shifted.biomechanics!.result!.endRawTime += offset;
     shifted.biomechanics!.result!.frames.forEach(f => { f.rawTime += offset; });
-    const result = compareAttempts(session, shifted);
+    const result = compareReviewedAttempts(session, shifted);
     expect(result.rows.filter(r => r.deltaSeconds !== undefined)).toHaveLength(7);
     expect(result.rows.every(r => r.deltaSeconds === 0)).toBe(true);
   });
@@ -249,8 +329,8 @@ describe("attempt comparison", () => {
   it("reverses gain/loss when attempts are swapped without changing thresholds", () => {
     const a = makeSession("a", { start: 2, hold10: 6, finish: 12 });
     const b = makeSession("b", { start: 3, hold10: 6.5, finish: 12 });
-    const forward = compareAttempts(a, b);
-    const backward = compareAttempts(b, a);
+    const forward = compareReviewedAttempts(a, b);
+    const backward = compareReviewedAttempts(b, a);
     for (const f of forward.rows.filter(r => r.deltaSeconds !== undefined)) {
       const b = row(backward, f.id)!;
       expect(b.deltaSeconds).toBe(-f.deltaSeconds!);

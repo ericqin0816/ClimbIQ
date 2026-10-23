@@ -220,6 +220,9 @@ try {
   await evaluate("document.querySelector('.comparison-details').open=true");
   check(await evaluate("!document.querySelector('.comparison-row.gained,.comparison-row.lost')"), "Main comparison bypasses the overlap confirmation.");
   await evaluate("document.querySelector('.comparison-identity-check input').click()");
+  check(await evaluate("!document.querySelector('.comparison-row.gained,.comparison-row.lost')"), "Distinct identity confirmation bypassed recording-context review.");
+  // This is an authored fixture exercising the review control, not an event label.
+  await evaluate("document.querySelector('.comparison-context-check input').click()");
   await wait("!!document.querySelector('.comparison-row.gained,.comparison-row.lost')");
   await evaluate("window.__coachingBaselines=window.__coachingBaselines.map(s=>({...s,updatedAt:'2027-01-01'}));window.__renderComparisonHarness(window.__coachingBaselines)");
   await wait("!document.querySelector('.comparison-identity-check input').checked");

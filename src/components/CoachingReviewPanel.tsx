@@ -16,7 +16,7 @@ export default function CoachingReviewPanel({ getCurrentSession, sessions, onJum
   const [goal, setGoal] = useState<CoachingGoal>("overview");
   const [currentSnapshot, setCurrentSnapshot] = useState(getCurrentSession);
   const [baselineId, setBaselineId] = useState("");
-  const [comparable, setComparable] = useState(false);
+  const [comparableFingerprint, setComparableFingerprint] = useState("");
   const [distinctAttemptFingerprint, setDistinctAttemptFingerprint] = useState("");
   const [evidence, setEvidence] = useState<CoachingEvidence | null>(null);
   const [plan, setPlan] = useState<CoachingPlan | null>(null);
@@ -42,6 +42,7 @@ export default function CoachingReviewPanel({ getCurrentSession, sessions, onJum
     return baseline ? coachingEvidenceFingerprint(currentSnapshot, baseline) : "";
   }, [baselineId, currentSnapshot, sessions]);
   const distinctAttemptsConfirmed = selectedIdentityFingerprint !== "" && distinctAttemptFingerprint === selectedIdentityFingerprint;
+  const comparable = selectedIdentityFingerprint !== "" && comparableFingerprint === selectedIdentityFingerprint;
   const connectionRequest = useRef<AbortController | null>(null);
   const checkConnection = useCallback(async () => {
     if (LOCAL_APP) return;
@@ -95,11 +96,12 @@ export default function CoachingReviewPanel({ getCurrentSession, sessions, onJum
       const current = getCurrentSession();
       setCurrentSnapshot(current);
       const baseline = comparable ? sessions.find(s => s.id === baselineId) : undefined;
-      if (baselineId && (!comparable || !baseline || !coachingBaselineOptions(current, [baseline])[0].eligible)) {
-        setMessage("Choose a different timed attempt and confirm that its climber, route, and recording setup are comparable.");
+      if (baselineId && (!comparable || !baseline || comparableFingerprint !== coachingEvidenceFingerprint(current, baseline) || !coachingBaselineOptions(current, [baseline])[0].eligible)) {
+        setMessage("Choose a different timed attempt and check the climber, route, normal-speed video clocks, and physical marker events before comparing.");
         return;
       }
       const next = buildCoachingEvidence(current, goal, baseline, {
+        comparisonContextConfirmed: comparable,
         distinctAttemptsConfirmed: !!baseline && distinctAttemptFingerprint === coachingEvidenceFingerprint(current, baseline),
       });
       evidenceBaselineId.current = baseline?.id ?? "";
@@ -156,7 +158,7 @@ export default function CoachingReviewPanel({ getCurrentSession, sessions, onJum
       <label>Review focus<select value={goal} onChange={e => { invalidate(); setGoal(e.target.value as CoachingGoal); }}>
         <option value="overview">Overview</option><option value="start">Start</option><option value="halves">Sections around Hold 10</option><option value="consistency">Repeatability</option>
       </select></label>
-      <label>Optional saved baseline<select value={baselineId} onChange={e => { invalidate(); setBaselineId(e.target.value); setComparable(false); setDistinctAttemptFingerprint(""); }}>
+      <label>Optional saved baseline<select value={baselineId} onChange={e => { invalidate(); setBaselineId(e.target.value); setComparableFingerprint(""); setDistinctAttemptFingerprint(""); }}>
         <option value="">Single-run review</option>{baselineOptions.map(option => <option key={option.id} value={option.id} disabled={!option.eligible}>
           {option.name}{option.date ? ` · ${option.date}` : ""}{option.totalSeconds !== null ? ` · ${option.totalSeconds.toFixed(3)}s` : ""}{option.reason ? ` — ${option.reason}` : ""}
         </option>)}
@@ -165,7 +167,8 @@ export default function CoachingReviewPanel({ getCurrentSession, sessions, onJum
     <p className="coaching-baseline-note">{baselineId ? `Baseline: ${selectedBaseline?.name ?? "unavailable"}. Compare the same climber on the same route with comparable recording conditions.`
       : baselineOptions.some(option => option.eligible) ? "A baseline adds measured differences. Choosing one does not replace your current attempt."
         : "No different timed baseline is ready yet. You can still review this run locally."}</p>
-    {baselineId && <label className="coaching-check"><input type="checkbox" checked={comparable} onChange={e => { invalidate(); setComparable(e.target.checked); }} />I am comparing two distinct attempts by the same climber on the same route with comparable recording conditions</label>}
+    {baselineId && <><label className="coaching-check"><input type="checkbox" checked={comparable} onChange={e => { invalidate(); setComparableFingerprint(e.target.checked ? selectedIdentityFingerprint : ""); }} />I checked these are distinct attempts by the same climber on the same route, use comparable normal-speed video clocks, and mark the same physical events in both recordings</label>
+      <p className="coaching-baseline-note">This is your review of the recordings, not independent verification or a timing-accuracy guarantee. Leave the baseline unconfirmed if its events or playback speed are unknown.</p></>}
     {selectedBaseline?.requiresDistinctAttemptConfirmation && <div className="coaching-identity-check">
       <p>{selectedBaseline.warning}</p><label className="coaching-check"><input type="checkbox" checked={distinctAttemptsConfirmed}
         onChange={e => { invalidate(); setDistinctAttemptFingerprint(e.target.checked ? selectedIdentityFingerprint : ""); }} />These overlapping recording details belong to different climbing attempts, not edited copies of one attempt</label>

@@ -1,5 +1,5 @@
 import type {SavedAnalysisSession, TimestampMarker} from "../types";
-import {summarizeAttempt, summarizeAttemptTiming} from "./attemptComparison";
+import {hasMixedPracticeContext, summarizeAttempt, summarizeAttemptTiming} from "./attemptComparison";
 import {sanitizeTimestampSequence} from "./timestampIntegrity";
 import {describeSpeedTrace} from "./biomechanicsPresentation";
 import {buildSectionReview} from "./coachingSections";
@@ -17,6 +17,8 @@ export interface CoachingBaselineOption {
 export function coachingEvidenceFingerprint(current: SavedAnalysisSession, baseline?: SavedAnalysisSession): string {
   const basis = (session: SavedAnalysisSession) => ({
     id: session.id, lineage: resolveAttemptLineageId(session), name: session.name, video: session.videoMetadata,
+    climberName: session.climberName, location: session.location, notes: session.notes,
+    date: session.date, attemptType: session.attemptType, analysisSettings: session.settings,
     timestamps: session.timestamps, athlete: session.zones.startBody,
     calibration: session.biomechanics?.calibration, settings: session.biomechanics?.settings,
     tracking: session.biomechanics?.result,
@@ -31,6 +33,7 @@ export function coachingBaselineOptions(current: SavedAnalysisSession, sessions:
     const identity = assessAttemptIdentity(current, candidate);
     const reason = candidate.id === current.id ? "Current attempt"
       : identity.relationship === "same-attempt" ? "Another analysis of the same attempt"
+        : hasMixedPracticeContext(current, candidate) ? "Synthetic practice cannot be a personal performance baseline"
         : facts.timingState !== "accepted" ? "Start or Finish needs review" : undefined;
     return { id: candidate.id, name: candidate.name, date: candidate.date, totalSeconds: facts.totalSeconds,
       eligible: reason === undefined, reason, requiresDistinctAttemptConfirmation: !reason && identity.requiresDistinctAttemptConfirmation,
@@ -73,11 +76,12 @@ export function coachingRunFacts(session:SavedAnalysisSession):CoachingRunFacts 
 }
 
 export function buildCoachingEvidence(current:SavedAnalysisSession,goal:CoachingGoal,baseline?:SavedAnalysisSession,
-  options: {distinctAttemptsConfirmed?:boolean} = {}): CoachingEvidence {
+  options: {distinctAttemptsConfirmed?:boolean; comparisonContextConfirmed?:boolean} = {}): CoachingEvidence {
   if (baseline) {
     const eligibility = coachingBaselineOptions(current, [baseline])[0];
     if (!eligibility.eligible) throw new Error("Choose a different saved attempt with accepted Start and Finish timing.");
     if (eligibility.requiresDistinctAttemptConfirmation && !options.distinctAttemptsConfirmed) throw new Error("Confirm these are two distinct climbing attempts before interpreting their timing differences.");
+    if (options.comparisonContextConfirmed !== true) throw new Error("Review the climber, route, normal-speed video clocks, and physical marker events before interpreting timing differences.");
   }
   const packet:CoachingPacket={version:2,goal,current:coachingRunFacts(current),baseline:baseline?coachingRunFacts(baseline):null};
   const markers=sanitizeTimestampSequence(current.timestamps,current.videoMetadata?.duration);

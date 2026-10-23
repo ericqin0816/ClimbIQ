@@ -9,29 +9,44 @@ function session(): SavedAnalysisSession {
     timestamps: markers.map(([id, rawTime]): TimestampMarker => ({ id, label: id, rawTime, climbTime: null, confidence: "High", source: "Manual" })),
   };
 }
+function buildReviewedCoachingEvidence(...args: Parameters<typeof buildCoachingEvidence>) {
+  return buildCoachingEvidence(args[0], args[1], args[2], { comparisonContextConfirmed: true, ...args[3] });
+}
+
 describe("coaching session adapter", () => {
+  it("requires local contextual review before creating any baseline performance claim", () => {
+    const current = session(), baseline = { ...session(), id: "baseline" };
+    expect(() => buildCoachingEvidence(current, "overview", baseline)).toThrow("physical marker events");
+    expect(() => buildCoachingEvidence(current, "overview", baseline, { comparisonContextConfirmed: true })).not.toThrow();
+    expect(() => buildCoachingEvidence(current, "overview")).not.toThrow();
+  });
+  it("does not admit bundled synthetic practice as a personal training baseline", () => {
+    const current = session(), baseline = { ...session(), id: "baseline", attemptLineageId: "climbiq-practice-v1-a" };
+    expect(coachingBaselineOptions(current, [baseline])[0]).toMatchObject({ eligible: false, reason: "Synthetic practice cannot be a personal performance baseline" });
+    expect(() => buildCoachingEvidence(current, "overview", baseline, { comparisonContextConfirmed: true, distinctAttemptsConfirmed: true })).toThrow("different saved attempt");
+  });
   it("links reviewed phase differences in the current video's clock and keeps them local", () => {
     const baseline = session(); baseline.id = "baseline";
     const current = session();
     for (const s of [baseline, current]) s.timestamps.find(m => m.id === "hold10")!.acceptanceMode = "frame-review";
     current.timestamps.find(m => m.id === "hold10")!.rawTime = 16.9;
-    const review = buildCoachingEvidence(current, "overview", baseline);
+    const review = buildReviewedCoachingEvidence(current, "overview", baseline);
     expect(review.sectionReview.items).toMatchObject([
       { id: "bottom-phase", deltaSeconds: 1, startRawTime: 9.4, endRawTime: 16.9 },
       { id: "top-phase", deltaSeconds: -1, startRawTime: 16.9, endRawTime: 21.655 },
     ]);
     expect(JSON.stringify(review.packet)).not.toMatch(/sectionReview|rawTime|PRIVATE/);
     baseline.timestamps.find(m => m.id === "hold10")!.acceptanceMode = undefined;
-    expect(buildCoachingEvidence(current, "overview", baseline).sectionReview.items).toHaveLength(0);
+    expect(buildReviewedCoachingEvidence(current, "overview", baseline).sectionReview.items).toHaveLength(0);
   });
   it("does not flag phase changes inside the threshold or from low-confidence endpoints", () => {
     const baseline = session(), current = session(); baseline.id = "baseline";
     for (const s of [baseline, current]) s.timestamps.find(m => m.id === "hold10")!.acceptanceMode = "frame-review";
     current.timestamps.find(m => m.id === "hold10")!.rawTime! += .05;
-    expect(buildCoachingEvidence(current, "overview", baseline).sectionReview.items).toHaveLength(0);
+    expect(buildReviewedCoachingEvidence(current, "overview", baseline).sectionReview.items).toHaveLength(0);
     current.timestamps.find(m => m.id === "hold10")!.rawTime! += 1;
     current.timestamps.find(m => m.id === "finishPad")!.confidence = "Low";
-    expect(buildCoachingEvidence(current, "overview", baseline).sectionReview.items).toHaveLength(0);
+    expect(buildReviewedCoachingEvidence(current, "overview", baseline).sectionReview.items).toHaveLength(0);
   });
   it("uses accepted timing, not the user-entered official total", () => {
     expect(coachingRunFacts(session()).totalSeconds).toBeCloseTo(12.255);
@@ -42,7 +57,7 @@ describe("coaching session adapter", () => {
     expect(coachingRunFacts(s)).toMatchObject({ reviewedHold10: true, bottomSeconds: 6.5, topSeconds: 5.755 });
   });
   it("does not send private strings, raw times or metadata to the server", () => {
-    const result = buildCoachingEvidence(session(), "overview");
+    const result = buildReviewedCoachingEvidence(session(), "overview");
     expect(JSON.stringify(result.packet)).not.toMatch(/PRIVATE|rawTime|fileName|location|notes/);
     expect(result.links.total).toEqual([{ label: "View Start", rawTime: 9.4 }, { label: "View Finish", rawTime: 21.655 }]);
   });
@@ -61,8 +76,8 @@ describe("coaching session adapter", () => {
       { id: "missing", eligible: false, reason: "Start or Finish needs review" },
       { id: "other", eligible: true, totalSeconds: 12.255 },
     ]);
-    expect(() => buildCoachingEvidence(current, "overview", current)).toThrow("different saved attempt");
-    expect(() => buildCoachingEvidence(current, "overview", missing)).toThrow("different saved attempt");
+    expect(() => buildReviewedCoachingEvidence(current, "overview", current)).toThrow("different saved attempt");
+    expect(() => buildReviewedCoachingEvidence(current, "overview", missing)).toThrow("different saved attempt");
   });
   it("lists baseline eligibility without reading every saved tracking result", () => {
     const current = session(), candidate = { ...session(), id: "other" };
@@ -103,10 +118,10 @@ describe("coaching session adapter", () => {
     expect(coachingBaselineOptions(current, [copy, independent])).toMatchObject([
       { eligible: true, requiresDistinctAttemptConfirmation: true }, { eligible: true, requiresDistinctAttemptConfirmation: false },
     ]);
-    expect(() => buildCoachingEvidence(current, "overview", copy)).toThrow("two distinct climbing attempts");
-    expect(buildCoachingEvidence(current, "overview", copy, { distinctAttemptsConfirmed: true }).packet.baseline).not.toBeNull();
+    expect(() => buildReviewedCoachingEvidence(current, "overview", copy)).toThrow("two distinct climbing attempts");
+    expect(buildReviewedCoachingEvidence(current, "overview", copy, { distinctAttemptsConfirmed: true }).packet.baseline).not.toBeNull();
     copy.attemptLineageId = current.id;
-    expect(() => buildCoachingEvidence(current, "overview", copy, { distinctAttemptsConfirmed: true })).toThrow("different saved attempt");
+    expect(() => buildReviewedCoachingEvidence(current, "overview", copy, { distinctAttemptsConfirmed: true })).toThrow("different saved attempt");
   });
   it("invalidates changed source identity and raw timing even when numeric intervals match", () => {
     const current = session();
@@ -117,9 +132,27 @@ describe("coaching session adapter", () => {
     expect(coachingRunFacts(shifted)).toEqual(coachingRunFacts(current));
     expect(coachingEvidenceFingerprint(shifted)).not.toBe(before);
   });
+  it("invalidates local review when climber, recording context, or marker definitions change", () => {
+    const current = session(), baseline = { ...session(), id: "baseline" };
+    const before = coachingEvidenceFingerprint(current, baseline);
+    for (const change of [
+      (s: SavedAnalysisSession) => { s.climberName = "Different climber"; },
+      (s: SavedAnalysisSession) => { s.location = "Different route"; },
+      (s: SavedAnalysisSession) => { s.notes = "Unknown playback speed"; },
+      (s: SavedAnalysisSession) => { s.settings.firstMovementDefinition = "committed"; },
+      (s: SavedAnalysisSession) => { s.timestamps[0].source = "Fused start detection"; },
+      (s: SavedAnalysisSession) => { s.timestamps[0].note = "Recorded acoustic arrival"; },
+      (s: SavedAnalysisSession) => { s.timestamps[0].observationIntervalSeconds = .5; },
+    ]) {
+      const changed = structuredClone(current); change(changed);
+      const changedBaseline = structuredClone(baseline); change(changedBaseline);
+      expect(coachingEvidenceFingerprint(changed, baseline)).not.toBe(before);
+      expect(coachingEvidenceFingerprint(current, changedBaseline)).not.toBe(before);
+    }
+  });
   it("includes baseline revisions in local identity but never in the hosted packet", () => {
     const current = session(), baseline = { ...session(), id: "baseline" };
-    const before = buildCoachingEvidence(current, "overview", baseline);
+    const before = buildReviewedCoachingEvidence(current, "overview", baseline);
     baseline.timestamps = baseline.timestamps.map(marker => marker.id === "finishPad" ? { ...marker, rawTime: 22 } : marker);
     expect(coachingEvidenceFingerprint(current, baseline)).not.toBe(before.sourceFingerprint);
     expect(JSON.stringify(before.packet)).not.toMatch(/PRIVATE|sourceFingerprint|attemptLineageId|rawTime|fileName|location|notes/);
@@ -127,7 +160,7 @@ describe("coaching session adapter", () => {
   it("does not alter accepted markers while producing review links", () => {
     const current = session();
     const before = JSON.stringify(current);
-    buildCoachingEvidence(current, "halves");
+    buildReviewedCoachingEvidence(current, "halves");
     expect(JSON.stringify(current)).toBe(before);
   });
   it("keeps a coarse Hold 10 interval out of the total comparison rule", () => {
@@ -140,7 +173,7 @@ describe("coaching session adapter", () => {
     expect(facts.comparisonFloorsSeconds.bottom).toBeCloseTo(.733333);
     expect(facts.comparisonFloorsSeconds.top).toBeCloseTo(.733333);
     const baseline = { ...session(), id: "baseline", timestamps: current.timestamps.map(marker => marker.id === "finishPad" ? { ...marker, rawTime: marker.rawTime! + .3 } : { ...marker }) };
-    const evidence = buildCoachingEvidence(current, "overview", baseline);
+    const evidence = buildReviewedCoachingEvidence(current, "overview", baseline);
     expect(evidence.packet.version).toBe(2);
     expect(evidence.catalog.comparisonRows[0]).toMatchObject({ outcome: "shorter", thresholdSeconds: .1, deltaSeconds: -.3 });
   });

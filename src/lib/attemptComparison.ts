@@ -4,7 +4,8 @@ import { isBiomechanicsResultFresh } from "./biomechanicsFreshness";
 import { sanitizeTimestampSequence } from "./timestampIntegrity";
 import { validateWallCalibration } from "./wallCalibration";
 import { observationComparisonFloor } from "./timingEvidence";
-import { assessAttemptIdentity, type AttemptIdentityAssessment } from "./attemptIdentity";
+import { assessAttemptIdentity, attemptIdentityConfirmationKey, type AttemptIdentityAssessment } from "./attemptIdentity";
+import { practiceIdForLineage } from "./practiceRecordings";
 
 export type AttemptMetricId =
   | "total"
@@ -43,7 +44,7 @@ export interface AttemptComparisonRow {
   candidate?: AttemptMetric;
   deltaSeconds?: number;
   comparisonFloorSeconds?: number;
-  outcome: "gained" | "lost" | "similar" | "unavailable" | "review" | "identity-review";
+  outcome: "gained" | "lost" | "similar" | "unavailable" | "review" | "identity-review" | "context-review";
   explanation: string;
 }
 
@@ -54,6 +55,8 @@ export interface AttemptComparison {
   comparableMetricCount: number;
   primaryInsight: string;
   identity: AttemptIdentityAssessment;
+  comparisonContextConfirmed: boolean;
+  contextMismatchReason?: string;
   performanceComparisonAllowed: boolean;
 }
 
@@ -176,22 +179,31 @@ export function summarizeAttempt(session: SavedAnalysisSession): AttemptSummary 
 export function compareAttempts(
   baselineSession: SavedAnalysisSession,
   candidateSession: SavedAnalysisSession,
-  options: { distinctAttemptsConfirmed?: boolean } = {},
+  options: { distinctAttemptsConfirmed?: boolean; comparisonContextConfirmed?: boolean } = {},
 ): AttemptComparison {
   const baseline = summarizeAttempt(baselineSession);
   const candidate = summarizeAttempt(candidateSession);
   const baselineById = new Map(baseline.metrics.map((item) => [item.id, item]));
   const candidateById = new Map(candidate.metrics.map((item) => [item.id, item]));
   const identity = assessAttemptIdentity(baselineSession, candidateSession);
-  const performanceComparisonAllowed = identity.relationship !== "same-attempt" &&
+  const identityAllowed = identity.relationship !== "same-attempt" &&
     (!identity.requiresDistinctAttemptConfirmation || options.distinctAttemptsConfirmed === true);
+  // Sources such as Manual or Fused start do not establish which physical cue
+  // was selected, and file metadata cannot establish recording playback speed.
+  // Preserve the observed numbers while requiring a user's contextual review.
+  const comparisonContextConfirmed = options.comparisonContextConfirmed === true;
+  const contextMismatchReason = hasMixedPracticeContext(baselineSession, candidateSession)
+    ? "A bundled synthetic practice and a personal recording cannot establish a same-climber performance change. Recorded differences remain available for inspection." : undefined;
+  const performanceComparisonAllowed = identityAllowed && comparisonContextConfirmed && !contextMismatchReason;
   const rows = METRIC_ORDER.map((id) => compareMetric(
     id,
     baselineById.get(id),
     candidateById.get(id),
     candidate.name,
-  )).map(row => !performanceComparisonAllowed && row.deltaSeconds !== undefined
-    ? { ...row, outcome: "identity-review" as const, explanation: identity.explanation } : row);
+  )).map(row => row.deltaSeconds === undefined ? row : !identityAllowed
+    ? { ...row, outcome: "identity-review" as const, explanation: identity.explanation }
+    : !comparisonContextConfirmed || contextMismatchReason ? { ...row, outcome: "context-review" as const,
+      explanation: contextMismatchReason ?? "Recorded timing difference only. Check the climber, route, recording clocks, and physical marker definitions before interpreting a performance change." } : row);
   const comparable = rows.filter((row) => row.deltaSeconds !== undefined);
   const total = comparable.find((row) => row.id === "total");
   // Contact phases partition the race. Prefer these over overlapping COM thirds
@@ -206,12 +218,32 @@ export function compareAttempts(
     baseline,
     candidate,
     rows,
-    identity, performanceComparisonAllowed,
+    identity, comparisonContextConfirmed, contextMismatchReason, performanceComparisonAllowed,
     comparableMetricCount: performanceComparisonAllowed ? comparable.length : 0,
-    primaryInsight: !performanceComparisonAllowed ? identity.explanation : insights.length ? insights.join(" ")
+    primaryInsight: !identityAllowed ? identity.explanation : contextMismatchReason ? contextMismatchReason : !comparisonContextConfirmed
+      ? "Recorded timing differences are shown. Review the climber, route, video clocks, and physical events before interpreting a performance change."
+      : insights.length ? insights.join(" ")
       : comparable.length ? "The available differences are below the comparison thresholds. No gain or loss is established."
       : "No comparable timing meets the evidence requirements in both saved attempts.",
   };
+}
+
+/** Only known bundled practice identity is conclusive; names/aliases are not. */
+export function hasMixedPracticeContext(left: SavedAnalysisSession, right: SavedAnalysisSession): boolean {
+  return (practiceIdForLineage(left.attemptLineageId ?? null) !== null) !==
+    (practiceIdForLineage(right.attemptLineageId ?? null) !== null);
+}
+
+/** User review belongs to this ordered pair and these exact accepted observations.
+ * It is not independent verification of event definitions or timing accuracy.
+ */
+export function attemptComparisonContextKey(left: SavedAnalysisSession, right: SavedAnalysisSession): string {
+  return JSON.stringify({ identity: attemptIdentityConfirmationKey(left, right), sessions: [left, right].map(session => ({
+    climberName: session.climberName, location: session.location, attemptType: session.attemptType,
+    date: session.date, notes: session.notes, settings: session.settings,
+    timestamps: sanitizeTimestampSequence(session.timestamps, session.videoMetadata?.duration),
+    wallCalibration: session.biomechanics?.calibration,
+  })) });
 }
 
 export function hasComparableTiming(session: SavedAnalysisSession): boolean {

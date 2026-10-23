@@ -1,7 +1,7 @@
 import ComparisonPlayback from "./ComparisonPlayback";
 import { memo, useEffect, useMemo, useRef, useState } from "react";
 import type { SavedAnalysisSession } from "../types";
-import { compareAttempts, hasComparableTiming, type AttemptComparisonRow } from "../lib/attemptComparison";
+import { attemptComparisonContextKey, compareAttempts, hasComparableTiming, type AttemptComparisonRow } from "../lib/attemptComparison";
 import { attemptIdentityConfirmationKey } from "../lib/attemptIdentity";
 import { comparisonPlaybackRange } from "../lib/comparisonPlayback";
 import "./AttemptComparisonPanel.css";
@@ -16,6 +16,7 @@ export default memo(function AttemptComparisonPanel({ sessions }: { sessions: Sa
   const [selectedBaselineId, setSelectedBaselineId] = useState("");
   const [selectedCandidateId, setSelectedCandidateId] = useState("");
   const [confirmedIdentityKey, setConfirmedIdentityKey] = useState("");
+  const [confirmedContextKey, setConfirmedContextKey] = useState("");
   const target = useRef<HTMLDetailsElement>(null);
 
   useEffect(() => {
@@ -60,7 +61,11 @@ export default memo(function AttemptComparisonPanel({ sessions }: { sessions: Sa
     ? selectedCandidateId
     : eligibleSessions.find((session) => session.id !== baselineId)!.id;
   const identityKey = attemptIdentityConfirmationKey(sessionById.get(baselineId)!, sessionById.get(candidateId)!);
-  const comparison = compareAttempts(sessionById.get(baselineId)!, sessionById.get(candidateId)!, { distinctAttemptsConfirmed: identityKey === confirmedIdentityKey });
+  const contextKey = attemptComparisonContextKey(sessionById.get(baselineId)!, sessionById.get(candidateId)!);
+  const comparison = compareAttempts(sessionById.get(baselineId)!, sessionById.get(candidateId)!, {
+    distinctAttemptsConfirmed: identityKey === confirmedIdentityKey,
+    comparisonContextConfirmed: contextKey === confirmedContextKey,
+  });
   const visibleRows = comparison.rows.filter((row) => row.baseline || row.candidate);
   const changedPhase = comparison.performanceComparisonAllowed ? comparison.rows
     .filter(row => (row.id === "bottom-phase" || row.id === "top-phase") && (row.outcome === "gained" || row.outcome === "lost"))
@@ -71,6 +76,7 @@ export default memo(function AttemptComparisonPanel({ sessions }: { sessions: Sa
 
   function chooseBaseline(nextId: string) {
     setConfirmedIdentityKey("");
+    setConfirmedContextKey("");
     setSelectedBaselineId(nextId);
     if (nextId === candidateId) {
       setSelectedCandidateId(baselineId);
@@ -79,6 +85,7 @@ export default memo(function AttemptComparisonPanel({ sessions }: { sessions: Sa
 
   function chooseCandidate(nextId: string) {
     setConfirmedIdentityKey("");
+    setConfirmedContextKey("");
     setSelectedCandidateId(nextId);
     if (nextId === baselineId) {
       setSelectedBaselineId(candidateId);
@@ -90,7 +97,7 @@ export default memo(function AttemptComparisonPanel({ sessions }: { sessions: Sa
       <summary>
         <span>
           <strong>Compare saved attempts</strong>
-          <small>{comparison.performanceComparisonAllowed ? `${comparison.comparableMetricCount} metrics meet the comparison requirements.` : "Saved timing is shown; performance changes need distinct attempts."}</small>
+          <small>{comparison.performanceComparisonAllowed ? `${comparison.comparableMetricCount} metrics meet the comparison requirements.` : "Saved timing is shown; review comparability before interpreting changes."}</small>
         </span>
         <span>Compare</span>
       </summary>
@@ -123,8 +130,17 @@ export default memo(function AttemptComparisonPanel({ sessions }: { sessions: Sa
           <input type="checkbox" checked={confirmedIdentityKey === identityKey} onChange={event => setConfirmedIdentityKey(event.target.checked ? identityKey : "")} />
           These overlapping recording details belong to two distinct climbing attempts, not edited analyses of one attempt
         </label>}
+        <div className="comparison-context-review">
+          <label className="comparison-context-check">
+            <input type="checkbox" checked={confirmedContextKey === contextKey}
+              disabled={comparison.identity.relationship === "same-attempt" || Boolean(comparison.contextMismatchReason)}
+              onChange={event => setConfirmedContextKey(event.target.checked ? contextKey : "")} />
+            I checked these are attempts by the same climber on the same route, use comparable normal-speed video clocks, and mark the same physical events in both recordings
+          </label>
+          <p>This is your review of the recordings, not independent verification or a timing-accuracy guarantee. If the events or playback speed are unknown, leave this unchecked and use the recorded differences for inspection only.</p>
+        </div>
         <div className="comparison-insight" aria-live="polite">
-          <span>{comparison.performanceComparisonAllowed ? "Overall result & phase changes" : "Annotation comparison only"}</span>
+          <span>{comparison.performanceComparisonAllowed ? "Overall result & phase changes" : comparison.identity.relationship === "same-attempt" ? "Annotation comparison only" : "Recorded timing comparison"}</span>
           <strong>{comparison.primaryInsight}</strong>
           {preferredPhase && <a className="comparison-replay-link" href="#comparison-replay" onClick={() => document.getElementById("comparison-replay")?.focus({ preventScroll: true })}>Replay changed {preferredPhase} phase <span aria-hidden="true">→</span></a>}
         </div>
@@ -188,6 +204,7 @@ function formatMetric(metric: AttemptComparisonRow["baseline"]): string {
 }
 
 function formatDelta(row: AttemptComparisonRow): string {
+  if (row.outcome === "context-review") return `${row.deltaSeconds! > 0 ? "+" : row.deltaSeconds! < 0 ? "−" : ""}${Math.abs(row.deltaSeconds!).toFixed(3)}s · Recorded difference`;
   if (row.outcome === "identity-review") return row.deltaSeconds === undefined ? "Confirm distinct attempts"
     : `${row.deltaSeconds > 0 ? "+" : row.deltaSeconds < 0 ? "−" : ""}${Math.abs(row.deltaSeconds).toFixed(3)}s · Annotation difference`;
   if (row.outcome === "review") return "Review confidence";

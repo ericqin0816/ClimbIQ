@@ -1,4 +1,4 @@
-import { test, expect } from "./fixtures";
+import { test, expect, reviewSyntheticComparisonContext } from "./fixtures";
 import { createPracticeSession } from "../../src/lib/practiceRecordings";
 import pkg from "../../package.json" with { type: "json" };
 import type { Page } from "@playwright/test";
@@ -196,6 +196,27 @@ async function importComparison(page: Page, personal = false) {
   await page.getByLabel("New attempt", { exact: true }).selectOption(sessions[1].id);
 }
 
+test("synthetic context review keeps observations separate and resets for a reversed pair", async ({ page }, testInfo) => {
+  // Authored sessions exercise the control; checking it is not an accuracy label
+  // or a real climber's training decision.
+  await importComparison(page);
+  const review = page.locator(".comparison-context-check input");
+  const claims = page.locator(".comparison-row.gained, .comparison-row.lost");
+  await expect(review).not.toBeChecked();
+  await expect(claims).toHaveCount(0);
+  await expect(page.locator(".comparison-row").filter({ hasText: "Total climb" })).toContainText("0.400s · Recorded difference");
+  await expect(page.getByRole("link", { name: "Replay changed bottom phase" })).toHaveCount(0);
+  await reviewSyntheticComparisonContext(page);
+  await expect(page.locator(".comparison-insight")).toContainText("0.400s faster overall");
+  await expect(page.getByRole("link", { name: "Replay changed bottom phase" })).toHaveCount(1);
+  const candidate = await page.getByLabel("New attempt", { exact: true }).inputValue();
+  await page.getByLabel("Baseline attempt", { exact: true }).selectOption(candidate);
+  await expect(review).not.toBeChecked();
+  await expect(claims).toHaveCount(0);
+  await expect(page.locator(".comparison-row").filter({ hasText: "Total climb" })).toContainText("+0.400s · Recorded difference");
+  await page.screenshot({ path: testInfo.outputPath("context-review-reset.png"), fullPage: true });
+});
+
 test("a pending practice landing yields to an outside export action", async ({ page }, testInfo) => {
   test.skip(process.platform === "win32" && testInfo.project.name.startsWith("webkit"), "Native media readiness is verified by macOS WebKit CI.");
   await page.goto("/");
@@ -234,6 +255,7 @@ test("a pending practice landing yields to an outside export action", async ({ p
 test("known practice pair prepares together and replays the largest reviewed phase", async ({ page }, testInfo) => {
   test.skip(process.platform === "win32" && testInfo.project.name.startsWith("webkit"), "Media fast path runs in macOS WebKit CI.");
   await importComparison(page);
+  await reviewSyntheticComparisonContext(page);
   await page.getByRole("link", { name: "Replay changed bottom phase" }).click();
   await page.getByRole("button", { name: "Prepare practice replay", exact: true }).click();
   await expect(page.locator(".comparison-verified")).toHaveCount(2);
@@ -276,6 +298,7 @@ test("known practice pair prepares together and replays the largest reviewed pha
 test("a mismatched bundled recording never receives automatic identity confirmation", async ({ page }, testInfo) => {
   test.skip(process.platform === "win32" && testInfo.project.name.startsWith("webkit"), "Media identity rejection runs in macOS WebKit CI.");
   await importComparison(page);
+  await reviewSyntheticComparisonContext(page);
   await page.route("**/samples/climbiq-practice-b.mp4", async route => route.fulfill({ contentType: "video/mp4",
     body: await readFile(path.resolve("public/samples/climbiq-practice-a.mp4")) }));
   await page.getByRole("button", { name: "Prepare practice replay", exact: true }).click();

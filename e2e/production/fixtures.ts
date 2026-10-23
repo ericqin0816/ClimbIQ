@@ -1,4 +1,12 @@
-import { test as base, expect } from "@playwright/test";
+import { test as base, expect, type Page } from "@playwright/test";
+
+/** Explicit exercise for authored workflow fixtures, never an event-truth label. */
+export async function reviewSyntheticComparisonContext(page: Page) {
+  const review = page.locator(".comparison-context-review");
+  await expect(review).toContainText("same physical events");
+  await expect(review).toContainText("not independent verification");
+  await review.locator('input[type="checkbox"]').check();
+}
 
 /** Every production workflow must respect the shipped policy and render safely. */
 export const test = base.extend({

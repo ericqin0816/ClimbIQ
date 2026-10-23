@@ -1,5 +1,5 @@
 import type { Page } from "@playwright/test";
-import { test, expect } from "./fixtures";
+import { test, expect, reviewSyntheticComparisonContext } from "./fixtures";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { createPracticeSession } from "../../src/lib/practiceRecordings";
@@ -65,6 +65,7 @@ test("practice import, contact review, save, comparison replay and reload", asyn
   await expect(nextStep.getByRole("link", { name: "Save this attempt" })).toBeAttached();
   await page.getByRole("button", { name: "Save Session", exact: true }).click();
   await expect(nextStep.getByRole("link", { name: "Compare saved attempts" })).toBeAttached();
+  await reviewSyntheticComparisonContext(page);
   await expect(page.locator(".comparison-insight")).toContainText("0.400s");
   await expect(page.getByRole("button", { name: "Replay whole attempt", exact: true })).toBeDisabled();
   await page.getByRole("button", { name: "Use baseline practice recording", exact: true }).click();
@@ -86,7 +87,9 @@ test("practice import, contact review, save, comparison replay and reload", asyn
   await page.screenshot({ path: testInfo.outputPath("saved-comparison.png") });
   await page.reload();
   await expect(page.locator(".attempt-library-list > button")).toHaveCount(2);
-  await expect(page.locator(".comparison-insight")).toContainText("0.400s");
+  await expect(page.locator(".comparison-context-check input")).not.toBeChecked();
+  await expect(page.locator(".comparison-row").filter({ hasText: "Total climb" })).toContainText("0.400s · Recorded difference");
+  await expect(page.locator(".comparison-row.gained, .comparison-row.lost")).toHaveCount(0);
   await expect(page.locator(".comparison-players video")).toHaveCount(0);
   expect(errors).toEqual([]);
 });
