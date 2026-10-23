@@ -54,11 +54,11 @@ Scores remain separate:
 | 3 | ROI sampling allocation and pixel parity | 18 native ROI pairs and four transparency/resizing controls byte-identical; repeated canvas allocation removed |
 | 4 | Start review-cursor evidence | Artifact ranking corrected; exact audio priority and automatic safety independently checked |
 | 5 | Upper-Finish cue quality | Independently reviewed conservative confidence cap; original candidate ranking retained |
-| 6 | Further measured detector bottleneck | Planned after profiling |
-| 7 | Start temporal/identity robustness | Planned after independent review |
-| 8 | Finish source-frame robustness | Planned after independent review |
-| 9 | Contact/tracking or remaining timing limitation | Evidence will determine scope |
-| 10 | Reserved-source evaluation and final refinement | Whole-source checks reserved; not yet run |
+| 6 | Sampling UI overhead and reserved-source check | Native seeks unchanged; React commits reduced; Start/Finish cancellation restoration passed |
+| 7 | Start windows beginning in a previous blue state | Later valid green departure recovered in controls; existing real ROI results identical |
+| 8 | Exposure compensation experiment | Rejected after real-pixel counterexample; safeguards retained |
+| 9 | Contact timing provenance | Actual saved pose replay and source-time correction under review |
+| 10 | Acoustic onset bias and reserved-source evaluation | Generated-tone investigation; fresh whole group still reserved |
 
 ## Cycle 1: audio transform reuse
 
@@ -141,6 +141,56 @@ Some other patches can still pass localization. A weak chromatic change plus
 uniform exposure shift remains a miss in both versions. Seventy-six focused
 tests and types passed; independent review found no scoped regression. Coverage
 and exact endpoint error have not improved on the fixed development set.
+
+## Cycle 6: reduce sampling-driven screen work
+
+Automatic decoder seeks no longer publish the hidden review cursor on every
+frame. The source-guarded restoration callback synchronizes the actual cursor and
+paused-frame readiness after success, cancellation or failure. Native seeks,
+pixels, detector progress and manual review remain active.
+
+On phone/Jakarta, production React commit counts fell 484→168 and 520→147.
+Native time/seek events stayed exactly 314/374; raw-time display mutations fell
+314→0 and 374→1. These instrumented counts establish reduced screen work, not a
+standalone latency claim. Start and Finish cancellation both restored 2.500s,
+retained accepted markers, blocked replacement and settled without stale writes.
+The clean cumulative Cycle 7 check passed 996 tests, types, build and server checks.
+
+The previously reserved H06 whole athlete/source group was released. Both
+baseline and cumulative Cycle 5 accepted Start at 2.070s, 15–30 ms early against
+the two-agent recorded-acoustic bracket 2.085–2.100s. This is not an electronic
+trigger error measurement. Finish was unobservable to the reviewers and unset
+in the app. Both workflows stopped during the final lower-Finish seek: container
+duration 13.328254s, cursor 13.270s, native frame 13.200s with 0.033333s duration.
+The stale-frame guard correctly refused those pixels. This tail-range failure
+remains unresolved; the group becomes development after this inspection.
+
+## Cycle 7: an incomplete initial blue run cannot hide a later Start
+
+The departure helper formerly stopped after the first durable blue run even
+when the window began blue and had no preceding green baseline. It now considers
+later run starts until the earliest fully verified green departure. Existing
+chromatic, persistence, reset and camera-cut checks remain. Eighty-two focused
+tests passed. All 2,456 prior detections in 4,000 seeded controls stayed exact;
+1,544 constructed initial-blue sequences recovered. These are controlled helper
+cases, not additional real attempts or population recall.
+
+Two native ROI windows from the existing phone (121 and 31 samples) returned
+identical original/candidate results. Independent review found no scoped defect.
+No observed real-video coverage gain is credited.
+
+## Cycle 8: reject unsafe exposure compensation
+
+Replacing subtraction of RGB-distance magnitudes with a vector residual
+recovered weak synthetic changes under exposure shifts. Four real timer-pixel
+spatial controls also survived. However, whole-frame RGB change in panning
+footage represents scene composition as well as exposure. On perturbed actual
+Jakarta pixels the variant changed a preferred Low 4.2s cue to a different High
+4.4s patch. Seven of 24 actual-pixel configurations changed cursor, zone or
+confidence. This was a coarse-helper regression, not demonstrated final false
+acceptance. An initial fixture-coordinate error was corrected and retained in
+the local evidence. Independent review supported rejecting the variant; no
+runtime change or performance/accuracy gain is credited for this cycle.
 
 Local detailed evidence currently lives under ignored `test-results/detector-ten/`,
 `test-results/detection-cycles/`, and `test-results/finish-cycles/`.
