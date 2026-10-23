@@ -3729,8 +3729,8 @@ function App() {
             <div>
               <strong>{autoAnalysisRunning ? "Analyzing the run" : "Automatic analysis"}</strong>
               <p className="muted" id="analysis-scope-description">
-                {analysisScope === "full" ? "Finds timing, first movement, the correct lane, athlete tracking, center of mass, and route splits."
-                  : "Finds Start and Finish with the same timing checks. Skips movement results, athlete tracking, and hold splits; you can run full analysis later."}
+                {analysisScope === "full" ? "Suggests timing, first movement, athlete tracking, center of mass, and route splits. Select a climber when lane cues disagree, and review uncertain results."
+                  : "Suggests Start and Finish with the same timing checks. Skips movement results, athlete tracking, and hold splits; you can run full analysis later."}
               </p>
               {displayedStartSearchWindow && (
                 <p className="muted">

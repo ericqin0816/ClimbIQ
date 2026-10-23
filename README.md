@@ -48,10 +48,11 @@ they are not real-climber recordings or independent accuracy labels.
 The default start search covers the first 12 seconds. For a longer recording,
 set the race's time window in **Review & advanced tools**.
 
-If cues point to different climbers, automatic Finish pauses. In **Manual lane
-setup**, capture a Start frame and draw a **Start Body Zone** around your climber,
-then rerun analysis. You can also review that climber's Finish manually. Changing
-the climber selection clears movement, Hold 10, Finish, and tracking; the shared
+If cues point to different climbers, automatic Finish pauses. Choose **Select
+climber** to open a frame at the accepted Start. Draw a **Start Body Zone** around
+your climber, or enter its four edges with the keyboard, then rerun analysis.
+You can also review that climber's Finish manually and save the completed timing.
+Changing the climber selection clears movement, Hold 10, Finish, and tracking; the shared
 Start clock stays. Reopened automatic light regions need a fresh analysis before
 they can generate a new automatic Finish.
 
@@ -117,6 +118,12 @@ separately report new online-video workflows, automatic coverage, manual recover
 and actual comparison playback. They include failed and unsupported cases; their
 workflow scores are not timing-accuracy estimates.
 
+The [latest ten detection rounds](docs/detection-refinement-cycles-2026-10-23.md)
+record Start verification changes, ambiguous-lane rejection, source-bound athlete
+selection, and actual keyboard recovery. Six existing phone recordings remain
+development data; two fresh public clips from one event group returned **0/4**
+automatic endpoints. Independent timing accuracy remains unavailable.
+
 ## Run locally
 
 Use Node.js 22, matching [.nvmrc](.nvmrc).
@@ -148,6 +155,7 @@ Private videos are deliberately excluded from Git. See the
 - [Changelog](CHANGELOG.md): release changes and remaining limitations.
 - [October 22 iteration evidence](docs/iteration-2026-10-22.md): implementation, verification, agent ratings, and field work still required.
 - [Three subsequent review rounds](docs/review-cycles-2026-10-22.md): fixed scoring rubrics, findings, fixes, and verification.
+- [Ten detection refinement rounds](docs/detection-refinement-cycles-2026-10-23.md): per-round scores, real-video outcomes, rejected experiments, and remaining evidence gaps.
 - [Analysis reference](docs/analysis-reference.md): detector behavior, calibration, review tools, saved sessions, and exports.
 - [Benchmark methodology](REAL_VIDEO_BENCHMARK.md): regression observations, label provenance, and known failures.
 - [Demo guide](COLLEGE_DEMO.md): a short walkthrough with results and limitations to discuss.

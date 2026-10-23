@@ -3,6 +3,21 @@
 User-facing changes and their limits. Detailed experiments and regression
 observations are recorded in [benchmarks](benchmarks).
 
+## Detection and climber selection — 2026-10-23
+
+- Require chromatic support throughout Start verification and observed support
+  for the preceding color state. Controlled tests improve; real-world endpoint
+  accuracy remains unestablished.
+- Pause automatic Finish, movement, and tracking when discovered cues point to
+  incompatible climber regions. Bind lane evidence to the current recording,
+  accepted Start, and selected body region. Changing climbers clears dependent
+  annotations while preserving the shared Start and attempt identity.
+- Add a direct **Select climber** action with source-frame capture, cancellation,
+  keyboard region entry, and manual Finish recovery that leads to Save.
+- Add an original CC0 dual-lane workflow fixture and production browser checks.
+  The [ten-round report](docs/detection-refinement-cycles-2026-10-23.md) publishes
+  per-round ratings, rejected approaches, automatic coverage, and evidence gaps.
+
 ## Review refinements — 2026-10-22
 
 - Fixed keyboard wall-corner editing, malformed imported session fields, and

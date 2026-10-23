@@ -2,6 +2,13 @@
 
 This benchmark records behavior on five private 1080 × 1920 phone recordings. The source videos stay outside the repository and are processed locally.
 
+The [October 23 detection refinement report](docs/detection-refinement-cycles-2026-10-23.md)
+is the latest separate evaluation: six private development recordings, six
+conditions of one attempt, two fresh public clips from one event/uploader group,
+and explicit lane-selection workflows. It retains abstentions and failed
+experiments. The release snapshots below are historical; their acceptance and
+tracking counts are not current accuracy estimates.
+
 ## Current release snapshot: 0.27.x
 
 - Five-original full workflows pass: two Starts and one Finish are automatically

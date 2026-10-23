@@ -1,0 +1,1707 @@
+{
+  "schemaVersion": 1,
+  "publicationType": "Derived public evidence summary; not a replayable raw bundle or an independent human study.",
+  "preparedAt": "2026-10-23T19:26:41.372048+00:00",
+  "baselineCommit": "3db861ee97902b2ccee279750d5cbbe479d9a2c7",
+  "freshPredictorEvaluationCommit": "b65414ebf1cb41a7156ae44b7b1b59353794c5ae",
+  "nativeClosingRuntimeCommit": "8102b51f6466979b2e63f10159e69c210f00db5f",
+  "laterChanges": "The publisher qualifies later copy/documentation changes separately. They do not retroactively change the original predictor or native-report build identities.",
+  "fixedDetectionAxes": {
+    "automaticCoverage": "10 × automatically accepted original endpoints / predeclared original endpoint opportunities. Acceptance is not correctness; missing or not-run endpoints remain in the denominator. Cohorts stay separate.",
+    "referenceCompatibleAutomaticCoverage": "N/A without frozen observations of the same physical event and verified lane. Do not use bracket centers as exact electronic labels.",
+    "primaryCandidateLocalization": "Use only the predeclared top-ranked same-event candidate and frozen envelope. Unaccepted proposals are not automatic success; absent matching references yield N/A.",
+    "knownInvalidGuards": "Report only specifically frozen cases, with denominators. Unknown clips are not known negatives; no population false-acceptance rate is estimated.",
+    "terminalLatency": "clamp(5 + 5 × log2(fixed baseline median / candidate median), 0, 10). This is a first-terminal proxy; skipped Finish work is not equivalent-work throughput.",
+    "compositeAccuracyScore": null
+  },
+  "fixedJudgmentRubric": {
+    "productPracticality": {
+      "outOf": 10,
+      "baselineScore": 7.8,
+      "components": {
+        "clearPurpose": 1.9,
+        "firstUsefulResult": 1.1,
+        "defensibleTrainingDecision": 0.9,
+        "reviewAndIdentity": 2.0,
+        "continuity": 1.9
+      }
+    },
+    "evidenceStrength": {
+      "outOf": 10,
+      "baselineScore": 5.9,
+      "components": {
+        "traceability": 2.0,
+        "observableEndpoints": 1.6,
+        "targetCaptureMatch": 0.5,
+        "independentLabelPrecision": 0.7,
+        "captureAndAthleteDiversity": 1.1
+      }
+    }
+  },
+  "cycles": [
+    {
+      "cycle": 1,
+      "summary": "Freeze the six-phone development baseline before changes: 5 of 12 automatic endpoints.",
+      "status": "baseline-frozen-before-runtime-changes",
+      "scores": {
+        "productPracticality": 7.8,
+        "evidenceStrength": 5.9
+      },
+      "scoreComponents": {},
+      "proofs": [
+        {
+          "artifactName": "cycle01-six-phone-baseline.json",
+          "sha256": "e8a6887e932970e189ef02b62a483ddb5cca730d0dca50b56608e880dfae2019"
+        }
+      ]
+    },
+    {
+      "cycle": 2,
+      "summary": "One-attempt robustness baseline: 11 of 12 condition endpoints; dark Finish requires review.",
+      "status": "controlled-robustness-baseline-fragility-observed",
+      "scores": {
+        "productPracticality": 7.8,
+        "evidenceStrength": 5.9
+      },
+      "scoreComponents": {},
+      "proofs": [
+        {
+          "artifactName": "robustness-baseline.json",
+          "sha256": "b9168b97f12a3d33e3c6a5fe0646799612e8fb4971e46bf316ab2e3ada13bfc2"
+        },
+        {
+          "artifactName": "robustness-provenance.json",
+          "sha256": "192fdedbaf3c5236453895735325b734a36096eb272844aae93a8713721b78ba"
+        },
+        {
+          "artifactName": "robustness-provenance-interior-v2.json",
+          "sha256": "ad50724e12ebe35cc6e63745547208bac4e4048e6fa0c59ae95fda8d8cfe3b09"
+        }
+      ]
+    },
+    {
+      "cycle": 3,
+      "summary": "Unsafe regression: a moving shoe becomes an automatic Start. Raw acceptance rises to 6 of 12 but is not a correctness gain.",
+      "status": "unsafe-candidate-regression-not-approved-to-land",
+      "scores": {
+        "productPracticality": 7.3,
+        "evidenceStrength": 5.9
+      },
+      "scoreComponents": {
+        "productComponents": {
+          "clearPurpose": 1.9,
+          "firstUsefulResult": 0.9,
+          "defensibleTrainingDecision": 0.9,
+          "reviewAndIdentity": 1.7,
+          "continuity": 1.9
+        }
+      },
+      "proofs": [
+        {
+          "artifactName": "cycle03-six-phone-chromatic.json",
+          "sha256": "4599716efffeb9d740b0ec1a058aa6681e5e8d7bc71d6d51fa32d69e746f28e8"
+        },
+        {
+          "artifactName": "cycle03-robustness-chromatic.json",
+          "sha256": "6455c9ce68e3036673bde2d44e8b72dfdbf3e10958c8645a7d824c0f638b7458"
+        },
+        {
+          "artifactName": "cycle03-shoe-counterexample-frozen.json",
+          "sha256": "e8be1ae5458afeefbf0bfb2e6ed544d89d6830e5043f0fddf461f111bb3d7633"
+        }
+      ]
+    },
+    {
+      "cycle": 4,
+      "summary": "Reject dense Finish parity: no new real candidates in 36 configurations and three new High flat-cut proposals.",
+      "status": "finish-parity-experiment-rejected-no-runtime-change",
+      "scores": {
+        "productPracticality": 7.3,
+        "evidenceStrength": 5.9
+      },
+      "scoreComponents": {
+        "productComponents": {
+          "clearPurpose": 1.9,
+          "firstUsefulResult": 0.9,
+          "defensibleTrainingDecision": 0.9,
+          "reviewAndIdentity": 1.7,
+          "continuity": 1.9
+        }
+      },
+      "proofs": [
+        {
+          "artifactName": "cycle03-finish-parity-evaluation-complete.json",
+          "sha256": "9e231d8d35db4eb8932ccad49f1e2cc33a9d232b352af61b292f0368776b58af"
+        }
+      ]
+    },
+    {
+      "cycle": 5,
+      "summary": "Reject both registered quantization variants; no runtime or evaluation release.",
+      "status": "quantization-development-experiments-rejected-no-runtime-change",
+      "scores": {
+        "productPracticality": 7.3,
+        "evidenceStrength": 5.9
+      },
+      "scoreComponents": {
+        "productComponents": {
+          "clearPurpose": 1.9,
+          "firstUsefulResult": 0.9,
+          "defensibleTrainingDecision": 0.9,
+          "reviewAndIdentity": 1.7,
+          "continuity": 1.9
+        }
+      },
+      "proofs": [
+        {
+          "artifactName": "quantization-development-registration.json",
+          "sha256": "c08b8a9e6d5f173add0eb43f8eb5da6259e7ec83c71c55a295130b665ef51f0e"
+        },
+        {
+          "artifactName": "quantization-development-results.json",
+          "sha256": "4bb8852a3468705cd48ab04e9966c9c8926a8c7ef96114b9b87fa58072d099ec"
+        }
+      ]
+    },
+    {
+      "cycle": 6,
+      "summary": "Reject the demonstrated shoe proposal through before-state verification. Acceptance returns to 5 of 12; broader hardware identity remains unresolved.",
+      "status": "bounded-before-state-fix-validated-known-shoe-rejected",
+      "scores": {
+        "productPracticality": 7.6,
+        "evidenceStrength": 5.9
+      },
+      "scoreComponents": {
+        "productComponents": {
+          "clearPurpose": 1.9,
+          "firstUsefulResult": 1.1,
+          "defensibleTrainingDecision": 0.9,
+          "reviewAndIdentity": 1.8,
+          "continuity": 1.9
+        }
+      },
+      "proofs": [
+        {
+          "artifactName": "cycle06-six-phone-stable-before.json",
+          "sha256": "dde62b531ed3c2bf3d72c8e4ec7d6090c42213f706c5943ef27836cae20bf0d9"
+        },
+        {
+          "artifactName": "cycle06-robustness-stable-before.json",
+          "sha256": "cd74bc4e81a43c85c54c06758bc59db157d29246abac62540c31322a75ba60b7"
+        }
+      ]
+    },
+    {
+      "cycle": 7,
+      "summary": "Withhold Finish across incompatible athlete regions. Preserve shared Start; six-phone acceptance falls to 4 of 12 and condition coverage to 6 of 12.",
+      "status": "full-pool-lane-identity-guard-validated-automatic-coverage-reduced",
+      "scores": {
+        "productPracticality": 7.7,
+        "evidenceStrength": 5.9
+      },
+      "scoreComponents": {
+        "productComponents": {
+          "clearPurpose": 1.9,
+          "firstUsefulResult": 1.0,
+          "defensibleTrainingDecision": 0.9,
+          "reviewAndIdentity": 2.0,
+          "continuity": 1.9
+        }
+      },
+      "proofs": [
+        {
+          "artifactName": "cycle07-six-phone-lane-identity.json",
+          "sha256": "556f985ffa39d913a3614a337493f396d25dd6613f895a8d8f6ec3d13d88443d"
+        },
+        {
+          "artifactName": "cycle07-robustness-lane-identity.json",
+          "sha256": "6fce75c13be778fca57799a44cc91ab85a3fffc53099a2cd1a53b7911fe5c2e2"
+        }
+      ]
+    },
+    {
+      "cycle": 8,
+      "summary": "Actual explicit-left selection produces timing and movement/COM results; changing athlete invalidates them without changing the recording or attempt.",
+      "status": "explicit-athlete-resolution-and-source-bound-invalidation-validated",
+      "scores": {
+        "productPracticality": 7.8,
+        "evidenceStrength": 5.9
+      },
+      "scoreComponents": {
+        "productComponents": {
+          "clearPurpose": 1.9,
+          "firstUsefulResult": 1.1,
+          "defensibleTrainingDecision": 0.9,
+          "reviewAndIdentity": 2.0,
+          "continuity": 1.9
+        }
+      },
+      "proofs": [
+        {
+          "artifactName": "cycle08-lane-selection-workflow-native-complete.json",
+          "sha256": "9ac42b7ece227773e6d7f0ce2b4dba6d5373a4967d8730b77b86c23b652197f9"
+        },
+        {
+          "artifactName": "cycle08-lane-selection-workflow.json",
+          "sha256": "ac94eba38fe51259869f0dc16b6696d846a85c50539b88ea8d3838ecf66d9f8a"
+        },
+        {
+          "artifactName": "cycle08-lane-selection-workflow-native.json",
+          "sha256": "75e483246376d74b70e538544d44b051afa9e22b5236a2dd4f2e44d97b0418c3"
+        }
+      ]
+    },
+    {
+      "cycle": 9,
+      "summary": "Fresh default first-test batch accepts 0 of 4 endpoints; guided development batch also accepts 0 of 4. Both Start results require review and neither Finish runs.",
+      "status": "fresh-whole-group-primary-abstains-guided-development-does-not-improve-coverage",
+      "scores": {
+        "productPracticality": 7.7,
+        "evidenceStrength": 6.0
+      },
+      "scoreComponents": {
+        "productComponents": {
+          "clearPurpose": 1.9,
+          "firstUsefulResult": 1.0,
+          "defensibleTrainingDecision": 0.9,
+          "reviewAndIdentity": 2.0,
+          "continuity": 1.9
+        },
+        "evidenceComponents": {
+          "traceability": 2.0,
+          "observableEndpoints": 1.6,
+          "targetCaptureMatch": 0.5,
+          "independentLabelPrecision": 0.7,
+          "captureAndAthleteDiversity": 1.2
+        }
+      },
+      "proofs": [
+        {
+          "artifactName": "cycle09-fresh-default.json",
+          "sha256": "8c0483fdeb0a726730b2062357cb16c36eb5d8fc00dbe8dfd8ed669b2fcb995b"
+        },
+        {
+          "artifactName": "cycle09-guided-development.json",
+          "sha256": "5ae226909b81e7cdd07adc399777359486262a59134d4ee3668d2ae06dd7c492"
+        },
+        {
+          "artifactName": "final-source-observer-a-frozen.json",
+          "sha256": "d1fb16c2714234f889ace6eafdd8cb98cdd63e78692aa2baf170cc8c52efa7d1"
+        },
+        {
+          "artifactName": "final-source-observer-b-frozen.json",
+          "sha256": "41d2b4181c89036f7af8d78e527125514ed6adad5bc1d7a2f1ce1013d47e4c32"
+        },
+        {
+          "artifactName": "final-source-reference-protocol-frozen.json",
+          "sha256": "1363d15060e5d728bee708f180d6feca0c0123b3879015aabbe0b4c4dfdf632b"
+        }
+      ]
+    },
+    {
+      "cycle": 10,
+      "summary": "Direct native Start-frame setup and keyboard selection pass on the real development recording. Reviewed Finish now leads to saving; no post-test detector tuning.",
+      "status": "native-direct-climber-keyboard-recovery-and-local-delivery-checks-passed",
+      "scores": {
+        "productPracticality": 8.0,
+        "evidenceStrength": 6.0
+      },
+      "scoreComponents": {
+        "productComponents": {
+          "clearPurpose": 2.0,
+          "firstUsefulResult": 1.2,
+          "defensibleTrainingDecision": 0.9,
+          "reviewAndIdentity": 2.0,
+          "continuity": 1.9
+        },
+        "evidenceComponents": {
+          "traceability": 2.0,
+          "observableEndpoints": 1.6,
+          "targetCaptureMatch": 0.5,
+          "independentLabelPrecision": 0.7,
+          "captureAndAthleteDiversity": 1.2
+        }
+      },
+      "proofs": [
+        {
+          "artifactName": "cycle10-direct-climber-keyboard-native.json",
+          "sha256": "deb8b4705595c3c6938826497b6e09d48e37c8e26c02452c3d88d5818836d1b7"
+        },
+        {
+          "artifactName": "cycle10-refined-check.log",
+          "sha256": "f82d085359c2674bdb11afe5754fe397d98aeae25c4fbe37cd780c8baa9430ba"
+        },
+        {
+          "artifactName": "cycle10-refined-production-browser.log",
+          "sha256": "aaa9d509dcd603fceaf9c3841efa0de90ad17baeb78f5a8d0d664b963d058c42"
+        },
+        {
+          "artifactName": "cycle10-manual-finish-before.log",
+          "sha256": "cb4bdbfcaee4d54afb7dfac5cf2e16ff7bfe2bb555cf29b189463d2a08cb9c60"
+        }
+      ]
+    }
+  ],
+  "currentFixedRubricScores": {
+    "productPracticality": 8.0,
+    "evidenceStrength": 6.0,
+    "meaning": "Evaluator judgment on its frozen ten-cycle rubric, not a measured percentage of timing correctness."
+  },
+  "separateIndependentClosingReview": {
+    "source": "Independent final_experience agent; rubric and initial grades frozen before reading the cycle ratings.",
+    "initialScores": {
+      "productPracticality": 7.0,
+      "uiWorkflow": 7.5,
+      "projectCode": 7.8,
+      "detectionEvidenceStrength": 4.5
+    },
+    "finalScores": {
+      "productPracticality": 7.2,
+      "uiWorkflow": 7.8,
+      "projectCode": 7.8,
+      "detectionEvidenceStrength": 4.5
+    },
+    "remainingBlockingFinding": "None reported after the reproduced manual-Finish next-action issue was corrected.",
+    "meaning": "A different rubric, reported separately without averaging. Evidence strength 4.5 is not estimated 45% accuracy."
+  },
+  "cohorts": {
+    "sixPrivatePhones": {
+      "meaning": "Existing development recordings. Session, athlete disjointness and stationary capture suitability are not certified; six files do not mean six independent people.",
+      "sources": [
+        {
+          "id": "12.24",
+          "sha256": "b981cc57f8d3d4fe9c57e4e6414f23457ad8bc7eb7cbec5a95c969707d21b333"
+        },
+        {
+          "id": "IMG_8903",
+          "sha256": "eb7bbcb91565cee5b7242f69f085442d260e85ef12cd399fbd21eb60c37ef08c"
+        },
+        {
+          "id": "IMG_9075",
+          "sha256": "12a1189c069d832b6bcb1f38176786a7abd0cbb88da234bc9c0d1e53881602e5"
+        },
+        {
+          "id": "IMG_9076",
+          "sha256": "4b9c8ce7367b0c64970a8df5a0474e385e3e27c7d3eb28f8977bd0b3186f3e8a"
+        },
+        {
+          "id": "IMG_9077",
+          "sha256": "e6fdd0a8db01396342d8ba5a95474d8b4e3f17459f83d9da30dbfeb9c3b571e1"
+        },
+        {
+          "id": "IMG_9199",
+          "sha256": "c906a632d57519e75a8ea95da28a1059a613b7bdb0d63781681b6c71ece8ec26"
+        }
+      ]
+    },
+    "robustness": {
+      "distinctAttempts": 1,
+      "conditions": 6,
+      "conditionsMeaning": "Original, native null reencode, 640/426 long side, and brightness minus/plus 0.12; copied audio, no crop, retime or official-time hints.",
+      "conditionsSourceHashes": [
+        {
+          "id": "phone-original",
+          "sha256": "b981cc57f8d3d4fe9c57e4e6414f23457ad8bc7eb7cbec5a95c969707d21b333"
+        },
+        {
+          "id": "phone-reencode",
+          "sha256": "818d84e03458fe8a27ff64dc5c1a5c44b3dcdf0a6e522c2b4d05ea645dd207f3"
+        },
+        {
+          "id": "phone-longside640",
+          "sha256": "9fd27e66f44c8a22e0c3a79a810dfefa13192b32fc0b875bbde1b6aae4c33177"
+        },
+        {
+          "id": "phone-longside426",
+          "sha256": "764a834760048d38b229ab36f6d2629f758a0b290a3537f51ddf05697de512df"
+        },
+        {
+          "id": "phone-dark",
+          "sha256": "c5b849d1bea7ce69ee85cded60f7263fd9ddb879ecad87a1cc00a0fd75b53f80"
+        },
+        {
+          "id": "phone-bright",
+          "sha256": "14b249ec08dba623199013c080ae429de3b099e83937c9a5302b4413270626ac"
+        }
+      ],
+      "clockScope": {
+        "qualifiedInteriorSeconds": [
+          0,
+          24
+        ],
+        "strictWholeContainerV1": "Failed before predictions: final AAC packet duration changes from 143 to 142 samples at 44.1 kHz.",
+        "prospectiveInteriorV2": "All 724 video PTS, AAC packet DTS/PTS/payloads and decoded PCM hashes match. The one-sample final duration delta lies outside the comparison interval. Whole-container equivalence is not claimed."
+      }
+    },
+    "freshPublic": {
+      "wholeEventUploaderGroups": 1,
+      "originalFiles": 2,
+      "firstChronologicalRaces": 2,
+      "meaning": "Predeclared clip/source-group first test, not proof of named-athlete disjointness from all historical material. Later races cannot replace the first primary.",
+      "sources": [
+        {
+          "id": "n01",
+          "sourceUrl": "https://www.youtube.com/watch?v=RZjqLg426RQ",
+          "sha256": "1a2ebef710fd467e374f61463202d5a88cd15615c9f08c2711645b14993bc14c"
+        },
+        {
+          "id": "n02",
+          "sourceUrl": "https://www.youtube.com/watch?v=BFATGS7y3Cs",
+          "sha256": "0b20fb60aeacc266867339f53b5a82c7c2bf82782811775efd7a2babf9ffe3ac"
+        }
+      ],
+      "currentStatus": "Entire group is development after the original default results.",
+      "referenceFreeze": {
+        "frozenAt": "2026-10-23T17:58:26.490587+00:00",
+        "proof": {
+          "artifactName": "final-source-reference-protocol-frozen.json",
+          "sha256": "1363d15060e5d728bee708f180d6feca0c0123b3879015aabbe0b4c4dfdf632b"
+        },
+        "observerA": {
+          "artifactName": "final-source-observer-a-frozen.json",
+          "sha256": "d1fb16c2714234f889ace6eafdd8cb98cdd63e78692aa2baf170cc8c52efa7d1"
+        },
+        "observerB": {
+          "artifactName": "final-source-observer-b-frozen.json",
+          "sha256": "41d2b4181c89036f7af8d78e527125514ed6adad5bc1d7a2f1ce1013d47e4c32"
+        },
+        "independenceLimit": "Separate prediction-blind AI observations; broad unannotated extraction windows were shared. Not recruited human reviewers.",
+        "references": [
+          {
+            "source": "n01",
+            "event": "apparent screen-right first hand/pad contact",
+            "conservativeUnionSeconds": [
+              35.1,
+              35.3
+            ],
+            "observerASeconds": [
+              35.1,
+              35.24
+            ],
+            "observerBSeconds": [
+              35.1,
+              35.3
+            ],
+            "electricalTriggerOrLightLabel": false
+          },
+          {
+            "source": "n01",
+            "event": "acoustic final cue or visible lower Start light",
+            "status": "unresolved"
+          },
+          {
+            "source": "n02 first race",
+            "event": "acoustic final cue or visible lower Start light",
+            "status": "unresolved"
+          },
+          {
+            "source": "n02 first race",
+            "event": "right apparent pad contact",
+            "status": "off frame / unobservable"
+          }
+        ]
+      },
+      "defaultPrimary": {
+        "proof": {
+          "artifactName": "cycle09-fresh-default.json",
+          "sha256": "8c0483fdeb0a726730b2062357cb16c36eb5d8fc00dbe8dfd8ed669b2fcb995b"
+        },
+        "build": {
+          "schemaVersion": 1,
+          "appVersion": "0.30.0",
+          "commitSha": "b65414ebf1cb41a7156ae44b7b1b59353794c5ae",
+          "workingTreeDirty": false
+        },
+        "browser": "156.0.8078.47",
+        "startedAt": "2026-10-23T18:45:17.652Z",
+        "finishedAt": "2026-10-23T18:46:15.561Z",
+        "automaticEndpoints": 0,
+        "endpointOpportunities": 4,
+        "rows": [
+          {
+            "id": "n01",
+            "sourceSha256": "1a2ebef710fd467e374f61463202d5a88cd15615c9f08c2711645b14993bc14c",
+            "effectiveStartSearchWindowSeconds": [
+              0,
+              12
+            ],
+            "automaticEndpoints": 0,
+            "terminalMilliseconds": 23443.665,
+            "acceptedAutomaticEndpoints": []
+          },
+          {
+            "id": "n02",
+            "sourceSha256": "0b20fb60aeacc266867339f53b5a82c7c2bf82782811775efd7a2babf9ffe3ac",
+            "effectiveStartSearchWindowSeconds": [
+              0,
+              12
+            ],
+            "automaticEndpoints": 0,
+            "terminalMilliseconds": 25640.053,
+            "acceptedAutomaticEndpoints": []
+          }
+        ],
+        "pageErrorCount": 0,
+        "policyViolationCount": 0
+      },
+      "guidedSecondaryDevelopment": {
+        "proof": {
+          "artifactName": "cycle09-guided-development.json",
+          "sha256": "5ae226909b81e7cdd07adc399777359486262a59134d4ee3668d2ae06dd7c492"
+        },
+        "build": {
+          "schemaVersion": 1,
+          "appVersion": "0.30.0",
+          "commitSha": "b65414ebf1cb41a7156ae44b7b1b59353794c5ae",
+          "workingTreeDirty": false
+        },
+        "browser": "156.0.8078.47",
+        "startedAt": "2026-10-23T18:47:07.375Z",
+        "finishedAt": "2026-10-23T18:48:04.962Z",
+        "automaticEndpoints": 0,
+        "endpointOpportunities": 4,
+        "rows": [
+          {
+            "id": "n01",
+            "sourceSha256": "1a2ebef710fd467e374f61463202d5a88cd15615c9f08c2711645b14993bc14c",
+            "effectiveStartSearchWindowSeconds": [
+              23,
+              27
+            ],
+            "automaticEndpoints": 0,
+            "terminalMilliseconds": 22026.5143,
+            "acceptedAutomaticEndpoints": []
+          },
+          {
+            "id": "n02",
+            "sourceSha256": "0b20fb60aeacc266867339f53b5a82c7c2bf82782811775efd7a2babf9ffe3ac",
+            "effectiveStartSearchWindowSeconds": [
+              4,
+              8
+            ],
+            "automaticEndpoints": 0,
+            "terminalMilliseconds": 25622.867899999997,
+            "acceptedAutomaticEndpoints": []
+          }
+        ],
+        "pageErrorCount": 0,
+        "policyViolationCount": 0
+      },
+      "guidedWindowsSeconds": {
+        "n01": [
+          23,
+          27
+        ],
+        "n02": [
+          4,
+          8
+        ]
+      },
+      "timingErrorAndSameEventLocalization": null,
+      "reason": "Start observations are unresolved and Finish is not run; no matching apparent-pad output exists. No physical-event substitution or displayed-total arithmetic."
+    }
+  },
+  "developmentMatrices": {
+    "baseline": {
+      "proof": {
+        "artifactName": "cycle01-six-phone-baseline.json",
+        "sha256": "e8a6887e932970e189ef02b62a483ddb5cca730d0dca50b56608e880dfae2019"
+      },
+      "build": {
+        "schemaVersion": 1,
+        "appVersion": "0.30.0",
+        "commitSha": "3db861ee97902b2ccee279750d5cbbe479d9a2c7",
+        "workingTreeDirty": false
+      },
+      "browser": "156.0.8078.47",
+      "startedAt": "2026-10-23T17:01:28.940Z",
+      "finishedAt": "2026-10-23T17:03:47.210Z",
+      "automaticEndpoints": 5,
+      "endpointOpportunities": 12,
+      "rows": [
+        {
+          "id": "12.24",
+          "sourceSha256": "b981cc57f8d3d4fe9c57e4e6414f23457ad8bc7eb7cbec5a95c969707d21b333",
+          "effectiveStartSearchWindowSeconds": [
+            0,
+            12
+          ],
+          "automaticEndpoints": 2,
+          "terminalMilliseconds": 4698.124,
+          "acceptedAutomaticEndpoints": [
+            {
+              "markerId": "startSignal",
+              "rawTime": 9.4
+            },
+            {
+              "markerId": "finishPad",
+              "rawTime": 21.655
+            }
+          ]
+        },
+        {
+          "id": "IMG_8903",
+          "sourceSha256": "eb7bbcb91565cee5b7242f69f085442d260e85ef12cd399fbd21eb60c37ef08c",
+          "effectiveStartSearchWindowSeconds": [
+            0,
+            12
+          ],
+          "automaticEndpoints": 1,
+          "terminalMilliseconds": 15805.338,
+          "acceptedAutomaticEndpoints": [
+            {
+              "markerId": "startSignal",
+              "rawTime": 4.29
+            }
+          ]
+        },
+        {
+          "id": "IMG_9075",
+          "sourceSha256": "12a1189c069d832b6bcb1f38176786a7abd0cbb88da234bc9c0d1e53881602e5",
+          "effectiveStartSearchWindowSeconds": [
+            0,
+            12
+          ],
+          "automaticEndpoints": 0,
+          "terminalMilliseconds": 12026.961900000002,
+          "acceptedAutomaticEndpoints": []
+        },
+        {
+          "id": "IMG_9076",
+          "sourceSha256": "4b9c8ce7367b0c64970a8df5a0474e385e3e27c7d3eb28f8977bd0b3186f3e8a",
+          "effectiveStartSearchWindowSeconds": [
+            0,
+            12
+          ],
+          "automaticEndpoints": 0,
+          "terminalMilliseconds": 15173.6204,
+          "acceptedAutomaticEndpoints": []
+        },
+        {
+          "id": "IMG_9077",
+          "sourceSha256": "e6fdd0a8db01396342d8ba5a95474d8b4e3f17459f83d9da30dbfeb9c3b571e1",
+          "effectiveStartSearchWindowSeconds": [
+            0,
+            12
+          ],
+          "automaticEndpoints": 0,
+          "terminalMilliseconds": 7907.694999999992,
+          "acceptedAutomaticEndpoints": []
+        },
+        {
+          "id": "IMG_9199",
+          "sourceSha256": "c906a632d57519e75a8ea95da28a1059a613b7bdb0d63781681b6c71ece8ec26",
+          "effectiveStartSearchWindowSeconds": [
+            0,
+            12
+          ],
+          "automaticEndpoints": 2,
+          "terminalMilliseconds": 12050.4041,
+          "acceptedAutomaticEndpoints": [
+            {
+              "markerId": "startSignal",
+              "rawTime": 7.121
+            },
+            {
+              "markerId": "finishPad",
+              "rawTime": 17.472
+            }
+          ]
+        }
+      ],
+      "pageErrorCount": 0,
+      "policyViolationCount": 0
+    },
+    "cycle3": {
+      "proof": {
+        "artifactName": "cycle03-six-phone-chromatic.json",
+        "sha256": "4599716efffeb9d740b0ec1a058aa6681e5e8d7bc71d6d51fa32d69e746f28e8"
+      },
+      "build": {
+        "schemaVersion": 1,
+        "appVersion": "0.30.0",
+        "commitSha": "8a8993c1aed5411584bdf41407d1698c2ad3d65b",
+        "workingTreeDirty": false
+      },
+      "browser": "156.0.8078.47",
+      "startedAt": "2026-10-23T17:30:32.319Z",
+      "finishedAt": "2026-10-23T17:32:59.798Z",
+      "automaticEndpoints": 6,
+      "endpointOpportunities": 12,
+      "rows": [
+        {
+          "id": "12.24",
+          "sourceSha256": "b981cc57f8d3d4fe9c57e4e6414f23457ad8bc7eb7cbec5a95c969707d21b333",
+          "effectiveStartSearchWindowSeconds": [
+            0,
+            12
+          ],
+          "automaticEndpoints": 2,
+          "terminalMilliseconds": 4794.0009,
+          "acceptedAutomaticEndpoints": [
+            {
+              "markerId": "startSignal",
+              "rawTime": 9.4
+            },
+            {
+              "markerId": "finishPad",
+              "rawTime": 21.655
+            }
+          ]
+        },
+        {
+          "id": "IMG_8903",
+          "sourceSha256": "eb7bbcb91565cee5b7242f69f085442d260e85ef12cd399fbd21eb60c37ef08c",
+          "effectiveStartSearchWindowSeconds": [
+            0,
+            12
+          ],
+          "automaticEndpoints": 1,
+          "terminalMilliseconds": 16067.3985,
+          "acceptedAutomaticEndpoints": [
+            {
+              "markerId": "startSignal",
+              "rawTime": 4.29
+            }
+          ]
+        },
+        {
+          "id": "IMG_9075",
+          "sourceSha256": "12a1189c069d832b6bcb1f38176786a7abd0cbb88da234bc9c0d1e53881602e5",
+          "effectiveStartSearchWindowSeconds": [
+            0,
+            12
+          ],
+          "automaticEndpoints": 1,
+          "terminalMilliseconds": 17595.360900000007,
+          "acceptedAutomaticEndpoints": [
+            {
+              "markerId": "startSignal",
+              "rawTime": 8.835
+            }
+          ]
+        },
+        {
+          "id": "IMG_9076",
+          "sourceSha256": "4b9c8ce7367b0c64970a8df5a0474e385e3e27c7d3eb28f8977bd0b3186f3e8a",
+          "effectiveStartSearchWindowSeconds": [
+            0,
+            12
+          ],
+          "automaticEndpoints": 0,
+          "terminalMilliseconds": 14650.402600000001,
+          "acceptedAutomaticEndpoints": []
+        },
+        {
+          "id": "IMG_9077",
+          "sourceSha256": "e6fdd0a8db01396342d8ba5a95474d8b4e3f17459f83d9da30dbfeb9c3b571e1",
+          "effectiveStartSearchWindowSeconds": [
+            0,
+            12
+          ],
+          "automaticEndpoints": 0,
+          "terminalMilliseconds": 7992.128199999992,
+          "acceptedAutomaticEndpoints": []
+        },
+        {
+          "id": "IMG_9199",
+          "sourceSha256": "c906a632d57519e75a8ea95da28a1059a613b7bdb0d63781681b6c71ece8ec26",
+          "effectiveStartSearchWindowSeconds": [
+            0,
+            12
+          ],
+          "automaticEndpoints": 2,
+          "terminalMilliseconds": 12662.807100000005,
+          "acceptedAutomaticEndpoints": [
+            {
+              "markerId": "startSignal",
+              "rawTime": 7.068
+            },
+            {
+              "markerId": "finishPad",
+              "rawTime": 17.472
+            }
+          ]
+        }
+      ],
+      "pageErrorCount": 0,
+      "policyViolationCount": 0
+    },
+    "cycle6": {
+      "proof": {
+        "artifactName": "cycle06-six-phone-stable-before.json",
+        "sha256": "dde62b531ed3c2bf3d72c8e4ec7d6090c42213f706c5943ef27836cae20bf0d9"
+      },
+      "build": {
+        "schemaVersion": 1,
+        "appVersion": "0.30.0",
+        "commitSha": "84c542943c2c9f8d5bf2bb25b4a6f403d5bfb459",
+        "workingTreeDirty": false
+      },
+      "browser": "156.0.8078.47",
+      "startedAt": "2026-10-23T17:59:34.229Z",
+      "finishedAt": "2026-10-23T18:01:55.420Z",
+      "automaticEndpoints": 5,
+      "endpointOpportunities": 12,
+      "rows": [
+        {
+          "id": "12.24",
+          "sourceSha256": "b981cc57f8d3d4fe9c57e4e6414f23457ad8bc7eb7cbec5a95c969707d21b333",
+          "effectiveStartSearchWindowSeconds": [
+            0,
+            12
+          ],
+          "automaticEndpoints": 2,
+          "terminalMilliseconds": 4595.633900000001,
+          "acceptedAutomaticEndpoints": [
+            {
+              "markerId": "startSignal",
+              "rawTime": 9.4
+            },
+            {
+              "markerId": "finishPad",
+              "rawTime": 21.655
+            }
+          ]
+        },
+        {
+          "id": "IMG_8903",
+          "sourceSha256": "eb7bbcb91565cee5b7242f69f085442d260e85ef12cd399fbd21eb60c37ef08c",
+          "effectiveStartSearchWindowSeconds": [
+            0,
+            12
+          ],
+          "automaticEndpoints": 1,
+          "terminalMilliseconds": 15754.110400000001,
+          "acceptedAutomaticEndpoints": [
+            {
+              "markerId": "startSignal",
+              "rawTime": 4.29
+            }
+          ]
+        },
+        {
+          "id": "IMG_9075",
+          "sourceSha256": "12a1189c069d832b6bcb1f38176786a7abd0cbb88da234bc9c0d1e53881602e5",
+          "effectiveStartSearchWindowSeconds": [
+            0,
+            12
+          ],
+          "automaticEndpoints": 0,
+          "terminalMilliseconds": 12592.610699999997,
+          "acceptedAutomaticEndpoints": []
+        },
+        {
+          "id": "IMG_9076",
+          "sourceSha256": "4b9c8ce7367b0c64970a8df5a0474e385e3e27c7d3eb28f8977bd0b3186f3e8a",
+          "effectiveStartSearchWindowSeconds": [
+            0,
+            12
+          ],
+          "automaticEndpoints": 0,
+          "terminalMilliseconds": 14844.3125,
+          "acceptedAutomaticEndpoints": []
+        },
+        {
+          "id": "IMG_9077",
+          "sourceSha256": "e6fdd0a8db01396342d8ba5a95474d8b4e3f17459f83d9da30dbfeb9c3b571e1",
+          "effectiveStartSearchWindowSeconds": [
+            0,
+            12
+          ],
+          "automaticEndpoints": 0,
+          "terminalMilliseconds": 8439.783299999996,
+          "acceptedAutomaticEndpoints": []
+        },
+        {
+          "id": "IMG_9199",
+          "sourceSha256": "c906a632d57519e75a8ea95da28a1059a613b7bdb0d63781681b6c71ece8ec26",
+          "effectiveStartSearchWindowSeconds": [
+            0,
+            12
+          ],
+          "automaticEndpoints": 2,
+          "terminalMilliseconds": 12672.9476,
+          "acceptedAutomaticEndpoints": [
+            {
+              "markerId": "startSignal",
+              "rawTime": 7.068
+            },
+            {
+              "markerId": "finishPad",
+              "rawTime": 17.472
+            }
+          ]
+        }
+      ],
+      "pageErrorCount": 0,
+      "policyViolationCount": 0
+    },
+    "cycle7": {
+      "proof": {
+        "artifactName": "cycle07-six-phone-lane-identity.json",
+        "sha256": "556f985ffa39d913a3614a337493f396d25dd6613f895a8d8f6ec3d13d88443d"
+      },
+      "build": {
+        "schemaVersion": 1,
+        "appVersion": "0.30.0",
+        "commitSha": "bb4f093abf2fdb434620dd66537f1bddfda3db4c",
+        "workingTreeDirty": false
+      },
+      "browser": "156.0.8078.47",
+      "startedAt": "2026-10-23T18:17:25.404Z",
+      "finishedAt": "2026-10-23T18:19:42.120Z",
+      "automaticEndpoints": 4,
+      "endpointOpportunities": 12,
+      "rows": [
+        {
+          "id": "12.24",
+          "sourceSha256": "b981cc57f8d3d4fe9c57e4e6414f23457ad8bc7eb7cbec5a95c969707d21b333",
+          "effectiveStartSearchWindowSeconds": [
+            0,
+            12
+          ],
+          "automaticEndpoints": 1,
+          "terminalMilliseconds": 2866.0937,
+          "acceptedAutomaticEndpoints": [
+            {
+              "markerId": "startSignal",
+              "rawTime": 9.4
+            }
+          ]
+        },
+        {
+          "id": "IMG_8903",
+          "sourceSha256": "eb7bbcb91565cee5b7242f69f085442d260e85ef12cd399fbd21eb60c37ef08c",
+          "effectiveStartSearchWindowSeconds": [
+            0,
+            12
+          ],
+          "automaticEndpoints": 1,
+          "terminalMilliseconds": 15606.696200000002,
+          "acceptedAutomaticEndpoints": [
+            {
+              "markerId": "startSignal",
+              "rawTime": 4.29
+            }
+          ]
+        },
+        {
+          "id": "IMG_9075",
+          "sourceSha256": "12a1189c069d832b6bcb1f38176786a7abd0cbb88da234bc9c0d1e53881602e5",
+          "effectiveStartSearchWindowSeconds": [
+            0,
+            12
+          ],
+          "automaticEndpoints": 0,
+          "terminalMilliseconds": 11766.078099999999,
+          "acceptedAutomaticEndpoints": []
+        },
+        {
+          "id": "IMG_9076",
+          "sourceSha256": "4b9c8ce7367b0c64970a8df5a0474e385e3e27c7d3eb28f8977bd0b3186f3e8a",
+          "effectiveStartSearchWindowSeconds": [
+            0,
+            12
+          ],
+          "automaticEndpoints": 0,
+          "terminalMilliseconds": 14730.646099999998,
+          "acceptedAutomaticEndpoints": []
+        },
+        {
+          "id": "IMG_9077",
+          "sourceSha256": "e6fdd0a8db01396342d8ba5a95474d8b4e3f17459f83d9da30dbfeb9c3b571e1",
+          "effectiveStartSearchWindowSeconds": [
+            0,
+            12
+          ],
+          "automaticEndpoints": 0,
+          "terminalMilliseconds": 8015.329499999993,
+          "acceptedAutomaticEndpoints": []
+        },
+        {
+          "id": "IMG_9199",
+          "sourceSha256": "c906a632d57519e75a8ea95da28a1059a613b7bdb0d63781681b6c71ece8ec26",
+          "effectiveStartSearchWindowSeconds": [
+            0,
+            12
+          ],
+          "automaticEndpoints": 2,
+          "terminalMilliseconds": 12564.876600000003,
+          "acceptedAutomaticEndpoints": [
+            {
+              "markerId": "startSignal",
+              "rawTime": 7.068
+            },
+            {
+              "markerId": "finishPad",
+              "rawTime": 17.472
+            }
+          ]
+        }
+      ],
+      "pageErrorCount": 0,
+      "policyViolationCount": 0
+    }
+  },
+  "conditionMatrices": {
+    "baseline": {
+      "proof": {
+        "artifactName": "robustness-baseline.json",
+        "sha256": "b9168b97f12a3d33e3c6a5fe0646799612e8fb4971e46bf316ab2e3ada13bfc2"
+      },
+      "build": {
+        "schemaVersion": 1,
+        "appVersion": "0.30.0",
+        "commitSha": "3db861ee97902b2ccee279750d5cbbe479d9a2c7",
+        "workingTreeDirty": false
+      },
+      "browser": "156.0.8078.47",
+      "startedAt": "2026-10-23T17:09:11.040Z",
+      "finishedAt": "2026-10-23T17:10:21.843Z",
+      "automaticEndpoints": 11,
+      "endpointOpportunities": 12,
+      "rows": [
+        {
+          "id": "phone-original",
+          "sourceSha256": "b981cc57f8d3d4fe9c57e4e6414f23457ad8bc7eb7cbec5a95c969707d21b333",
+          "effectiveStartSearchWindowSeconds": [
+            0,
+            12
+          ],
+          "automaticEndpoints": 2,
+          "terminalMilliseconds": 4708.18,
+          "acceptedAutomaticEndpoints": [
+            {
+              "markerId": "startSignal",
+              "rawTime": 9.4
+            },
+            {
+              "markerId": "finishPad",
+              "rawTime": 21.655
+            }
+          ]
+        },
+        {
+          "id": "phone-reencode",
+          "sourceSha256": "818d84e03458fe8a27ff64dc5c1a5c44b3dcdf0a6e522c2b4d05ea645dd207f3",
+          "effectiveStartSearchWindowSeconds": [
+            0,
+            12
+          ],
+          "automaticEndpoints": 2,
+          "terminalMilliseconds": 8796.973500000002,
+          "acceptedAutomaticEndpoints": [
+            {
+              "markerId": "startSignal",
+              "rawTime": 9.4
+            },
+            {
+              "markerId": "finishPad",
+              "rawTime": 21.655
+            }
+          ]
+        },
+        {
+          "id": "phone-longside640",
+          "sourceSha256": "9fd27e66f44c8a22e0c3a79a810dfefa13192b32fc0b875bbde1b6aae4c33177",
+          "effectiveStartSearchWindowSeconds": [
+            0,
+            12
+          ],
+          "automaticEndpoints": 2,
+          "terminalMilliseconds": 10354.438299999998,
+          "acceptedAutomaticEndpoints": [
+            {
+              "markerId": "startSignal",
+              "rawTime": 9.4
+            },
+            {
+              "markerId": "finishPad",
+              "rawTime": 21.655
+            }
+          ]
+        },
+        {
+          "id": "phone-longside426",
+          "sourceSha256": "764a834760048d38b229ab36f6d2629f758a0b290a3537f51ddf05697de512df",
+          "effectiveStartSearchWindowSeconds": [
+            0,
+            12
+          ],
+          "automaticEndpoints": 2,
+          "terminalMilliseconds": 12176.023199999996,
+          "acceptedAutomaticEndpoints": [
+            {
+              "markerId": "startSignal",
+              "rawTime": 9.4
+            },
+            {
+              "markerId": "finishPad",
+              "rawTime": 21.655
+            }
+          ]
+        },
+        {
+          "id": "phone-dark",
+          "sourceSha256": "c5b849d1bea7ce69ee85cded60f7263fd9ddb879ecad87a1cc00a0fd75b53f80",
+          "effectiveStartSearchWindowSeconds": [
+            0,
+            12
+          ],
+          "automaticEndpoints": 1,
+          "terminalMilliseconds": 18442.661200000002,
+          "acceptedAutomaticEndpoints": [
+            {
+              "markerId": "startSignal",
+              "rawTime": 9.4
+            }
+          ]
+        },
+        {
+          "id": "phone-bright",
+          "sourceSha256": "14b249ec08dba623199013c080ae429de3b099e83937c9a5302b4413270626ac",
+          "effectiveStartSearchWindowSeconds": [
+            0,
+            12
+          ],
+          "automaticEndpoints": 2,
+          "terminalMilliseconds": 8908.019199999995,
+          "acceptedAutomaticEndpoints": [
+            {
+              "markerId": "startSignal",
+              "rawTime": 9.4
+            },
+            {
+              "markerId": "finishPad",
+              "rawTime": 21.655
+            }
+          ]
+        }
+      ],
+      "pageErrorCount": 0,
+      "policyViolationCount": 0
+    },
+    "cycle3": {
+      "proof": {
+        "artifactName": "cycle03-robustness-chromatic.json",
+        "sha256": "6455c9ce68e3036673bde2d44e8b72dfdbf3e10958c8645a7d824c0f638b7458"
+      },
+      "build": {
+        "schemaVersion": 1,
+        "appVersion": "0.30.0",
+        "commitSha": "8a8993c1aed5411584bdf41407d1698c2ad3d65b",
+        "workingTreeDirty": false
+      },
+      "browser": "156.0.8078.47",
+      "startedAt": "2026-10-23T17:33:11.164Z",
+      "finishedAt": "2026-10-23T17:34:24.788Z",
+      "automaticEndpoints": 11,
+      "endpointOpportunities": 12,
+      "rows": [
+        {
+          "id": "phone-original",
+          "sourceSha256": "b981cc57f8d3d4fe9c57e4e6414f23457ad8bc7eb7cbec5a95c969707d21b333",
+          "effectiveStartSearchWindowSeconds": [
+            0,
+            12
+          ],
+          "automaticEndpoints": 2,
+          "terminalMilliseconds": 4838.9065,
+          "acceptedAutomaticEndpoints": [
+            {
+              "markerId": "startSignal",
+              "rawTime": 9.4
+            },
+            {
+              "markerId": "finishPad",
+              "rawTime": 21.655
+            }
+          ]
+        },
+        {
+          "id": "phone-reencode",
+          "sourceSha256": "818d84e03458fe8a27ff64dc5c1a5c44b3dcdf0a6e522c2b4d05ea645dd207f3",
+          "effectiveStartSearchWindowSeconds": [
+            0,
+            12
+          ],
+          "automaticEndpoints": 2,
+          "terminalMilliseconds": 11678.5952,
+          "acceptedAutomaticEndpoints": [
+            {
+              "markerId": "startSignal",
+              "rawTime": 9.4
+            },
+            {
+              "markerId": "finishPad",
+              "rawTime": 21.655
+            }
+          ]
+        },
+        {
+          "id": "phone-longside640",
+          "sourceSha256": "9fd27e66f44c8a22e0c3a79a810dfefa13192b32fc0b875bbde1b6aae4c33177",
+          "effectiveStartSearchWindowSeconds": [
+            0,
+            12
+          ],
+          "automaticEndpoints": 2,
+          "terminalMilliseconds": 10111.4191,
+          "acceptedAutomaticEndpoints": [
+            {
+              "markerId": "startSignal",
+              "rawTime": 9.4
+            },
+            {
+              "markerId": "finishPad",
+              "rawTime": 21.655
+            }
+          ]
+        },
+        {
+          "id": "phone-longside426",
+          "sourceSha256": "764a834760048d38b229ab36f6d2629f758a0b290a3537f51ddf05697de512df",
+          "effectiveStartSearchWindowSeconds": [
+            0,
+            12
+          ],
+          "automaticEndpoints": 2,
+          "terminalMilliseconds": 12325.7928,
+          "acceptedAutomaticEndpoints": [
+            {
+              "markerId": "startSignal",
+              "rawTime": 9.4
+            },
+            {
+              "markerId": "finishPad",
+              "rawTime": 21.655
+            }
+          ]
+        },
+        {
+          "id": "phone-dark",
+          "sourceSha256": "c5b849d1bea7ce69ee85cded60f7263fd9ddb879ecad87a1cc00a0fd75b53f80",
+          "effectiveStartSearchWindowSeconds": [
+            0,
+            12
+          ],
+          "automaticEndpoints": 1,
+          "terminalMilliseconds": 15836.599900000001,
+          "acceptedAutomaticEndpoints": [
+            {
+              "markerId": "startSignal",
+              "rawTime": 9.4
+            }
+          ]
+        },
+        {
+          "id": "phone-bright",
+          "sourceSha256": "14b249ec08dba623199013c080ae429de3b099e83937c9a5302b4413270626ac",
+          "effectiveStartSearchWindowSeconds": [
+            0,
+            12
+          ],
+          "automaticEndpoints": 2,
+          "terminalMilliseconds": 11727.795700000002,
+          "acceptedAutomaticEndpoints": [
+            {
+              "markerId": "startSignal",
+              "rawTime": 9.4
+            },
+            {
+              "markerId": "finishPad",
+              "rawTime": 21.655
+            }
+          ]
+        }
+      ],
+      "pageErrorCount": 0,
+      "policyViolationCount": 0
+    },
+    "cycle6": {
+      "proof": {
+        "artifactName": "cycle06-robustness-stable-before.json",
+        "sha256": "cd74bc4e81a43c85c54c06758bc59db157d29246abac62540c31322a75ba60b7"
+      },
+      "build": {
+        "schemaVersion": 1,
+        "appVersion": "0.30.0",
+        "commitSha": "84c542943c2c9f8d5bf2bb25b4a6f403d5bfb459",
+        "workingTreeDirty": false
+      },
+      "browser": "156.0.8078.47",
+      "startedAt": "2026-10-23T18:02:29.395Z",
+      "finishedAt": "2026-10-23T18:03:45.178Z",
+      "automaticEndpoints": 11,
+      "endpointOpportunities": 12,
+      "rows": [
+        {
+          "id": "phone-original",
+          "sourceSha256": "b981cc57f8d3d4fe9c57e4e6414f23457ad8bc7eb7cbec5a95c969707d21b333",
+          "effectiveStartSearchWindowSeconds": [
+            0,
+            12
+          ],
+          "automaticEndpoints": 2,
+          "terminalMilliseconds": 4977.6293000000005,
+          "acceptedAutomaticEndpoints": [
+            {
+              "markerId": "startSignal",
+              "rawTime": 9.4
+            },
+            {
+              "markerId": "finishPad",
+              "rawTime": 21.655
+            }
+          ]
+        },
+        {
+          "id": "phone-reencode",
+          "sourceSha256": "818d84e03458fe8a27ff64dc5c1a5c44b3dcdf0a6e522c2b4d05ea645dd207f3",
+          "effectiveStartSearchWindowSeconds": [
+            0,
+            12
+          ],
+          "automaticEndpoints": 2,
+          "terminalMilliseconds": 12710.9524,
+          "acceptedAutomaticEndpoints": [
+            {
+              "markerId": "startSignal",
+              "rawTime": 9.4
+            },
+            {
+              "markerId": "finishPad",
+              "rawTime": 21.655
+            }
+          ]
+        },
+        {
+          "id": "phone-longside640",
+          "sourceSha256": "9fd27e66f44c8a22e0c3a79a810dfefa13192b32fc0b875bbde1b6aae4c33177",
+          "effectiveStartSearchWindowSeconds": [
+            0,
+            12
+          ],
+          "automaticEndpoints": 2,
+          "terminalMilliseconds": 10203.6168,
+          "acceptedAutomaticEndpoints": [
+            {
+              "markerId": "startSignal",
+              "rawTime": 9.4
+            },
+            {
+              "markerId": "finishPad",
+              "rawTime": 21.655
+            }
+          ]
+        },
+        {
+          "id": "phone-longside426",
+          "sourceSha256": "764a834760048d38b229ab36f6d2629f758a0b290a3537f51ddf05697de512df",
+          "effectiveStartSearchWindowSeconds": [
+            0,
+            12
+          ],
+          "automaticEndpoints": 2,
+          "terminalMilliseconds": 12279.189700000003,
+          "acceptedAutomaticEndpoints": [
+            {
+              "markerId": "startSignal",
+              "rawTime": 9.4
+            },
+            {
+              "markerId": "finishPad",
+              "rawTime": 21.655
+            }
+          ]
+        },
+        {
+          "id": "phone-dark",
+          "sourceSha256": "c5b849d1bea7ce69ee85cded60f7263fd9ddb879ecad87a1cc00a0fd75b53f80",
+          "effectiveStartSearchWindowSeconds": [
+            0,
+            12
+          ],
+          "automaticEndpoints": 1,
+          "terminalMilliseconds": 16208.526599999997,
+          "acceptedAutomaticEndpoints": [
+            {
+              "markerId": "startSignal",
+              "rawTime": 9.4
+            }
+          ]
+        },
+        {
+          "id": "phone-bright",
+          "sourceSha256": "14b249ec08dba623199013c080ae429de3b099e83937c9a5302b4413270626ac",
+          "effectiveStartSearchWindowSeconds": [
+            0,
+            12
+          ],
+          "automaticEndpoints": 2,
+          "terminalMilliseconds": 11877.9758,
+          "acceptedAutomaticEndpoints": [
+            {
+              "markerId": "startSignal",
+              "rawTime": 9.4
+            },
+            {
+              "markerId": "finishPad",
+              "rawTime": 21.655
+            }
+          ]
+        }
+      ],
+      "pageErrorCount": 0,
+      "policyViolationCount": 0
+    },
+    "cycle7": {
+      "proof": {
+        "artifactName": "cycle07-robustness-lane-identity.json",
+        "sha256": "6fce75c13be778fca57799a44cc91ab85a3fffc53099a2cd1a53b7911fe5c2e2"
+      },
+      "build": {
+        "schemaVersion": 1,
+        "appVersion": "0.30.0",
+        "commitSha": "bb4f093abf2fdb434620dd66537f1bddfda3db4c",
+        "workingTreeDirty": false
+      },
+      "browser": "156.0.8078.47",
+      "startedAt": "2026-10-23T18:20:37.812Z",
+      "finishedAt": "2026-10-23T18:21:06.230Z",
+      "automaticEndpoints": 6,
+      "endpointOpportunities": 12,
+      "rows": [
+        {
+          "id": "phone-original",
+          "sourceSha256": "b981cc57f8d3d4fe9c57e4e6414f23457ad8bc7eb7cbec5a95c969707d21b333",
+          "effectiveStartSearchWindowSeconds": [
+            0,
+            12
+          ],
+          "automaticEndpoints": 1,
+          "terminalMilliseconds": 3016.9123999999997,
+          "acceptedAutomaticEndpoints": [
+            {
+              "markerId": "startSignal",
+              "rawTime": 9.4
+            }
+          ]
+        },
+        {
+          "id": "phone-reencode",
+          "sourceSha256": "818d84e03458fe8a27ff64dc5c1a5c44b3dcdf0a6e522c2b4d05ea645dd207f3",
+          "effectiveStartSearchWindowSeconds": [
+            0,
+            12
+          ],
+          "automaticEndpoints": 1,
+          "terminalMilliseconds": 3157.6088999999993,
+          "acceptedAutomaticEndpoints": [
+            {
+              "markerId": "startSignal",
+              "rawTime": 9.4
+            }
+          ]
+        },
+        {
+          "id": "phone-longside640",
+          "sourceSha256": "9fd27e66f44c8a22e0c3a79a810dfefa13192b32fc0b875bbde1b6aae4c33177",
+          "effectiveStartSearchWindowSeconds": [
+            0,
+            12
+          ],
+          "automaticEndpoints": 1,
+          "terminalMilliseconds": 2959.9897999999994,
+          "acceptedAutomaticEndpoints": [
+            {
+              "markerId": "startSignal",
+              "rawTime": 9.4
+            }
+          ]
+        },
+        {
+          "id": "phone-longside426",
+          "sourceSha256": "764a834760048d38b229ab36f6d2629f758a0b290a3537f51ddf05697de512df",
+          "effectiveStartSearchWindowSeconds": [
+            0,
+            12
+          ],
+          "automaticEndpoints": 1,
+          "terminalMilliseconds": 4683.309699999998,
+          "acceptedAutomaticEndpoints": [
+            {
+              "markerId": "startSignal",
+              "rawTime": 9.4
+            }
+          ]
+        },
+        {
+          "id": "phone-dark",
+          "sourceSha256": "c5b849d1bea7ce69ee85cded60f7263fd9ddb879ecad87a1cc00a0fd75b53f80",
+          "effectiveStartSearchWindowSeconds": [
+            0,
+            12
+          ],
+          "automaticEndpoints": 1,
+          "terminalMilliseconds": 3540.611000000001,
+          "acceptedAutomaticEndpoints": [
+            {
+              "markerId": "startSignal",
+              "rawTime": 9.4
+            }
+          ]
+        },
+        {
+          "id": "phone-bright",
+          "sourceSha256": "14b249ec08dba623199013c080ae429de3b099e83937c9a5302b4413270626ac",
+          "effectiveStartSearchWindowSeconds": [
+            0,
+            12
+          ],
+          "automaticEndpoints": 1,
+          "terminalMilliseconds": 3549.3102,
+          "acceptedAutomaticEndpoints": [
+            {
+              "markerId": "startSignal",
+              "rawTime": 9.4
+            }
+          ]
+        }
+      ],
+      "pageErrorCount": 0,
+      "policyViolationCount": 0
+    }
+  },
+  "latencyQualification": {
+    "sixPhoneFixedBaselineMedianMilliseconds": 12038.683,
+    "conditionFixedBaselineMedianMilliseconds": 9631.22875,
+    "singlePassRows": [
+      {
+        "cycle": 3,
+        "sixPhoneMedianMilliseconds": 13656.604850000003,
+        "conditionMedianMilliseconds": 11703.195450000001
+      },
+      {
+        "cycle": 6,
+        "sixPhoneMedianMilliseconds": 12632.779149999998,
+        "conditionMedianMilliseconds": 12078.582750000001
+      },
+      {
+        "cycle": 7,
+        "sixPhoneMedianMilliseconds": 12165.477350000001,
+        "conditionMedianMilliseconds": 3349.10995
+      }
+    ],
+    "cycle7TerminalProxyScores": {
+      "sixPhones": 4.924423218720761,
+      "conditions": 10,
+      "finishWorkNotPerformed": true,
+      "equivalentWorkTimingScore": null
+    },
+    "meaning": "Single passes, not repeated throughput gains. Cycle3 also contains an invalid accepted terminal state. No headline performance or accuracy score is inferred."
+  },
+  "nativeIntentResolution": {
+    "cycle8": {
+      "proof": {
+        "artifactName": "cycle08-lane-selection-workflow-native-complete.json",
+        "sha256": "9ac42b7ece227773e6d7f0ce2b4dba6d5373a4967d8730b77b86c23b652197f9"
+      },
+      "build": {
+        "schemaVersion": 1,
+        "appVersion": "0.30.0",
+        "commitSha": "b65414ebf1cb41a7156ae44b7b1b59353794c5ae",
+        "workingTreeDirty": false
+      },
+      "verificationStagesPassed": 10,
+      "leftTimingAutomatedMilliseconds": 8978.639,
+      "fullAnalysisAutomatedMilliseconds": 23098.0391,
+      "movementRawTime": 9.567,
+      "finishRawTime": 21.655,
+      "computedComFrames": 62,
+      "usableComFrames": 32,
+      "trackingQuality": "Needs review",
+      "hold10": null,
+      "actualPopulatedBeforeAthleteChange": {
+        "movement": true,
+        "firstHold": false,
+        "hold10": false,
+        "finish": true,
+        "COM": true
+      },
+      "invalidationPreserves": "Shared Start, original native source, input hash, session and lineage.",
+      "browserVersion": "Not explicitly recorded in this individual artifact."
+    },
+    "cycle10": {
+      "proof": {
+        "artifactName": "cycle10-direct-climber-keyboard-native.json",
+        "sha256": "deb8b4705595c3c6938826497b6e09d48e37c8e26c02452c3d88d5818836d1b7"
+      },
+      "build": {
+        "schemaVersion": 1,
+        "appVersion": "0.30.0",
+        "commitSha": "8102b51f6466979b2e63f10159e69c210f00db5f",
+        "workingTreeDirty": false
+      },
+      "browser": "156.0.8078.47",
+      "viewport": {
+        "width": 1440,
+        "height": 1050
+      },
+      "verificationStagesPassed": 9,
+      "acceptedStartCursorSeconds": 9.4,
+      "nativePresentationSeconds": 9.38,
+      "nativeFrameDurationSeconds": 0.033333,
+      "capturedImageMatchesNativePixels": true,
+      "keyboardPath": "Tab, type four percentage edges, Enter to Apply.",
+      "leftTimingAutomatedMilliseconds": 7961.7743,
+      "finishRawTime": 21.655,
+      "operationalTotalSeconds": 12.255,
+      "fullAnalysisRepeated": false,
+      "actualPopulatedBeforeAthleteChange": {
+        "movement": false,
+        "firstHold": false,
+        "hold10": false,
+        "finish": true,
+        "COM": false
+      },
+      "pageErrorCount": 0,
+      "policyViolationCount": 0
+    },
+    "meaning": "Legacy source clocks are operational anchors. Scripted durations are not human correction times, event error or independent accuracy; cycle8 retains the populated movement/COM proof."
+  },
+  "verificationOn8102b51": {
+    "unitPassed": 1131,
+    "explicitExpectedFailures": 5,
+    "testFilesPassed": 107,
+    "productionChromiumDesktopAndPhonePassed": 52,
+    "typecheckBuildCoachingSmoke": "passed",
+    "proofs": [
+      {
+        "artifactName": "cycle10-refined-check.log",
+        "sha256": "f82d085359c2674bdb11afe5754fe397d98aeae25c4fbe37cd780c8baa9430ba"
+      },
+      {
+        "artifactName": "cycle10-refined-production-browser.log",
+        "sha256": "aaa9d509dcd603fceaf9c3841efa0de90ad17baeb78f5a8d0d664b963d058c42"
+      }
+    ],
+    "generatedDualLaneFixture": "Original CC0 geometry/audio for workflow, cancellation and invalid-input controls only; no field accuracy credit."
+  },
+  "failureHistory": [
+    "Original baseline already rejected IMG9075 automatic Start. Cycle3 introduced the shoe acceptance and cycle6 removed it; this is not new recall or precision over baseline on that case.",
+    "IMG9199 Start shifts from 7.121 to 7.068 while Finish remains 17.472. Its bottom-edge floor/diffuse cue identity is unverified.",
+    "Dense Finish parity gains no real candidates and produces three new High flat-cut proposals; both quantization variants fail registered criteria and are not released.",
+    "Cycle8 preserves the failed CSP blob-fetch and hidden-control harness reports. The successful native run changes neither production CSP nor app behavior to bypass them.",
+    "An independent cycle10 review reproduces a manual-Finish next-action bug before the UI-only 8102b51 correction. The failed proof and successful regression remain referenced.",
+    "RGB-only entering-object hardware identity and four quantization cases remain five explicit expected failures. No perfect general rejection claim."
+  ],
+  "limits": [
+    "No recruited independent human study, exact sensor-trigger accuracy or calibrated camera/audio delay.",
+    "No population false-acceptance rate, human correction-time benefit, training-decision benefit, voluntary return or actual iPhone field validation.",
+    "Public availability is not redistribution permission. Downloaded media remains outside Git.",
+    "No absolute local paths, signed media URLs, private pixel/landmark arrays or PCM payloads are published here.",
+    "This derivative supplies artifact hashes and selected observations, not a replayable raw evidence bundle."
+  ]
+}
