@@ -256,6 +256,7 @@ export function analyzeTopFinishFrames(
   const baselineCount = Math.min(8, Math.max(4, Math.floor(frames.length * 0.14)));
   const globalColors = frames.map(averageFrame);
   const globalBaseline = averageRgb(globalColors.slice(0, baselineCount));
+  const globalExposureChanges = globalColors.map(color => computeColorDistance(color, globalBaseline) * 0.95);
   const structuralChangeRatios = frames.map((frame, index) => frameWideStructuralChangeRatio(
     frames[0],
     frame,
@@ -286,13 +287,14 @@ export function analyzeTopFinishFrames(
         const colors = frames.map((frame) => averagePatch(frame, x, y, radius));
         const baseline = averageRgb(colors.slice(0, baselineCount));
         const baselineDistances = colors.slice(0, baselineCount).map((color) => computeColorDistance(color, baseline));
-        const baselineMad = median(baselineDistances.map((value) => Math.abs(value - median(baselineDistances))));
-        const threshold = Math.max(8, median(baselineDistances) + baselineMad * 4 + 4);
+        const baselineDistanceMedian = median(baselineDistances);
+        const baselineMad = median(baselineDistances.map((value) => Math.abs(value - baselineDistanceMedian)));
+        const threshold = Math.max(8, baselineDistanceMedian + baselineMad * 4 + 4);
         const correctedChanges = colors.map((color, index) =>
           // A phone's auto-exposure can brighten the complete upward-looking
           // frame by dozens of RGB levels. Remove nearly all frame-wide change;
           // a real indicator still retains its localized chromatic residual.
-          computeColorDistance(color, baseline) - computeColorDistance(globalColors[index], globalBaseline) * 0.95,
+          computeColorDistance(color, baseline) - globalExposureChanges[index],
         );
 
         for (let index = baselineCount; index < frames.length - 3; index += 1) {
