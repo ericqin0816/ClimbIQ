@@ -126,54 +126,58 @@ export default function ComparisonPlayback({ baseline, candidate, preferredPhase
     void Promise.all(SIDES.map(side => attach(side, undefined, true)));
   }
 
-  async function position(nextPhase: ComparisonPhase, time: number, play: boolean) {
+  async function position(nextPhase: ComparisonPhase, time: number, play: boolean, reveal = true) {
     pause();
     completedSides.current.clear();
     const token = operation.current;
     const pair = { baseline: comparisonPlaybackRange(baseline, nextPhase), candidate: comparisonPlaybackRange(candidate, nextPhase) };
-    if (SIDES.some(side => loading[side]) || !SIDES.every(side => confirmed[side] && ready[side] && pair[side])) return;
-    if (play) document.getElementById("comparison-replay")?.scrollIntoView({ block: "start", behavior: "instant" });
+    const pairPlayers = { ...players.current };
+    const pairSources = { baseline: pairPlayers.baseline?.src, candidate: pairPlayers.candidate?.src };
+    if (SIDES.some(side => loading[side]) || !SIDES.every(side => confirmed[side] && ready[side] && pair[side] &&
+      pairPlayers[side] && pairSources[side] === sources.current[side]?.objectUrl)) return;
+    const current = () => operation.current === token && SIDES.every(side =>
+      players.current[side] === pairPlayers[side] && pairPlayers[side]!.src === pairSources[side] &&
+      sources.current[side]?.objectUrl === pairSources[side]);
+    const end = Math.max(...SIDES.map(side => pair[side]!.end - pair[side]!.start));
+    const positionTime = Math.max(0, Math.min(time, end));
+    for (const side of SIDES) if (positionTime >= pair[side]!.end - pair[side]!.start) completedSides.current.add(side);
+    if (play && reveal) document.getElementById("comparison-replay")?.scrollIntoView({ block: "start", behavior: "instant" });
     setSeeking(true);
     setPhase(nextPhase);
     setMessage("");
     try {
-      await Promise.all(SIDES.map(side => seekTo(players.current[side]!, comparisonPlaybackTime(pair[side]!, time))));
-      if (operation.current !== token) return;
-      setElapsed(time);
-      if (!play) { setSeeking(false); return; }
-      await Promise.all(SIDES.map(side => players.current[side]!.play()));
+      await Promise.all(SIDES.map(side => seekTo(pairPlayers[side]!, comparisonPlaybackTime(pair[side]!, positionTime), { exact: true })));
+      if (!current()) return;
+      setElapsed(positionTime);
+      if (!play || completedSides.current.size === SIDES.length) { setSeeking(false); return; }
+      await Promise.all(SIDES.filter(side => !completedSides.current.has(side)).map(side => pairPlayers[side]!.play()));
       // Pause/replacement already cancelled this owner. A late play promise must
       // never pause a newer replay using these players.
-      if (operation.current !== token) return;
+      if (!current()) return;
       setSeeking(false);
       playbackActive.current = true;
       setPlaying(true);
-      const started = performance.now() - time * 1000;
-      const end = Math.max(...SIDES.map(side => pair[side]!.end - pair[side]!.start));
+      const started = performance.now() - positionTime * 1000;
       const tick = () => {
-        if (operation.current !== token) return;
+        if (!current()) return;
         const seconds = Math.min(end, (performance.now() - started) / 1000);
         setElapsed(seconds);
-        for (const side of SIDES) {
-          const video = players.current[side]!;
-          const target = comparisonPlaybackTime(pair[side]!, seconds);
-          if (seconds >= pair[side]!.end - pair[side]!.start) {
-            if (!completedSides.current.has(side)) {
-              completedSides.current.add(side);
-              video.pause();
-              video.currentTime = pair[side]!.end;
-            }
-          } else if (Math.abs(video.currentTime - target) > 0.12) video.currentTime = target;
+        const boundaryReached = SIDES.some(side => !completedSides.current.has(side) &&
+          seconds >= pair[side]!.end - pair[side]!.start);
+        const correctionNeeded = SIDES.some(side => !completedSides.current.has(side) &&
+          Math.abs(pairPlayers[side]!.currentTime - comparisonPlaybackTime(pair[side]!, seconds)) > 0.12);
+        if (seconds >= end || boundaryReached || correctionNeeded) {
+          // Seeking active players can itself emit waiting at readyState 1.
+          // Give the pair one paused preparation owner, preserve elapsed time
+          // while decoding, and resume only sides that have not finished.
+          void position(nextPhase, seconds, seconds < end, false);
+          return;
         }
-        if (seconds < end) frame.current = requestAnimationFrame(tick);
-        else {
-          pause();
-          for (const side of SIDES) players.current[side]!.currentTime = pair[side]!.end;
-        }
+        frame.current = requestAnimationFrame(tick);
       };
       frame.current = requestAnimationFrame(tick);
     } catch (error) {
-      if (operation.current === token) {
+      if (current()) {
         pause();
         setMessage(error instanceof Error ? error.message : "Playback stopped. Try replaying this section.");
       }

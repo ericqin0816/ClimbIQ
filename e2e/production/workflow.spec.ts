@@ -245,6 +245,64 @@ test("the shorter phase stops exactly at its reviewed endpoint while the other c
   await page.evaluate(() => { (window as any).__phaseEndpointProbe.active = false; });
 });
 
+test("native replay lag is corrected with both players paused before seeking and then resumes", async ({ page }, testInfo) => {
+  test.skip(process.platform === "win32" && testInfo.project.name.startsWith("webkit"), "Native replay correction runs on macOS WebKit CI.");
+  await prepareReplay(page);
+  await page.evaluate(() => {
+    const videos = Array.from(document.querySelectorAll<HTMLVideoElement>(".comparison-players video"));
+    const replay = Array.from(document.querySelectorAll<HTMLButtonElement>("#comparison-replay button"))
+      .find(button => button.textContent === "Replay bottom phase");
+    if (!replay) throw new Error("Bottom phase replay is unavailable.");
+    const probe = { controlledPause: false, correctionSeeks: 0, activeSeek: false, resumed: false,
+      firstPlayingTimes: null as number[] | null, resumedTimes: null as number[] | null, samples: [] as unknown[], error: "" };
+    (window as any).__nativeCorrectionProbe = probe;
+    const descriptor = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, "currentTime")!;
+    Object.defineProperty(HTMLMediaElement.prototype, "currentTime", { ...descriptor, set(this: HTMLMediaElement, value: number) {
+      if (probe.controlledPause && videos.includes(this as HTMLVideoElement)) {
+        probe.correctionSeeks++;
+        probe.activeSeek ||= videos.some(video => !video.paused);
+      }
+      descriptor.set!.call(this, value);
+    } });
+    replay.addEventListener("click", () => {
+      const started = performance.now();
+      const observe = () => {
+        const playing = /· Playing$/.test(document.querySelector(".comparison-playback-status")?.textContent?.trim() ?? "");
+        const ready = videos.length === 2 && videos.every(video => !video.paused && !video.seeking && video.readyState >= 3);
+        if (!probe.controlledPause && playing && ready) {
+          probe.firstPlayingTimes ??= videos.map(video => video.currentTime);
+          if (videos.every((video, index) => video.currentTime > probe.firstPlayingTimes![index] + .08)) {
+            // Controlled native lag, not a network-starvation or accuracy test.
+            // Media clocks, native decoding and rAF remain untouched. Let the
+            // real synchronization loop detect and correct this paused side.
+            probe.controlledPause = true;
+            videos[0].pause();
+          }
+        } else if (probe.controlledPause && probe.correctionSeeks > 0 && playing && ready) {
+          probe.resumedTimes ??= videos.map(video => video.currentTime);
+          probe.resumed ||= videos.every((video, index) => video.currentTime > probe.resumedTimes![index] + .08);
+        }
+        if (probe.samples.length < 600) probe.samples.push({ elapsedMs: performance.now() - started,
+          videos: videos.map(video => ({ time: video.currentTime, paused: video.paused, seeking: video.seeking, ready: video.readyState })) });
+        if (!probe.resumed && performance.now() - started < 8000) requestAnimationFrame(observe);
+        else if (!probe.resumed) probe.error = "The real pair did not resume native progress after controlled lag.";
+      };
+      requestAnimationFrame(observe);
+    }, { once: true });
+  });
+  await page.getByRole("button", { name: "Replay bottom phase", exact: true }).click();
+  await expect.poll(() => page.evaluate(() => {
+    const p = (window as any).__nativeCorrectionProbe;
+    return { controlledPause: p.controlledPause, corrected: p.correctionSeeks > 0, activeSeek: p.activeSeek, resumed: p.resumed, error: p.error };
+  })).toEqual({ controlledPause: true, corrected: true, activeSeek: false, resumed: true, error: "" });
+  await expect(page.locator("#comparison-replay [role=alert]")).toHaveCount(0);
+  await expect.poll(() => page.locator(".comparison-players video").evaluateAll(videos => {
+    const [baseline, candidate] = videos as HTMLVideoElement[];
+    return baseline.paused && candidate.paused && !baseline.seeking && !candidate.seeking &&
+      Math.abs(candidate.currentTime - 3.3) < .005 && Math.abs(baseline.currentTime - 3.8) < .005;
+  })).toBe(true);
+});
+
 test("recovered waiting notices preserve replay and current unready data requires explicit replay", async ({ page }, testInfo) => {
   test.skip(process.platform === "win32" && testInfo.project.name.startsWith("webkit"), "Media readiness regression runs on macOS WebKit CI.");
   await prepareReplay(page);

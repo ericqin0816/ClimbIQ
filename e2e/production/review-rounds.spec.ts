@@ -14,9 +14,15 @@ test("manual timing reaches native review without preaccepting missing markers",
   await expect(page.locator(".video-meta-line")).toContainText("Ready");
   const start = page.locator("#timing-markers tbody tr").filter({ hasText: "Start Signal" });
   const hold = page.locator("#timing-markers tbody tr").filter({ hasText: "Hold 10" });
-  // Native controls are browser-owned; seek the real decoder and wait for its
-  // presented frame rather than forcing a review clock or hidden mobile input.
-  const seek = (time: number) => page.locator("#video-review video").evaluate((video: HTMLVideoElement, target) => { video.pause(); video.currentTime = target; }, time);
+  // Use the shipped precise navigation, which waits for the opening frame.
+  // A direct setter can race the review's pending initial seek and does not
+  // verify that a person can reach the intended native frame on a phone.
+  const seek = async (time: number) => {
+    await page.getByRole("button", { name: "Jump to time", exact: true }).click();
+    const field = page.getByLabel("Raw video time (seconds)", { exact: true });
+    await field.fill(String(time));
+    await field.press("Enter");
+  };
   const manual = page.getByRole("button", { name: "Review timing manually", exact: true });
   await manual.click();
   await expect(page.locator(".timestamp-review")).toContainText("Leave Start unset if the signal is missing");
@@ -45,7 +51,7 @@ test("manual timing reaches native review without preaccepting missing markers",
   await acceptStart.click();
   await page.getByRole("button", { name: "Review finish", exact: true }).click();
   await seek(6.6);
-  const acceptFinish = page.getByRole("button", { name: /^Set reviewed finish at 6\.600s/ });
+  const acceptFinish = page.getByRole("button", { name: /^Accept finish at 6\.600s/ });
   await expect(acceptFinish).toBeEnabled();
   await acceptFinish.click();
   await expect(page.locator("#results .summary-primary-metric strong")).toHaveText("5.600s");

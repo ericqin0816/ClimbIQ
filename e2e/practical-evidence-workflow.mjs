@@ -17,6 +17,15 @@ const pendingJump = process.argv.includes("--pending-jump");
 const exerciseStepCursor = process.argv.includes("--step-cursor");
 const finishCursor = Number(argument("finish") ?? "14.2");
 const expectedFrameInterval = argument("expected-frame-interval") === undefined ? null : Number(argument("expected-frame-interval"));
+const sessionNote = argument("session-note");
+const sourceBracket = name => {
+  if (argument(name) === undefined) return null;
+  const bounds = argument(name).split(",").map(Number);
+  assert.ok(bounds.length === 2 && bounds.every(Number.isFinite) && bounds[0] <= bounds[1] && finishAndSave,
+    `${name} requires --finish-and-save and two ordered finite source times.`);
+  return bounds;
+};
+const startBracket = sourceBracket("start-bracket"), finishBracket = sourceBracket("finish-bracket");
 assert.ok(argument("file"), "Supply an actual local recording with --file.");
 assert.ok(Number.isFinite(requestedCursor) && requestedCursor >= 0);
 assert.ok(heights.every(height => Number.isInteger(height) && height >= 400));
@@ -32,6 +41,7 @@ const report = {
     : "Real-file native manual-review navigation. Supplied cursor is an operational input, not an event label. No detector inference, event acceptance, human search time, or training decision is measured.",
   appUrl, fileName: path.basename(file), sourceSha256: createHash("sha256").update(await readFile(file)).digest("hex"), requestedCursor,
   finishAndSave, exerciseStepCursor, pendingJump, expectedFrameInterval,
+  sourceObservationBrackets: { start: startBracket, finish: finishBracket, isCalibratedEventTruth: false }, sessionNote,
   cases: [],
 };
 let owner, browser, page;
@@ -139,6 +149,13 @@ try {
       await action("Accept operational native Finish frame", () => page.locator(".timestamp-review-actions .primary").click());
       await expect(page.locator(".timestamp-review")).toHaveCount(0);
       await action("Follow Save this attempt", () => page.getByRole("link", { name: "Save this attempt", exact: true }).click());
+      if (sessionNote) {
+        const notes = page.getByRole("textbox", { name: "Notes", exact: true, includeHidden: true });
+        for (const details of await notes.locator("xpath=ancestor::details").all()) if (await details.getAttribute("open") === null) {
+          await action("Open session note details", () => details.locator(":scope > summary").click(), true);
+        }
+        await action("Record source observation and lane limitations", () => notes.fill(sessionNote), true);
+      }
       await action("Save manually reviewed attempt", () => page.getByRole("button", { name: "Save Session", exact: true }).click());
       await expect.poll(async () => (await library()).length).toBe(1);
       const saved = (await library())[0];
@@ -150,10 +167,21 @@ try {
       assert.equal(finish.acceptanceMode, "frame-review");
       // The shared manual policy stores the accepted native frame in this
       // legacy field. It must not record the unverified initial cursor instead.
-      assert.equal(finish.detectedRawTime, finish.rawTime);
+      assert.ok(typeof finish.detectedRawTime === "number" && Math.abs(finish.detectedRawTime - finish.rawTime) <= .00051,
+        "The legacy native-frame field must match the saved millisecond-rounded point.");
       assert.notEqual(finish.detectedRawTime, item.initialFinishCursor);
       assert.equal(finish.offsetApplied, 0);
       assert.equal(item.savedMarkers.find(marker => marker.id === "startSignal").rawTime, item.acceptedStart);
+      item.savedSessionNote = saved.notes;
+      if (sessionNote) assert.equal(saved.notes, sessionNote);
+      for (const [id, bracket] of [["startSignal", startBracket], ["finishPad", finishBracket]]) if (bracket) {
+        const marker = item.savedMarkers.find(item => item.id === id);
+        const nativePoint = marker.detectedRawTime;
+        assert.ok(typeof nativePoint === "number" && nativePoint >= bracket[0] && nativePoint <= bracket[1],
+          `Saved ${id} presented-frame point must lie within its frozen source-observation bracket.`);
+        assert.ok(marker.rawTime >= bracket[0] - .001 && marker.rawTime <= bracket[1] + .001,
+          "Displayed/saved millisecond rounding must remain consistent with the source point.");
+      }
       if (expectedFrameInterval !== null) for (const id of ["startSignal", "finishPad"]) {
         const marker = item.savedMarkers.find(item => item.id === id);
         assert.ok(typeof marker.observationIntervalSeconds === "number" &&
