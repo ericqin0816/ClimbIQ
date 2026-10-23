@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "date": "2026-10-23",
   "title": "Detection expansion: ten sequential experiments",
-  "status": "In progress: rounds 1-9 completed, including retained failures and a separately registered partial audio follow-up. Round 10 whole-app evidence pending.",
+  "status": "Completed: all ten sequential experiments have actual retained evidence, including rejected hypotheses and unresolved failures. Automatic endpoint coverage on the original six phones is unchanged.",
   "baselineCommitSha": "e088ffd47b0617a723b38ae08b5221e7e8181bbe",
   "isModelWeightTraining": false,
   "isIndependentHumanStudy": false,
@@ -609,7 +609,21 @@
         "outOf10": 10,
         "scope": "Recovery of a unique persistent body-center proposal inside the blind observer's coarse visible wall-figure bounds on these same four known-source frames. This 10/10 is not anatomical/keypoint accuracy, a validated full-body extent, intended-athlete identity, or endpoint accuracy."
       },
-      "comparabilityLimit": "Native source PNGs and PTS match round 1. PNG-to-model resizing is replayed independently; round 1 and round 2 full-frame model-input hashes are not identical. The controlled crop comparison uses round 2 full-replay results rather than asserting byte-identical model inputs across rounds."
+      "comparabilityLimit": "Native source PNGs and PTS match round 1. PNG-to-model resizing is replayed independently; round 1 and round 2 full-frame model-input hashes are not identical. The controlled crop comparison uses round 2 full-replay results rather than asserting byte-identical model inputs across rounds.",
+      "additionalTwoClimberControl": {
+        "sourceId": "12.24",
+        "inspectedFrames": 4,
+        "uniqueProposalFrames": 0,
+        "persistentUnique": false,
+        "automaticChoiceMade": false,
+        "intendedAthleteVerified": false,
+        "result": "The fixed-grid research selector abstains on all four frames with multiple plausible wall figures. This does not validate single-source anatomy or intended identity.",
+        "sourceArtifactHashes": {
+          "results-frozen.json": "e3f195faf742bdb035c2331e3f097566d35d979975425228e96049081d3e9c47",
+          "blind-two-climber-control-frozen.json": "666d9d554adfcac2f0c4001d7c154282becddd6332a4b1a32d37c333d892240e",
+          "plan-frozen.json": "da6e05f9732db6c43693714cacd720abe50560d4bca41c93b6621dc436a557e4"
+        }
+      }
     },
     {
       "round": 3,
@@ -760,7 +774,22 @@
       "decision": "Rejected research variant; no runtime change and no automatic endpoint gain.",
       "feedbackAfterActualResult": "Original descriptor persistence closes the known dissolve controls but leaves only 3/46 original features at the actual final frame. Do not lower retention to fit this clip or remove the scene gate; report the unresolved blocker in the round 5 whole-app evaluation.",
       "amendments": [],
-      "practicalTargetRecovered": false
+      "practicalTargetRecovered": false,
+      "secondaryOfflineCorrespondence": {
+        "tool": "OpenCV ORB and SIFT, offline ignored environment only",
+        "sourceId": "IMG_9075",
+        "sourceArtifactHashes": {
+          "opencv-evidence-summary.json": "2bed000d73474f1403907fa1fe285ecc38304f079db22c7c1c48d06d29d17464",
+          "opencv-correspondence-results.json": "2753458114d543adb393760fafab50a8dca708fc324f7e2935aad990fff0c01a",
+          "prospective-plan-v3-opencv.json": "1dfad65501636722b29087e38d6b56a0b7f031ab63f0356ef811cc06542be8d6",
+          "v3-freeze.json": "cc6c8f764126a4c6e152202ddecdbd0ca4139067e0aae523df412e4fd1ae86ad"
+        },
+        "actualSourceResult": "Both methods meet their prospectively registered correspondence support checks on the actual source pair.",
+        "counterexample": "SIFT also meets support checks on deliberately inserted same-gym cross-recording cut links; matching wall geometry is insufficient to establish capture continuity.",
+        "runtimeOverrideQualified": false,
+        "runtimeOrDependencyManifestChanged": false,
+        "limit": "Dual-method agreement was not prospectively qualified as a production policy. Correspondence does not verify body identity, a Start event or safe automatic acceptance."
+      }
     },
     {
       "round": 5,
@@ -1280,8 +1309,8 @@
         "result": false,
         "scope": "Kernel timing-authority evidence only: four correlated target conditions return High outside policy. No new whole-app automatic endpoint was tested or accepted."
       },
-      "decision": "A separately registered spectral-peak follow-up gives partial controlled localization gains. Preserve initial failures and await round10 whole-app regression; no automatic endpoint gain is established.",
-      "feedbackAfterActualResult": "The local-peak guard corrects right gains 0.5 and 0.67 to 8.590 s and preserves the original 8.590 s. Five resampled conditions move from definitely early 8.410 s to indeterminate 8.500 s; retain all five unresolved cases. Finish localization remains a separate target, and full-app automatic output must be measured in round 10.",
+      "decision": "Ship the narrow local-maximum guard with retained limitations: complete registered localization 4/8 to 5/8, once-reserved conditions 1/4 to 2/4; original whole-app automatic endpoints remain unchanged.",
+      "feedbackAfterActualResult": "Retain the five indeterminate resampled clocks and all three failed noise conditions. Next validate physical cue, lane and body identity on new recordings rather than treating unchanged High counts or correlated transforms as automatic recovery.",
       "amendments": [],
       "actualScope": "Audio-kernel robustness on transformed copies of six existing native-PCM sources. Timing score is confined to derived conditions of the one source with an eligible recorded-cue bracket; High is not whole-app automatic acceptance.",
       "conditionDeduplication": "The native 8 kHz linear-resample identity and right-gain 1 identity are the same unmodified source condition. Both raw rows remain; the combined score counts that baseline once: phase 4/5 plus rate 1/4 becomes 4/8 unique conditions, rather than 5/9 independent events.",
@@ -1516,8 +1545,20 @@
         "remainingLimit": "All five resampled candidate clocks are 8.500 s: signed [-.125,-.080] s straddles the frozen .100 s comparison policy. They are not fully qualified; the interval does not prove every possible event time is beyond policy. No complete sample-rate fix or whole-app automatic gain.",
         "denominatorLimit": "The registered five and reserved four conditions are correlated derivatives of ONE development source, not nine independent recordings or a new whole-source holdout. The initial eight-condition score remains archived separately.",
         "runtimeSourceImplemented": true,
-        "wholeAppCandidateRegression": "Pending round10.",
-        "automaticEndpointEvidenceOutOf10": null
+        "wholeAppCandidateRegression": "Completed at clean c0ce888: all six original phone accepted clocks unchanged, 4/12 endpoints; P07 default and guided accept neither endpoint.",
+        "automaticEndpointEvidenceOutOf10": null,
+        "completeRegisteredMatrix": {
+          "rawTargetRows": 9,
+          "uniqueSourceConditions": 8,
+          "beforeCorrect": 4,
+          "afterCorrect": 5,
+          "beforeLocalizationOutOf10": 5.0,
+          "afterLocalizationOutOf10": 6.25,
+          "sourceArtifact": "round10-final-stress-comparison-frozen.json",
+          "originalRound7ScorePreserved": true,
+          "sameUnderlyingReferenceSources": 1,
+          "limit": "Eight correlated conditions of one development recording. This is an audio-kernel localization score, not eight climbs or whole-app automatic endpoint accuracy."
+        }
       }
     },
     {
@@ -1719,7 +1760,7 @@
     {
       "round": 10,
       "title": "Cumulative clean-source evaluation",
-      "status": "pending",
+      "status": "completed",
       "predecessorFeedbackRequired": true,
       "question": "Evaluate the final candidate on the original development matrix and any genuinely untouched source group qualified before predictions.",
       "requiredEvidence": [
@@ -1734,17 +1775,348 @@
         "video-frame-callback-spec"
       ],
       "concreteConditionRegistration": null,
-      "baselineResult": null,
-      "candidateResult": null,
-      "sourceArtifactHashes": {},
-      "counts": null,
+      "baselineResult": {
+        "acceptedPhoneEndpoints": 4,
+        "phoneEndpointSlots": 12,
+        "completeAutomaticPairs": 1,
+        "source": "Published stereo recovery and original audio-kernel snapshots retained unchanged. No new frozen-baseline runtime run is invented."
+      },
+      "candidateResult": {
+        "runtimeBuild": {
+          "schemaVersion": 1,
+          "appVersion": "0.30.0",
+          "commitSha": "c0ce888b6609babd2b3eac1ec5be87aac6b1a786",
+          "workingTreeDirty": false
+        },
+        "browserVersion": "156.0.8078.47",
+        "startedAt": "2026-10-23T22:54:51.149Z",
+        "finishedAt": "2026-10-23T22:58:06.848Z",
+        "scope": "timing-only",
+        "nativeRuns": [
+          {
+            "id": "12.24",
+            "cohort": "existing-development-phone",
+            "sourceSha256": "b981cc57f8d3d4fe9c57e4e6414f23457ad8bc7eb7cbec5a95c969707d21b333",
+            "acceptedEndpoints": [
+              {
+                "markerId": "startSignal",
+                "acceptedRawTimeSeconds": 9.4
+              }
+            ],
+            "automaticEndpointCount": 1,
+            "effectiveStartSearchWindow": [
+              0,
+              12
+            ],
+            "firstUsefulTerminalMs": 3389.162,
+            "passed": true
+          },
+          {
+            "id": "IMG_8903",
+            "cohort": "existing-development-phone",
+            "sourceSha256": "eb7bbcb91565cee5b7242f69f085442d260e85ef12cd399fbd21eb60c37ef08c",
+            "acceptedEndpoints": [
+              {
+                "markerId": "startSignal",
+                "acceptedRawTimeSeconds": 4.29
+              }
+            ],
+            "automaticEndpointCount": 1,
+            "effectiveStartSearchWindow": [
+              0,
+              12
+            ],
+            "firstUsefulTerminalMs": 18659.924,
+            "passed": true
+          },
+          {
+            "id": "IMG_9075",
+            "cohort": "existing-development-phone",
+            "sourceSha256": "12a1189c069d832b6bcb1f38176786a7abd0cbb88da234bc9c0d1e53881602e5",
+            "acceptedEndpoints": [],
+            "automaticEndpointCount": 0,
+            "effectiveStartSearchWindow": [
+              0,
+              12
+            ],
+            "firstUsefulTerminalMs": 8183.072,
+            "passed": true
+          },
+          {
+            "id": "IMG_9076",
+            "cohort": "existing-development-phone",
+            "sourceSha256": "4b9c8ce7367b0c64970a8df5a0474e385e3e27c7d3eb28f8977bd0b3186f3e8a",
+            "acceptedEndpoints": [],
+            "automaticEndpointCount": 0,
+            "effectiveStartSearchWindow": [
+              0,
+              12
+            ],
+            "firstUsefulTerminalMs": 16775.779,
+            "passed": true
+          },
+          {
+            "id": "IMG_9077",
+            "cohort": "existing-development-phone",
+            "sourceSha256": "e6fdd0a8db01396342d8ba5a95474d8b4e3f17459f83d9da30dbfeb9c3b571e1",
+            "acceptedEndpoints": [],
+            "automaticEndpointCount": 0,
+            "effectiveStartSearchWindow": [
+              0,
+              12
+            ],
+            "firstUsefulTerminalMs": 8867.272,
+            "passed": true
+          },
+          {
+            "id": "IMG_9199",
+            "cohort": "existing-development-phone",
+            "sourceSha256": "c906a632d57519e75a8ea95da28a1059a613b7bdb0d63781681b6c71ece8ec26",
+            "acceptedEndpoints": [
+              {
+                "markerId": "startSignal",
+                "acceptedRawTimeSeconds": 7.068
+              },
+              {
+                "markerId": "finishPad",
+                "acceptedRawTimeSeconds": 17.472
+              }
+            ],
+            "automaticEndpointCount": 2,
+            "effectiveStartSearchWindow": [
+              0,
+              12
+            ],
+            "firstUsefulTerminalMs": 14288.288,
+            "passed": true
+          },
+          {
+            "id": "p07-default",
+            "cohort": "existing-public-development-same-P07-group",
+            "sourceSha256": "05b6ec8b546372cea84fc16a21086357a768e66ddea1f6a395f7f4ce0b2857c1",
+            "acceptedEndpoints": [],
+            "automaticEndpointCount": 0,
+            "effectiveStartSearchWindow": [
+              0,
+              12
+            ],
+            "firstUsefulTerminalMs": 12637.37,
+            "passed": true
+          },
+          {
+            "id": "p07-guided",
+            "cohort": "existing-public-development-same-P07-group",
+            "sourceSha256": "05b6ec8b546372cea84fc16a21086357a768e66ddea1f6a395f7f4ce0b2857c1",
+            "acceptedEndpoints": [],
+            "automaticEndpointCount": 0,
+            "effectiveStartSearchWindow": [
+              17,
+              21
+            ],
+            "firstUsefulTerminalMs": 12231.519,
+            "passed": true
+          }
+        ],
+        "pageErrors": 0,
+        "policyViolations": 0,
+        "acceptedPhoneEndpoints": 4,
+        "phoneEndpointSlots": 12,
+        "completePhoneAutomaticPairs": 1,
+        "newAcceptedPhoneEndpoints": 0,
+        "allOriginalAcceptedClocksPreserved": true,
+        "p07AcceptedEndpoints": 0,
+        "p07UnderlyingRecordings": 1,
+        "p07Runs": 2,
+        "stress": {
+          "rawDerivedOrAuthoredRows": 109,
+          "existingSourceRecordings": 6,
+          "audioDetectorSha256": "e478126c893a413753089b76c6caa2849c0e015a33242db53e89d45685e4c35f",
+          "sourceConditionScores": {
+            "round06GainNoise": {
+              "rawTargetRows": 8,
+              "uniqueSourceConditions": 8,
+              "beforeCorrect": 5,
+              "afterCorrect": 5,
+              "beforeLocalizationOutOf10": 6.25,
+              "afterLocalizationOutOf10": 6.25
+            },
+            "round07PhaseRate": {
+              "rawTargetRows": 9,
+              "uniqueSourceConditions": 8,
+              "beforeCorrect": 4,
+              "afterCorrect": 5,
+              "beforeLocalizationOutOf10": 5.0,
+              "afterLocalizationOutOf10": 6.25
+            },
+            "allAudioStress": {
+              "rawTargetRows": 17,
+              "uniqueSourceConditions": 15,
+              "beforeCorrect": 8,
+              "afterCorrect": 9,
+              "beforeLocalizationOutOf10": 5.333333333333333,
+              "afterLocalizationOutOf10": 6.0
+            }
+          },
+          "negativeControlsPassed": 5,
+          "positiveControlsPassed": 1,
+          "ambiguousTwoProtocolControlScored": false,
+          "unlabelledChangedSource": "IMG_9077",
+          "unlabelledClockChanges": [
+            {
+              "condition": "independent uniform noise 0.05",
+              "beforeRawTimeSeconds": 11.27,
+              "afterRawTimeSeconds": 10.38,
+              "confidence": "Medium"
+            },
+            {
+              "condition": "right gain 0.5",
+              "beforeRawTimeSeconds": 5.96,
+              "afterRawTimeSeconds": 5.98,
+              "confidence": "High"
+            }
+          ],
+          "unlabelledChangesAreCorrectnessGains": false,
+          "limit": "All scores use one referenceable development recording; transformed rows are not independent attempts. Audio High does not imply app acceptance."
+        }
+      },
+      "sourceArtifactHashes": {
+        "round10-native-workflow-c0ce888.json": "2f87d5f2592de9b7b9232976dc1800252ec9295313b811162b34d339a79552c7",
+        "round10-final-stress-comparison-frozen.json": "7793a9ff3513d607b7da952679cb630d2e9373af67c20e660bb5f21a43fbc8d7",
+        "round10-manifest-provenance-correction.json": "5f17b60e17206334d8706a9e952580afdfdf25612d7d3cd3a8cd13d8b92017c7",
+        "round10-independent-code-evidence-review-frozen.json": "f2b8a3138ccff2bd31963a830a92c5d68f5e9a6b21b8874254e7fb1c539d66ad",
+        "round10-native-workflow-c0ce888/12.24-1-dataset.json": "ff6f70405454da8bed1acbd64cab999846cbf42c7fcacfee6f30a315551c8a57",
+        "round10-native-workflow-c0ce888/IMG_8903-1-dataset.json": "b98a1e9f49b76e41f9e023e2b0178b7b0815fd0fda4755151b9fa793d3c60ccf",
+        "round10-native-workflow-c0ce888/IMG_9075-1-dataset.json": "c57f26c9d39f7c0c01e4eff11e73f0a594f68f4b67ee35262501ee4752e378a4",
+        "round10-native-workflow-c0ce888/IMG_9076-1-dataset.json": "6ac968e23f4f1b8bb660288500aa45018630a2429cabfeba35e31bcd036caad2",
+        "round10-native-workflow-c0ce888/IMG_9077-1-dataset.json": "2c070c5c979c717081e0f92bedf96aa1b194f78eb0de8466aa260d5bfe3054b8",
+        "round10-native-workflow-c0ce888/IMG_9199-1-dataset.json": "8322107d2995055a17b4b476878d968068698f8796f4804e6866e9ca88c0fbf2",
+        "round10-native-workflow-c0ce888/p07-default-1-dataset.json": "54864b813760824ef446a78a32951167aff7534b15711ccde9161d24f0bbf7d7",
+        "round10-native-workflow-c0ce888/p07-guided-1-dataset.json": "ef38f4458077ea6e68f8b6ee2dbaa21bc445ef253487f4ba6e81ceb3de72aad0",
+        "round06-gain.json": "45eec21ce984d602f14dc675a13a452c8f01b45450a943c9205c2120f2965d7e",
+        "round10-final-stress-gain.json": "cbfcd75c3168d816e4a1e4f99a19de0022eade7e885dc9f8ce8326de8316ea0a",
+        "round06-noise.json": "e4311202ac0aa77f0194c7ead50d6ca59cde6f0569b4c38ce4c3c4b335c30fdb",
+        "round10-final-stress-noise.json": "221800ee4016c2fde5a3c4c349aedcceb35027e333881c4e9c7f8aaf1266e1cf",
+        "round07-phase.json": "efaa41e7c5a92f28537c7134118312f939041ba8cc5b69b7d88fb46226320198",
+        "round10-final-stress-phase.json": "d808bce3d7ec47a63062f68e1d2f144f32962e98cebcbb01e70f94fbcbd7d43a",
+        "round07-rate.json": "d9e653fbbd916ab382e57acf8f8c4e90f20b2834a2d7434c80a9916818878297",
+        "round10-final-stress-rate.json": "6620d21ba64721affff1e3af08dea2e743243542278dc53776a8a14ced21fdd8",
+        "round07-conflict.json": "8bf5e38a01dea39669b3a73dd30d5e14cddfabf03ee5b83073f1093131ca8220",
+        "round10-final-stress-conflict.json": "b047ecfba5e54ff5273499cfc75664f55f90d4a18ce810fd11ee6f1651d53798"
+      },
+      "counts": {
+        "originalPhoneRecordings": 6,
+        "phoneEndpointSlots": 12,
+        "acceptedPhoneEndpointsBefore": 4,
+        "acceptedPhoneEndpointsAfter": 4,
+        "completePhonePairsBefore": 1,
+        "completePhonePairsAfter": 1,
+        "p07UnderlyingRecordings": 1,
+        "p07RepeatedRuns": 2,
+        "p07AcceptedEndpoints": 0,
+        "rawAudioStressRows": 109
+      },
       "localizationEvidenceOutOf10": null,
       "automaticEndpointEvidenceOutOf10": null,
-      "scoreReason": "Pending actual evidence.",
-      "safetyGate": null,
-      "decision": null,
-      "feedbackAfterActualResult": null,
-      "amendments": []
+      "scoreReason": "No aggregate score across unlabelled phones, recorded acoustic cues and visible lamps. Scoped matching-event scores and automatic coverage are reported separately below. There is no population accuracy estimate.",
+      "safetyGate": {
+        "result": "No observed new whole-app acceptance or authored-control regression; limitations remain.",
+        "labelledAuthoredControlsPassed": 6,
+        "knownUnresolvedResampledConditions": 5,
+        "unlabelledTransformedClockChanges": 2,
+        "limit": "Finite development controls do not establish a field false-acceptance rate or prove unlabelled changes harmless."
+      },
+      "decision": "Complete all ten experiments. Ship only the bounded off-image torso-center guard, current-analysis body-audit export and spectral local-maximum correction. Reject the unqualified pose/Heavy/scene/Finish prototypes.",
+      "feedbackAfterActualResult": "The next detection iteration needs newly collected fixed-camera attempts with visible cue and Finish, verified lane/body association and prediction-blind human observations. Preserve early resampled High cases and unresolved noise/Finish failures as mandatory controls; do not optimize toward raw acceptance counts.",
+      "amendments": [],
+      "scoreStrata": [
+        {
+          "stratum": "six original development phones",
+          "automaticCoverage": {
+            "accepted": 4,
+            "slots": 12,
+            "completePairs": 1,
+            "recordings": 6
+          },
+          "localizationEvidenceOutOf10": null,
+          "automaticEndpointEvidenceOutOf10": null,
+          "reason": "Accepted event/lane correctness is unverified for the complete matrix; raw coverage cannot supply missing references."
+        },
+        {
+          "stratum": "IMG_9075 recorded final acoustic cue, original native whole-app run",
+          "referenceUnionSeconds": [
+            8.58,
+            8.625
+          ],
+          "reviewCursorSeconds": 8.59,
+          "signedDisagreementIntervalSeconds": [
+            -0.035,
+            0.01
+          ],
+          "qualifyingReferenceEvents": 1,
+          "correctPrimaryLocalizations": 1,
+          "verifiedCorrectAutomaticallyAcceptedEndpoints": 0,
+          "localizationEvidenceOutOf10": 10,
+          "automaticEndpointEvidenceOutOf10": 0,
+          "limit": "One targeted development cue; existing scene/body gates still prevent automatic Start and no Finish is produced."
+        },
+        {
+          "stratum": "P07 default window [0,12]",
+          "qualifyingVisibleStartSearchEvents": 0,
+          "localizationEvidenceOutOf10": null,
+          "automaticEndpointEvidenceOutOf10": null,
+          "automaticCoverage": {
+            "accepted": 0,
+            "slots": 2
+          },
+          "reason": "Frozen lower red-to-green Start bracket [18.585233,18.651967] falls outside the default Start search. Finish is not run. Do not treat the unrelated review candidate as a matching-event timing estimate."
+        },
+        {
+          "stratum": "P07 guided development window [17,21]",
+          "qualifyingReferenceEvents": 2,
+          "correctPrimaryLocalizations": 0,
+          "verifiedCorrectAutomaticallyAcceptedEndpoints": 0,
+          "localizationEvidenceOutOf10": 0,
+          "automaticEndpointEvidenceOutOf10": 0,
+          "startReviewCursorSeconds": 20.687,
+          "timingError": null,
+          "reason": "Neither output matches the frozen lower red-to-green Start or upper green-to-red Finish. Acoustic/color candidate semantics do not establish a matching event. Finish is not run; no candidate-error estimate is fabricated."
+        }
+      ],
+      "buildProvenanceQualification": {
+        "originalManifestSha256": "1249edd76f77f9dc93088007e954a162da58db7607069e73d06679a3bfcb3521",
+        "inheritedUnusedFrozenBuildLabel": "3db861ee97902b2ccee279750d5cbbe479d9a2c7",
+        "executedBuildIdentitySource": "Fetched build-info in the native report and matching exportBuild in all eight original datasets.",
+        "actualBuild": {
+          "schemaVersion": 1,
+          "appVersion": "0.30.0",
+          "commitSha": "c0ce888b6609babd2b3eac1ec5be87aac6b1a786",
+          "workingTreeDirty": false
+        },
+        "originalManifestPreserved": true,
+        "correctionArtifact": "round10-manifest-provenance-correction.json",
+        "limit": "The copied legacy manifest label is not used to attest the executed build. Its discrepancy is preserved rather than silently rewritten."
+      },
+      "latencyQualification": {
+        "singlePass": true,
+        "pairedRepeatedEquivalentWork": false,
+        "processingSpeedImprovementEstablished": false,
+        "limit": "First-terminal times are descriptive. Blocked or unperformed Finish work is not an equivalent-work throughput comparison."
+      },
+      "engineeringVerification": {
+        "unitTestsPassed": 1168,
+        "expectedFailures": 5,
+        "unitTestFiles": 109,
+        "typecheck": "passed",
+        "build": "passed",
+        "coachingSmoke": "passed",
+        "realEncodedChromiumProductionCasesPassed": 2,
+        "realEncodedChromiumViewports": [
+          "desktop",
+          "phone"
+        ],
+        "source": "Root reported completed verification; independent native and stress artifact verification is recorded above.",
+        "exactPublishedCommitCI": "Not yet supplied at this benchmark freeze; local results are not a hosted CI claim."
+      }
     }
   ],
   "privacy": {
@@ -1792,5 +2164,44 @@
       "Freeze two separate source-observation worksheets and run conditions before predictions if a prospect qualifies.",
       "No download or media redistribution rights are asserted."
     ]
+  },
+  "completion": {
+    "roundsCompleted": 10,
+    "runtimeBuild": {
+      "schemaVersion": 1,
+      "appVersion": "0.30.0",
+      "commitSha": "c0ce888b6609babd2b3eac1ec5be87aac6b1a786",
+      "workingTreeDirty": false
+    },
+    "nativeReportSha256": "2f87d5f2592de9b7b9232976dc1800252ec9295313b811162b34d339a79552c7",
+    "finalStressReportSha256": "7793a9ff3513d607b7da952679cb630d2e9373af67c20e660bb5f21a43fbc8d7",
+    "narrowMeasuredGain": "Recorded-cue localization under a changed channel balance: complete registered phase/rate conditions improve from 4/8 to 5/8; once-reserved same-source conditions improve 1/4 to 2/4.",
+    "noAutomaticCoverageGain": "Six original development recordings retain 4/12 accepted endpoints and one complete pair; P07 default/guided accept neither endpoint.",
+    "noNewQualifiedHoldout": true,
+    "trainedModelWeights": false,
+    "generalAccuracyEstimate": null,
+    "finalScopedScores": {
+      "registeredAudioKernelBeforeOutOf10": 5.0,
+      "registeredAudioKernelAfterOutOf10": 6.25,
+      "onceReservedAudioKernelBeforeOutOf10": 2.5,
+      "onceReservedAudioKernelAfterOutOf10": 5.0,
+      "wholeAppGeneralDetectionAccuracyOutOf10": null
+    }
+  },
+  "independentClosingReview": {
+    "reviewer": "practical_critic",
+    "artifact": "test-results/detection-expansion-ten/round10-independent-code-evidence-review-frozen.json",
+    "sha256": "f2b8a3138ccff2bd31963a830a92c5d68f5e9a6b21b8874254e7fb1c539d66ad",
+    "runtimeCommit": "c0ce888b6609babd2b3eac1ec5be87aac6b1a786",
+    "codeReadinessOutOf10": 8,
+    "generalizableDetectionEvidenceOutOf10": 4.7,
+    "rubric": "Separate weighted subjective review of correctness, tests, maintainability and integration; evidence assesses breadth, physical references, reproducibility and source-level gains.",
+    "notCombinedWithFormulaScores": true,
+    "additionalReviewerStatement": {
+      "codeReadinessOutOf10": 8.8,
+      "automaticImprovementEvidenceOutOf10": 2.0,
+      "source": "Reliability agent statement supplied by root, a separate assessment rather than a hashable review artifact.",
+      "limit": "The 2.0 score concerns demonstrated automatic improvement, not an estimated correctness percentage."
+    }
   }
 }

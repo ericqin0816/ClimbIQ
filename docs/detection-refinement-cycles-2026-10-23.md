@@ -229,3 +229,67 @@ the unchanged automatic denominator, source hashes, reference intervals,
 reviewer assessments and raw sidecar evidence hashes. Private footage and PCM
 remain outside Git. No model weights were trained and no general accuracy or
 processing-speed improvement is established by these development runs.
+
+## Ten further detection experiments
+
+The [detection expansion ledger](../benchmarks/detection-expansion-2026-10-23.json)
+records ten additional experiments, their frozen criteria, failures, scores and
+evidence hashes. These use six existing phone recordings and one previously
+inspected public YouTube source, P07. Crops, frames, generated controls and audio
+transformations are correlated diagnostics, not new independent attempts. Two
+additional World Climbing broadcasts were identified as research prospects;
+neither was qualified or tested as a fresh holdout.
+
+| Round | Experiment | Observed result | Scoped score |
+| --- | --- | --- | --- |
+| 1 | Whole-frame pose model | No correct wall-figure proposal in four inspected frames; two proposals had torso centers outside the image. | 0/4 center proposals |
+| 2 | Cropped pose and fixed-grid search | Fixed grid placed centers on the wall figure in 4/4 frames and abstained on the two-climber control. This did not establish accurate anatomy. | 10/10 for center agreement on four known frames |
+| 3 | Adjacent-frame scene matching | Accepted three generated dissolves incorrectly. Rejected for production. | No endpoint score |
+| 4 | Persistent original background features | Rejected generated cuts/dissolves but could not qualify the phone recording. Offline ORB/SIFT also showed that shared background cannot prove continuous capture. | No endpoint score |
+| 5 | Native launch audit and HEAVY model | Derived body region failed launch verification. HEAVY lost early-frame eligibility and increased model size and runtime. Neither recovery shipped. | 0/1 launch qualification |
+| 6 | Audio gain and noise | Five gain conditions localized the recorded cue; three noise conditions did not. | 6.25/10, 5/8 correlated conditions |
+| 7 | Channel balance and resampling | Found an out-of-band spectral shoulder being labeled as a beep. The spectral fix improves complete registered localization from 4/8 to 5/8; reserved conditions improve 1/4 to 2/4. | 5.0 → 6.25/10 registered; 2.5 → 5.0/10 reserved |
+| 8 | Native upper-Finish detector | No candidate on P07 despite explicitly supplied Start and lane. Actual indicator geometry falls outside discovery bounds. | 0/1 conditional localization |
+| 9 | Known sensor and temporal isolation | Full planned tracking window failed quality checks. A secondary verified-prefix test proposed 25.692 s, before the matching indicator interval 25.8258–25.9259 s. | 0/1 primary; secondary timing also failed |
+| 10 | Clean cumulative native and stress checks | Original six phones retain 4/12 accepted endpoints and one complete pair. P07 default and guided runs accept neither endpoint. | Coverage unchanged; no broad accuracy score |
+
+The shipped audio change searches for actual local spectral maxima, including
+neighbors outside the restricted frequency band. A stronger frequency outside
+that band can no longer supply its sloping shoulder as the selected peak. It
+does not change confidence thresholds, countdown rules, timing tolerances or
+stereo clock policy. On the referenceable recording, channel gains 0.5 and the
+reserved 0.67 condition improve from an early High-confidence 8.410-second
+marker to 8.590 seconds, within the frozen recorded-cue bracket 8.580–8.625.
+Resampled conditions move to 8.500 seconds: their signed interval of −125 to
+−80 ms straddles the 100 ms comparison policy, so they receive no success
+credit. The five such rate conditions remain unresolved. Noise robustness also
+remains limited. A 50 Hz spectral-bin boundary can still lose an off-grid tone;
+the targeted tests do not establish field recall.
+
+The cumulative stress check contains 109 derived or authored conditions, not
+109 climbs. Its five labeled negative controls and one positive control pass;
+an ambiguous two-protocol case remains explicitly unscored. Eight quiet-attack
+controls preserve their clocks, and an earlier genuine mixed-audio countdown
+cannot be replaced merely because both individual channels prefer a later one.
+Two new spectral tests failed before the change and pass afterward.
+
+The other runtime changes reject off-image torso centers while retaining visible
+torso centers with peripheral limbs outside the image, and retain the separate
+body-audit result in current-analysis exports. Scene checks, Finish discovery
+bounds, launch thresholds and model weights remain unchanged. No experimental
+pose recovery, HEAVY model, OpenCV dependency or scene override ships.
+
+At clean runtime commit `c0ce888`, all eight native app runs finish without page
+or policy errors. All accepted clocks in the six phone recordings are preserved;
+the P07 default and guided runs are two correlated runs of the same public recording.
+Typecheck, build, coaching smoke checks and 1,168 unit tests across 109 files
+pass, with five pre-existing expected failures. These results do not establish
+a representative false-acceptance rate, electronic timing accuracy, actual
+iPhone performance, human correction effort or generalization to fresh climbs.
+
+The closing independent review grades code readiness **8.0/10** and
+generalizable detection evidence **4.7/10** under separate weighted rubrics.
+These are review judgments, not accuracy percentages. A second reviewer grades
+code correctness 8.8/10 and evidence of automatic endpoint improvement 2.0/10;
+that narrower evidence rubric is not averaged with the first. The ledger retains
+both assessments and the unresolved failures. No 9/10 detection claim is supported.
