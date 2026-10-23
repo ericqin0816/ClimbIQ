@@ -91,6 +91,63 @@ describe("perspective-aware upper finish indicator", () => {
     expect(analyzeTopFinishFrames(frames, 0.8).found).toBe(false);
   });
 
+  it.each([
+    { r: 192, g: 193, b: 184 },
+    { r: 62, g: 108, b: 117 },
+  ])("keeps a disappearing colored object's cursor explicitly unverified: %j", (wall) => {
+    // Both transitions pass the old hue gate. A persistent new color alone
+    // does not establish an indicator when it has become the surrounding wall.
+    expect(hasDistinctIndicatorHue(darkRed, wall)).toBe(true);
+    const frames = makeFrames([...repeat(darkRed, 8), ...repeat(wall, 12)], { x: 12, y: 2 }, () => 0, wall);
+    const result = analyzeTopFinishFrames(frames, 0.8);
+    expect(result.found).toBe(true);
+    expect(result.rawTime).toBe(1.6);
+    expect(result.targetLocalized).toBe(false);
+    expect(result.confidence).toBe("Low");
+    expect(result.reason).toContain("no electronic finish was established");
+  });
+
+  it.each([0, 35])("preserves a faint single-pixel indicator with frame exposure shift %s", (shift) => {
+    const background = { r: 54, g: 55, b: 57 };
+    const frames = makeFrames([...repeat({ r: 48, g: 76, b: 49 }, 8), ...repeat({ r: 48, g: 49, b: 77 }, 12)],
+      { x: 12, y: 3 }, index => index < 8 ? 0 : shift, background);
+    for (const frame of frames) for (const [x, y] of [[13, 3], [12, 4], [13, 4]]) {
+      const exposure = frame.time < 1.6 ? 0 : shift;
+      frame.data.set([background.r + exposure, background.g + exposure, background.b + exposure], (y * frame.width + x) * 4);
+    }
+    const result = analyzeTopFinishFrames(frames, 0.8);
+    expect(result.found).toBe(true);
+    expect(result.targetLocalized).toBe(true);
+    expect(result.rawTime).toBe(1.6);
+  });
+
+  it("preserves a blurred indicator whose pale edge still contrasts with the wall", () => {
+    const background = { r: 54, g: 55, b: 57 };
+    const frames = makeFrames([...repeat(darkRed, 8), ...repeat(brightGreen, 12)], { x: 12, y: 2 });
+    for (const frame of frames) {
+      const color = frame.time < 1.6 ? darkRed : brightGreen;
+      for (let y = 1; y <= 4; y++) for (let x = 11; x <= 14; x++) {
+        if (x >= 12 && x <= 13 && y >= 2 && y <= 3) continue;
+        const edge = mix(background, color, 0.22);
+        frame.data.set([edge.r, edge.g, edge.b], (y * frame.width + x) * 4);
+      }
+    }
+    expect(analyzeTopFinishFrames(frames, 0.8)).toMatchObject({ found: true, targetLocalized: true });
+  });
+
+  it("uses available context at an image edge without requiring invented surrounding pixels", () => {
+    const frames = makeFrames([...repeat(darkRed, 8), ...repeat(brightGreen, 12)], { x: 1, y: 1 });
+    expect(analyzeTopFinishFrames(frames)).toMatchObject({ found: true, targetLocalized: true });
+  });
+
+  it("does not replace missing ring pixels with a black high-contrast background", () => {
+    const frames = makeFrames([...repeat(darkRed, 8), ...repeat(brightGreen, 12)], { x: 12, y: 1 });
+    for (const frame of frames) frame.data = frame.data.slice(0, (frame.width + 13) * 4);
+    const result = analyzeTopFinishFrames(frames, 0.8);
+    expect(result.targetLocalized ?? false).toBe(false);
+    expect(result.confidence).not.toBe("High");
+  });
+
   it("rejects a persistent finish-like color when a foreground person covers the frame", () => {
     const frames = makeFrames([
       ...repeat(darkRed, 8),
@@ -221,6 +278,7 @@ function makeFrames(
   indicatorColors: RGB[],
   indicator: { x: number; y: number },
   exposureShift: (index: number) => number = () => 0,
+  background: RGB = { r: 54, g: 55, b: 57 },
 ): TopFinishFrame[] {
   const width = 20;
   const height = 20;
@@ -228,9 +286,9 @@ function makeFrames(
     const shift = exposureShift(frameIndex);
     const data = new Uint8ClampedArray(width * height * 4);
     for (let index = 0; index < data.length; index += 4) {
-      data[index] = 54 + shift;
-      data[index + 1] = 55 + shift;
-      data[index + 2] = 57 + shift;
+      data[index] = background.r + shift;
+      data[index + 1] = background.g + shift;
+      data[index + 2] = background.b + shift;
       data[index + 3] = 255;
     }
     for (let y = indicator.y; y <= indicator.y + 1; y += 1) {

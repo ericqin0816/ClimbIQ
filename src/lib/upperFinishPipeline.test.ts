@@ -11,7 +11,9 @@ describe("upper finish discovery-to-refinement pipeline", () => {
     { official: true, rejectRefinement: false, nativeFps: 30, eventTime: 49 / 30 },
     { official: true, rejectRefinement: false, nativeFps: 10, eventTime: 1.7 },
     { official: true, rejectRefinement: false, nativeFps: 30, eventTime: 49 / 30, dropNativeTiming: true },
-  ])("retains the tiny light with official=$official, rejected refinement=$rejectRefinement, source fps=$nativeFps, native failure=$dropNativeTiming", async ({ official, rejectRefinement, nativeFps, eventTime, dropNativeTiming }) => {
+    { official: true, rejectRefinement: false, nativeFps: undefined, eventTime: 1.6, unlocalized: true },
+    { official: false, rejectRefinement: false, nativeFps: undefined, eventTime: 1.6, unlocalized: true },
+  ])("checks upper evidence with official=$official, rejected refinement=$rejectRefinement, source fps=$nativeFps, native failure=$dropNativeTiming, unlocalized=$unlocalized", async ({ official, rejectRefinement, nativeFps, eventTime, dropNativeTiming, unlocalized }) => {
     vi.stubGlobal("window", { setTimeout, clearTimeout });
     const video = Object.assign(new EventTarget(), {
       src: "blob:upper-finish", videoWidth: 20, videoHeight: 20, duration: 5, readyState: 2, seeking: false,
@@ -28,6 +30,7 @@ describe("upper finish discovery-to-refinement pipeline", () => {
       close() {}
     } : undefined);
     let refinementSamples = 0;
+    let refinementCrops = 0;
     vi.stubGlobal("document", {
       createElement: () => {
         let sourceX = 0; let sourceY = 0;
@@ -38,6 +41,7 @@ describe("upper finish discovery-to-refinement pipeline", () => {
             // frames and the native-resolution crop used by temporal sampling.
             sourceX = args.length === 8 ? args[0] : 0;
             sourceY = args.length === 8 ? args[1] : 0;
+            if (args.length === 8) refinementCrops += 1;
           },
           getImageData: (_x: number, _y: number, width: number, height: number) => {
             if (sourceX > 0 && dropNativeTiming && ++refinementSamples > 2) vi.stubGlobal("VideoFrame", undefined);
@@ -46,7 +50,8 @@ describe("upper finish discovery-to-refinement pipeline", () => {
               for (let x = 0; x < width; x += 1) {
                 const inLight = x + sourceX >= 12 && x + sourceX <= 13 && y + sourceY >= 2 && y + sourceY <= 3;
                 const sourceState = sourceTime() < eventTime || (rejectRefinement && sourceX > 0);
-                const color = inLight ? (sourceState ? [88, 24, 23] : [34, 142, 48]) : [54, 55, 57];
+                const background = unlocalized ? [192, 193, 184] : [54, 55, 57];
+                const color = inLight ? (sourceState ? [88, 24, 23] : unlocalized ? background : [34, 142, 48]) : background;
                 data.set([...color, 255], (y * width + x) * 4);
               }
             }
@@ -62,7 +67,18 @@ describe("upper finish discovery-to-refinement pipeline", () => {
       return;
     }
     const outcome = await analysis;
-    if (rejectRefinement) {
+    if (unlocalized) {
+      // An agreeing entered total cannot turn a disappearing red object into
+      // an electronic cue, nor may a fine crop hide the missing surroundings.
+      expect(outcome.result.detected).toBe(false);
+      expect(outcome.result.rawTime).toBeUndefined();
+      expect(outcome.result.confidence).toBe("Low");
+      expect(outcome.result.reason).toContain("official total cannot verify an unlocalized visual cue");
+      expect(outcome.result.candidates?.[0].rawTime).toBe(1.6);
+      expect(outcome.result.candidates?.every(candidate => candidate.confidence === "Low")).toBe(true);
+      expect(outcome.result.debug.selectedCandidateTime).toBeUndefined();
+      expect(refinementCrops).toBe(0);
+    } else if (rejectRefinement) {
       // An entered total is a cross-check, not a substitute for the missing
       // fine visual verification. Preserve only a coarse review suggestion.
       expect(outcome.result.confidence).toBe("Medium");

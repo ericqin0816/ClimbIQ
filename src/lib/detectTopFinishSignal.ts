@@ -34,6 +34,8 @@ export interface TopFinishColorSample {
 
 export interface TopFinishDiscovery {
   found: boolean;
+  /** False keeps the selected indicator review-only; true is not proof of pad contact. */
+  targetLocalized?: boolean;
   rawTime?: number;
   confidence: Confidence;
   reason: string;
@@ -66,6 +68,7 @@ const MAX_SCAN_WIDTH = 320;
 const MAX_SCAN_HEIGHT = 320;
 const TOP_SCAN_MIN_Y = 0.015;
 const TOP_SCAN_MAX_Y = 0.22;
+const UNLOCALIZED_TARGET_REASON = "The upper color change did not retain localized contrast against its surroundings. Camera motion, a disappearing object, or missing surrounding pixels can explain this appearance change. Review the cursor; no electronic finish was established.";
 
 /**
  * Fallback for phone videos where the lower start sensor is too oblique or
@@ -157,6 +160,22 @@ export async function detectTopFinishSignal({
   if (!discovery.found || discovery.rawTime === undefined || !discovery.zone || !discovery.calibration) {
     const combinedReason = `${discovery.reason} ${contactDiscovery.reason}`;
     return { result: emptyResult(combinedReason) };
+  }
+  if (discovery.targetLocalized === false) {
+    const coarse = discoveryToResult(discovery);
+    const reason = `${UNLOCALIZED_TARGET_REASON} An agreeing official total cannot verify an unlocalized visual cue.`;
+    const candidates = coarse.candidates?.map(candidate => ({ ...candidate, confidence: "Low" as const, reason }));
+    return {
+      result: {
+        ...coarse, detected: false, rawTime: undefined, confidence: "Low", reason, candidates,
+        debug: {
+          ...coarse.debug, selectedCandidateTime: undefined, detectedRawTime: undefined,
+          selectedCandidateReason: reason, failureReason: reason, topCandidates: candidates,
+        },
+      },
+      zone: discovery.zone,
+      calibration: discovery.calibration,
+    };
   }
 
   const refineStart = Math.max(searchStart, discovery.rawTime - 0.8);
@@ -278,6 +297,7 @@ export function analyzeTopFinishFrames(
     before: RGB;
     after: RGB;
     persistenceFrames: number;
+    targetLocalized: boolean;
   }> = [];
 
   for (const radius of [0, 1, 2] as const) {
@@ -337,6 +357,18 @@ export function analyzeTopFinishFrames(
             hasDistinctIndicatorHue(baseline, target);
           if (!targetLooksElectronic) continue;
 
+          // A hold or climber can leave this pixel patch as the camera moves,
+          // exposing a persistent new wall color. A tiny indicator must still
+          // differ from its immediate surroundings in the verified target
+          // state, including when its absolute color is faint or pale.
+          const minimumLocalContrast = Math.max(4, Math.min(10, targetDelta * 0.05));
+          const localizedTargetFrames = tail.filter((sample) => {
+            if (computeColorDistance(sample.color, target) > targetTolerance) return false;
+            const surround = averagePatchSurround(frames[index + sample.offset], x, y, radius);
+            return surround !== undefined && computeColorDistance(sample.color, surround) >= minimumLocalContrast;
+          }).length;
+          const targetLocalized = localizedTargetFrames >= Math.max(2, Math.ceil(tailFrameCount * 0.55));
+
           const xNorm = x / width;
           const laneBoost = laneHintX === undefined
             ? 0
@@ -346,7 +378,9 @@ export function analyzeTopFinishFrames(
             : Math.min(24, Math.abs(frames[index].time - expectedFinishTime) * 4);
           const persistenceFrames = stableTargetFrames;
           const score = targetDelta + persistenceFrames * 5 + laneBoost + Math.max(0, chroma(target) - chroma(baseline)) * 0.3 - expectedPenalty;
-          const confidence: Confidence = targetDelta >= Math.max(18, threshold * 1.65) && persistenceFrames >= 3
+          // Preserve scoring and selection: rejecting this patch outright can
+          // promote a different camera-motion artifact to the review cursor.
+          const confidence: Confidence = !targetLocalized ? "Low" : targetDelta >= Math.max(18, threshold * 1.65) && persistenceFrames >= 3
             ? "High"
             : "Medium";
           internal.push({
@@ -359,6 +393,7 @@ export function analyzeTopFinishFrames(
             before: baseline,
             after: target,
             persistenceFrames,
+            targetLocalized,
           });
           break;
         }
@@ -394,9 +429,9 @@ export function analyzeTopFinishFrames(
   const candidates: DetectionCandidate[] = separated.slice(0, 5).map((candidate) => ({
     rawTime: candidate.rawTime,
     confidence: candidate.confidence,
-    reason: "A tiny upper-wall patch changed to a new persistent electronic-light state.",
+    reason: candidate.targetLocalized ? "A tiny upper-wall patch changed to a new persistent electronic-light state." : UNLOCALIZED_TARGET_REASON,
     score: roundTime(candidate.score),
-    kind: "Upper finish indicator",
+    kind: candidate.targetLocalized ? "Upper finish indicator" : "Unlocalized upper appearance change",
     method: "Perspective-aware upper finish-indicator discovery",
     rgb: candidate.after,
     distanceToBefore: roundTime(computeColorDistance(candidate.after, candidate.before)),
@@ -405,9 +440,10 @@ export function analyzeTopFinishFrames(
   }));
   return {
     found: true,
+    targetLocalized: selected.targetLocalized,
     rawTime: selected.rawTime,
     confidence: selected.confidence,
-    reason: "A perspective-aware scan found a persistent state change in the selected lane's upper timing-indicator band.",
+    reason: selected.targetLocalized ? "A perspective-aware scan found a persistent state change in the selected lane's upper timing-indicator band." : UNLOCALIZED_TARGET_REASON,
     score: roundTime(selected.score),
     zone,
     calibration,
@@ -933,6 +969,24 @@ function averagePatch(frame: TopFinishFrame, centerX: number, centerY: number, r
       count += 1;
     }
   }
+  return { r: Math.round(r / count), g: Math.round(g / count), b: Math.round(b / count) };
+}
+
+function averagePatchSurround(frame: TopFinishFrame, centerX: number, centerY: number, radius: number): RGB | undefined {
+  const outerRadius = radius + 3;
+  const fullRingPixels = (outerRadius * 2 + 1) ** 2 - (radius * 2 + 1) ** 2;
+  let r = 0; let g = 0; let b = 0; let count = 0;
+  for (let y = Math.max(0, centerY - outerRadius); y <= Math.min(frame.height - 1, centerY + outerRadius); y += 1) {
+    for (let x = Math.max(0, centerX - outerRadius); x <= Math.min(frame.width - 1, centerX + outerRadius); x += 1) {
+      if (Math.abs(x - centerX) <= radius && Math.abs(y - centerY) <= radius) continue;
+      const offset = (y * frame.width + x) * 4;
+      if (offset + 2 >= frame.data.length) continue;
+      r += frame.data[offset]; g += frame.data[offset + 1]; b += frame.data[offset + 2]; count += 1;
+    }
+  }
+  // A clipped edge may still provide enough context; missing pixels never
+  // become a black surround that artificially increases indicator contrast.
+  if (count < Math.max(8, fullRingPixels * 0.5)) return undefined;
   return { r: Math.round(r / count), g: Math.round(g / count), b: Math.round(b / count) };
 }
 

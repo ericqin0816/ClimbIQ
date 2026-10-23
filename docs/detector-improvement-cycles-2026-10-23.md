@@ -53,7 +53,7 @@ Scores remain separate:
 | 2 | Repeated upper-Finish scan invariants | Exact full-result parity on 24 actual-pixel configurations; cumulative production outputs preserved |
 | 3 | ROI sampling allocation and pixel parity | 18 native ROI pairs and four transparency/resizing controls byte-identical; repeated canvas allocation removed |
 | 4 | Start review-cursor evidence | Artifact ranking corrected; exact audio priority and automatic safety independently checked |
-| 5 | Upper-Finish cue quality | Conservative confidence cap under independent review; original candidate ranking retained |
+| 5 | Upper-Finish cue quality | Independently reviewed conservative confidence cap; original candidate ranking retained |
 | 6 | Further measured detector bottleneck | Planned after profiling |
 | 7 | Start temporal/identity robustness | Planned after independent review |
 | 8 | Finish source-frame robustness | Planned after independent review |
@@ -125,6 +125,22 @@ new automatic acceptances, zero lost accepted exact-audio events, and all 5,005
 artifact-free inputs unchanged. Sixty-eight artifact-driven switches lost
 automatic status intentionally. This improves correction guidance, not measured
 endpoint accuracy or automatic coverage.
+
+## Cycle 5: retain uncertain Finish proposals without promoting them
+
+A patch changing to the same appearance as its surroundings can be an object
+moving away rather than an electronic light. Such upper proposals now stay Low.
+Their score, time, zone and ordering are preserved: rejecting and re-ranking
+them had merely exposed a different suspect patch. They return review-only
+before a tight crop or agreeing official total can manufacture higher confidence.
+
+All 24 actual-pixel configurations preserved selection and calibration. A real
+Edinburgh red/green timer pixel control remains High. Its frames were repeated
+to isolate the spatial gate, so this is not continuous-video recall evidence.
+Some other patches can still pass localization. A weak chromatic change plus
+uniform exposure shift remains a miss in both versions. Seventy-six focused
+tests and types passed; independent review found no scoped regression. Coverage
+and exact endpoint error have not improved on the fixed development set.
 
 Local detailed evidence currently lives under ignored `test-results/detector-ten/`,
 `test-results/detection-cycles/`, and `test-results/finish-cycles/`.
