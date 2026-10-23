@@ -10,7 +10,7 @@ export interface MobileWorkflowProps {
   savedCount: number;
 }
 
-export type NextStepStage = "waiting" | "loading" | "ready" | "analyzing" | "review-start" | "review-finish" | "results";
+export type NextStepStage = "waiting" | "loading" | "ready" | "analyzing" | "review-start" | "review-finish" | "select-climber" | "preparing-climber" | "results";
 
 export interface NextStepCardProps {
   stage: NextStepStage;
@@ -19,6 +19,7 @@ export interface NextStepCardProps {
   onReview?: () => void;
   onChooseVideo?: () => void;
   onCancel?: () => void;
+  onSelectClimber?: () => void;
   saved?: boolean;
   canCompare?: boolean;
 }
@@ -155,13 +156,21 @@ const STEP_COPY: Record<NextStepStage, { number: string; label: string; title: s
     number: "03", label: "Check the finish", title: "Confirm the finish frame.",
     description: "Check the visible finish contact or signal before using the total time. You can adjust it frame by frame.",
   },
+  "select-climber": {
+    number: "03", label: "Choose your climber", title: "Two lane regions need a choice.",
+    description: "Start is accepted. Select your climber in the Start frame before running lane-specific analysis, or review Finish manually.",
+  },
+  "preparing-climber": {
+    number: "03", label: "Opening climber setup", title: "Opening the Start frame.",
+    description: "Wait for the recording's frame before marking your climber.",
+  },
   results: {
     number: "04", label: "Keep your progress", title: "Review it. Save it. Compare it.",
     description: "Check your timing against the video, then save this attempt to compare with your next run.",
   },
 };
 
-export function NextStepCard({ stage, status, onAnalyze, onReview, onChooseVideo, onCancel, saved = false, canCompare = false }: NextStepCardProps) {
+export function NextStepCard({ stage, status, onAnalyze, onReview, onChooseVideo, onCancel, onSelectClimber, saved = false, canCompare = false }: NextStepCardProps) {
   const copy = stage === "results" && saved ? {
     number: "04", label: "Saved on this device", title: canCompare ? "See which section changed." : "Ready for your next attempt.",
     description: canCompare ? "Compare accepted timing and reviewed sections, then replay the change."
@@ -171,7 +180,9 @@ export function NextStepCard({ stage, status, onAnalyze, onReview, onChooseVideo
     ? { label: "Choose a video", onClick: onChooseVideo }
     : stage === "ready" && onAnalyze
       ? { label: "Analyze this run", onClick: onAnalyze }
-      : (stage === "review-start" || stage === "review-finish") && onReview
+      : stage === "select-climber" && onSelectClimber
+        ? { label: "Select climber", onClick: onSelectClimber }
+        : (stage === "review-start" || stage === "review-finish") && onReview
         ? { label: stage === "review-start" ? "Review start" : "Review finish", onClick: onReview }
         : undefined;
 
@@ -185,7 +196,9 @@ export function NextStepCard({ stage, status, onAnalyze, onReview, onChooseVideo
         {status ? <p className="next-step-status" role="status">{status}</p> : null}
       </div>
       {action ? <button type="button" className="next-step-action" onClickCapture={stage === "review-start" || stage === "review-finish" ? focusReviewOpener : undefined} onClick={action.onClick}>{action.label}<span aria-hidden="true">→</span></button> : null}
+      {stage === "select-climber" && onReview ? <button type="button" className="next-step-cancel" onClickCapture={focusReviewOpener} onClick={onReview}>Review finish</button> : null}
       {stage === "analyzing" && onCancel ? <button type="button" className="next-step-cancel" onClick={onCancel}>Cancel analysis</button> : null}
+      {stage === "preparing-climber" && onCancel ? <button type="button" className="next-step-cancel" onClick={onCancel}>Cancel opening frame</button> : null}
       {stage === "results" ? <a className="next-step-action" href={saved ? canCompare ? "#attempt-comparison" : "#upload" : "#save-analysis"}>
         {saved ? canCompare ? "Compare saved attempts" : "Open another recording" : "Save this attempt"}<span aria-hidden="true">→</span></a> : null}
     </section>

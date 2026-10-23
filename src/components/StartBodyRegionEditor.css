@@ -1,0 +1,11 @@
+.body-region-editor {
+  min-width: 0;
+  margin: 16px 0 0;
+  border: 1px solid var(--line, #d9dad7);
+  border-radius: 8px;
+  padding: 12px;
+}
+
+.body-region-editor .form-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}

@@ -13,6 +13,7 @@ import { savedBiomechanicsKey, savedSessionEditableKey } from "./lib/sessionSave
 import { hasComparableTiming } from "./lib/attemptComparison";
 import { exportTextFile, exportResultMessage } from "./lib/exportFile";
 import { MobileWorkflow, NextStepCard } from "./components/MobileWorkflow";
+import { StartBodyRegionEditor } from "./components/StartBodyRegionEditor";
 import RecordingGuide from "./components/RecordingGuide";
 import SavedAttemptsPanel from "./components/SavedAttemptsPanel";
 import AnalysisActivity from "./components/AnalysisActivity";
@@ -66,13 +67,13 @@ import {
 } from "./lib/routeAlignment";
 import { fuseStartEvidence, requireContinuousStartScene, type FusedStartDecision, type StartEvidence } from "./lib/startSignalFusion";
 import { associateStartLanes, startLaneId, type AnalysisLaneCandidate, type StartLaneEvidence } from "./lib/startLaneEvidence";
-import { assessFinishLaneIdentity, clearAutomaticLaneBiomechanics, clearAutomaticLaneDependentMarkers, finishLaneEvidenceAfterScan } from "./lib/finishLaneIdentity";
+import { assessFinishLaneIdentity, clearAutomaticLaneBiomechanics, clearAutomaticLaneDependentMarkers, finishLaneEvidenceAfterScan, FINISH_LANE_SELECTION_REQUIRED } from "./lib/finishLaneIdentity";
 import { canContinueSuggestedLaneRun, clearAthleteDependentMarkers, hasFreshLaneRunContext, laneRunContextKey } from "./lib/athleteLaneContext";
 import { assessAutomaticStartBodyAudit } from "./lib/startBodyAudit";
 import { deriveAutomaticStartBodyZone, resolveAnalysisBodyZone } from "./lib/startRegion";
 import { applyTimestampAcceptance, clearMarkerTimestamp, sanitizeTimestampSequence } from "./lib/timestampIntegrity";
 import { finishPrecisionNote, timingConfidence } from "./lib/timingEvidence";
-import { captureFrame, captureVideoPixels, clamp, hasUsableVideoMetadata, roundTime, sampleFrameAt, sampleZoneOpponentColor, seekTo } from "./lib/videoFrameSampler";
+import { captureFrame, captureVideoPixels, clamp, hasUsableVideoMetadata, roundTime, sampleFrameAt, sampleZoneOpponentColor, seekTo, seekToFrameObservation } from "./lib/videoFrameSampler";
 import { getVideoUiState } from "./lib/videoUiState";
 import {
   createSessionLibraryBackup,
@@ -246,6 +247,10 @@ function App() {
   const [reviewFrameReady, setReviewFrameReady] = useState(true);
   const [jumpInput, setJumpInput] = useState("");
   const [capturedFrame, setCapturedFrame] = useState<string | null>(null);
+  const [capturedFrameRawTime, setCapturedFrameRawTime] = useState<number | null>(null);
+  const [climberSetupRunning, setClimberSetupRunning] = useState(false);
+  const [climberSetupStatus, setClimberSetupStatus] = useState("");
+  const climberSetupAbortRef = useRef<AbortController | null>(null);
   const [selectedZoneId, setSelectedZoneId] = useState<ZoneId>("startLight");
   const [zoneDisplayMode, setZoneDisplayMode] = useState<ZoneDisplayMode>("fit");
   const [showImageBounds, setShowImageBounds] = useState(false);
@@ -348,6 +353,7 @@ function App() {
         analysisRuns.automatic?.abort();
         secondPassAbortRef.current?.abort();
         finishReviewAbortRef.current?.abort();
+        cancelClimberSetup();
         videoSession.cancelPreparation();
         setVideoPreparationPending(false);
       });
@@ -362,6 +368,8 @@ function App() {
       analysisRuns.automatic?.abort();
       secondPassAbortRef.current?.abort();
       finishReviewAbortRef.current?.abort();
+      climberSetupAbortRef.current?.abort();
+      climberSetupAbortRef.current = null;
       videoSession.cancelPreparation();
         pendingVideoAttachmentRef.current?.prepared.dispose();
       pendingVideoAttachmentRef.current = null;
@@ -587,7 +595,8 @@ function App() {
       : calibrationReady && ["calibrated", "blocked", "manual"].includes(resolvedStartProfile)
       ? "Calibrated light transition"
       : "Generic color-distance detection";
-  const videoTaskRunning = calibrationSampling || frameTestRunning || startRunning || movementRunning || movementPreviewRunning || finishRunning || biomechanicsRunning || autoAnalysisRunning || secondPassRunning || finishReviewRunning;
+  const videoTaskRunning = calibrationSampling || frameTestRunning || startRunning || movementRunning || movementPreviewRunning || finishRunning || biomechanicsRunning || autoAnalysisRunning || secondPassRunning || finishReviewRunning || climberSetupRunning;
+  const opposingFinishLanes = finishResult?.reason === FINISH_LANE_SELECTION_REQUIRED;
   const videoReplacementBlocked = videoTaskRunning || librarySaving || importPending;
   const videoAnalysisRunning = videoReplacementBlocked || videoPreparationPending || pendingVideoAttachment !== null;
   const visibleTimestampReview = timestampReview && (!timestampReview.secondPassBasis || timestampReview.secondPassBasis === activeHold10SecondPass) ? timestampReview : null;
@@ -645,6 +654,8 @@ function App() {
     setCommittedLaunchMinDelay(0.1);
     setOfficialTotalTime("");
     setCapturedFrame(null);
+    setCapturedFrameRawTime(null);
+    setClimberSetupStatus("");
     pendingAutomaticContextRef.current = null;
     setZones({});
     setBiomechanics(createDefaultBiomechanicsSession());
@@ -801,6 +812,8 @@ function App() {
     setMetadata({ ...prepared.metadata, metadataLoaded: false });
     setVideoLoadError("");
     setCapturedFrame(null);
+    setCapturedFrameRawTime(null);
+    setClimberSetupStatus("");
     setFrameDebug(null);
     setStartResult(null);
     setSuggestedStartRawTime(null);
@@ -1254,6 +1267,69 @@ function App() {
 
     const captured = captureFrame(video);
     setCapturedFrame(captured.dataUrl);
+    setCapturedFrameRawTime(readDecodedVideoFrameTime(video)?.mediaTime ?? video.currentTime);
+    setClimberSetupStatus("");
+  }
+
+  function cancelClimberSetup() {
+    if (!climberSetupAbortRef.current) return;
+    climberSetupAbortRef.current.abort();
+    // Keep other decoder work disabled until the pending seek settles.
+    setClimberSetupStatus("Stopping frame setup…");
+  }
+
+  async function openClimberSelection() {
+    const video = videoRef.current;
+    if (videoAnalysisRunning || !isCurrentVideoReady(video) || startSignalRaw === null || climberSetupAbortRef.current) return;
+    const controller = new AbortController(), source = video.src, context = analysisContextRef.current;
+    const current = () => !controller.signal.aborted && analysisContextRef.current === context && videoRef.current === video && video.src === source;
+    climberSetupAbortRef.current = controller;
+    setClimberSetupRunning(true);
+    setClimberSetupStatus("Opening the accepted Start frame…");
+    closeTimestampReview();
+    video.pause();
+    try {
+      const observation = await seekToFrameObservation(video, startSignalRaw, { exact: true, signal: controller.signal });
+      if (!current()) return;
+      const captured = captureFrame(video);
+      setCapturedFrame(captured.dataUrl);
+      setCapturedFrameRawTime(observation.decoded?.mediaTime ?? observation.cursorTime);
+      setSelectedZoneId("startBody");
+      setCurrentTime(video.currentTime);
+      setClimberSetupStatus("Start frame ready. Draw around your climber or enter the region edges below, then run analysis again. You can also review Finish manually.");
+      window.requestAnimationFrame(() => {
+        if (!current()) return;
+        const tools = document.getElementById("review-tools"), setup = document.querySelector<HTMLDetailsElement>("#zones details");
+        if (tools instanceof HTMLDetailsElement) tools.open = true;
+        if (setup) setup.open = true;
+        document.getElementById("manual-zone-target")?.focus();
+        document.getElementById("zones")?.scrollIntoView({ block: "start", behavior: "instant" });
+      });
+    } catch (error) {
+      if (current()) setClimberSetupStatus(error instanceof Error ? `Could not open the Start frame: ${error.message}` : "Could not open the Start frame. Try frame review again.");
+    } finally {
+      if (climberSetupAbortRef.current === controller) {
+        climberSetupAbortRef.current = null;
+        if (analysisContextRef.current === context && videoRef.current === video && video.src === source) {
+          setClimberSetupRunning(false);
+          if (controller.signal.aborted) setClimberSetupStatus("Frame setup cancelled. Your annotations were kept.");
+        }
+      }
+    }
+  }
+
+  function commitZone(zone: NormalizedZone): boolean {
+    if (videoAnalysisRunning || !capturedFrame) return false;
+    const nextZone = normalizeZone(zone);
+    if (nextZone.x2 - nextZone.x1 <= 0.005 || nextZone.y2 - nextZone.y1 <= 0.005) return false;
+    pendingAutomaticContextRef.current = null;
+    if (zone.id === "startLight") {
+      invalidateStartLightDependents("Start-light region changed. Its colors will be learned again on the next analysis.");
+    } else if (zone.id === "startBody" && (!normalizedZonesEqual(zones.startBody, nextZone) || zones.startBody?.label.startsWith("Automatic lane"))) {
+      invalidateAthleteSelection("Climber selection changed. Start was kept; movement, Hold 10, Finish, and tracking need a new review or analysis.");
+    }
+    setZones(current => ({ ...current, [zone.id]: nextZone }));
+    return true;
   }
 
   function beginZoneDrag(event: PointerEvent<HTMLDivElement>) {
@@ -1308,18 +1384,7 @@ function App() {
       return;
     }
 
-    const width = Math.abs(draftZone.x2 - draftZone.x1);
-    const height = Math.abs(draftZone.y2 - draftZone.y1);
-    if (width > 0.005 && height > 0.005) {
-      pendingAutomaticContextRef.current = null;
-      const nextZone = normalizeZone(draftZone);
-      if (draftZone.id === "startLight") {
-        invalidateStartLightDependents("Start-light region changed. Its colors will be learned again on the next analysis.");
-      } else if (draftZone.id === "startBody" && !normalizedZonesEqual(zones.startBody, nextZone)) {
-        invalidateAthleteSelection("Climber selection changed. Start was kept; movement, Hold 10, Finish, and tracking need a new review or analysis.");
-      }
-      setZones((current) => ({ ...current, [draftZone.id]: nextZone }));
-    }
+    commitZone(draftZone);
     setDraftZone(null);
     setDragStart(null);
     event.currentTarget.releasePointerCapture(event.pointerId);
@@ -2449,6 +2514,7 @@ function App() {
     setMetadata(current => current ? { ...current, metadataLoaded: false } : null);
     setReviewFrameReady(false);
     analysisRuns.automatic?.abort();
+    cancelClimberSetup();
     secondPassAbortRef.current?.abort();
     finishReviewAbortRef.current?.abort();
   }
@@ -3194,6 +3260,8 @@ function App() {
       videoFileRef.current = null;
       setCurrentTime(0);
       setCapturedFrame(null);
+      setCapturedFrameRawTime(null);
+      setClimberSetupStatus("");
       pendingSessionVideoMetadataRef.current = null;
       pendingVideoFileNameRef.current = null;
       recordingLineagesRef.current = new Set();
@@ -3576,11 +3644,12 @@ function App() {
       )}
 
       {hasSelectedVideo && <NextStepCard
-        stage={!hasLoadedVideo ? "loading" : videoTaskRunning ? "analyzing" : suggestedStartRawTime !== null || startReviewNeeded ? "review-start" : calculatedClimbTime !== null ? "results" : startSignalRaw !== null ? "review-finish" : "ready"}
-        status={autoAnalysisStatus || undefined}
+        stage={!hasLoadedVideo ? "loading" : climberSetupRunning ? "preparing-climber" : videoTaskRunning ? "analyzing" : suggestedStartRawTime !== null || startReviewNeeded ? "review-start" : opposingFinishLanes ? "select-climber" : calculatedClimbTime !== null ? "results" : startSignalRaw !== null ? "review-finish" : "ready"}
+        status={(climberSetupRunning || opposingFinishLanes ? climberSetupStatus || autoAnalysisStatus : autoAnalysisStatus) || undefined}
         saved={openAttemptSaved} canCompare={canCompareSaved}
         onAnalyze={() => { void runAutomaticAnalysis(); }}
-        onCancel={autoAnalysisRunning ? () => analysisRuns.automatic?.abort() : undefined}
+        onCancel={climberSetupRunning ? cancelClimberSetup : autoAnalysisRunning ? () => analysisRuns.automatic?.abort() : undefined}
+        onSelectClimber={() => { void openClimberSelection(); }}
         onReview={suggestedStartRawTime !== null ? () => reviewTimestamp({
           label: "Quick Analyze start", suggestedRawTime: Math.max(0, roundTime(suggestedStartRawTime + startSignalOffset)),
           confidence: startResult?.confidence ?? "Medium", acceptLabel: "Accept start",
@@ -3965,7 +4034,8 @@ function App() {
             <button className="primary" onClick={captureCurrentFrameForZones} disabled={videoAnalysisRunning}>
               Capture Current Frame for Zone Setup
             </button>
-            <select value={selectedZoneId} onChange={(event) => setSelectedZoneId(event.target.value as ZoneId)} disabled={videoAnalysisRunning}>
+            <label htmlFor="manual-zone-target">Manual zone</label>
+            <select id="manual-zone-target" value={selectedZoneId} onChange={(event) => setSelectedZoneId(event.target.value as ZoneId)} disabled={videoAnalysisRunning}>
               {ZONES.map((zone) => (
                 <option key={zone.id} value={zone.id}>
                   {zone.label}
@@ -3999,10 +4069,12 @@ function App() {
             </button>
           </div>
           <p className="muted zone-helper">
-            Zones are normally unnecessary. If two climbers are visible, draw one rough Start Body Zone around your climber so identity stays locked to that lane. Draw a Start Light Zone only if automatic sensor discovery fails. If the numbered route overlay places Hold 10 incorrectly, draw a small Hold 10 Zone over the real hold to correct contact timing.
+            Zones are normally unnecessary. If two climbers are visible, draw one rough Start Body Zone around your climber to guide analysis to that lane. Draw a Start Light Zone only if automatic sensor discovery fails. If the numbered route overlay places Hold 10 incorrectly, draw a small Hold 10 Zone over the real hold to correct contact timing.
           </p>
 
           {capturedFrame ? (
+            <>
+            {capturedFrameRawTime !== null ? <p className="muted" data-zone-frame-time={capturedFrameRawTime}>Captured source frame near {capturedFrameRawTime.toFixed(3)}s. Selecting a region does not accept a timing event.</p> : null}
             <div
               ref={zoneFrameWrapRef}
               className={`zone-frame-wrap ${zoneDisplayMode}`}
@@ -4028,6 +4100,9 @@ function App() {
                 </div>
               </div>
             </div>
+            {selectedZoneId === "startBody" ? <StartBodyRegionEditor zone={zones.startBody} disabled={videoAnalysisRunning}
+              onApply={commitZone} /> : null}
+            </>
           ) : (
             <p className="muted">Capture a frame to draw normalized detection zones.</p>
           )}

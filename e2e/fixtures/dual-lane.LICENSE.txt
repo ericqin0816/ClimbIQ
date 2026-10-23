@@ -1,0 +1,9 @@
+CC0 1.0 Universal (CC0 1.0) Public Domain Dedication
+https://creativecommons.org/publicdomain/zero/1.0/
+
+The original geometric animation and synthesized tones in dual-lane.mp4,
+its reproducible generator, and authored reference metadata are dedicated
+to the public domain under CC0 1.0.
+
+This is an authored workflow test fixture. It depicts no real person and
+provides no independent human annotation or detector accuracy evidence.

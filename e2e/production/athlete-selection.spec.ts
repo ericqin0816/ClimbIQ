@@ -7,7 +7,9 @@ test("reattached automatic zones need fresh evidence and deleting the athlete cl
   test.skip(process.platform === "win32" && testInfo.project.name.startsWith("webkit"), "macOS CI verifies the media decoder; local Windows WebKit cannot decode this fixture.");
   const session = createPracticeSession("a"); // Authored workflow fixture, never an independent event label.
   session.zones.startBody = { id: "startBody", label: "Selected synthetic climber", x1: .1, x2: .45, y1: .4, y2: .9 };
-  session.zones.startLight = { id: "startLight", label: "Auto-detected fixture light", x1: .2, x2: .23, y1: .7, y2: .75 };
+  // Use the actual persisted automatic label: unknown labels are normalized
+  // into manual setup and would exercise a different authority policy.
+  session.zones.startLight = { id: "startLight", label: "Auto-detected green-to-blue start light", x1: .2, x2: .23, y1: .7, y2: .75 };
   session.startLightCalibration = { beforeStartRGB: { r: 10, g: 100, b: 20 }, afterStartRGB: { r: 10, g: 20, b: 100 }, colorDelta: 113 };
   session.timestamps.find(marker => marker.id === "hold10")!.acceptanceMode = "frame-review";
   await page.goto("/");
@@ -34,4 +36,5 @@ test("reattached automatic zones need fresh evidence and deleting the athlete cl
   expect(dataset.acceptedTimestamps.find((marker: any) => marker.markerId === "startSignal").acceptedRawTime).toBe(1);
   expect(dataset.acceptedTimestamps.filter((marker: any) => marker.markerId !== "startSignal").every((marker: any) => marker.acceptedRawTime === null)).toBe(true);
   expect(dataset.zones.startBodyZone).toBeNull();
+  expect(dataset.zones.startLightZone.label).toBe("Auto-detected green-to-blue start light");
 });

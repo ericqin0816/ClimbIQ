@@ -1,0 +1,35 @@
+{
+  "version": 1,
+  "synthetic": true,
+  "workflowOnly": true,
+  "license": "CC0-1.0",
+  "width": 160,
+  "height": 284,
+  "fps": 30,
+  "duration": 8,
+  "sha256": "9a84c65d620ec0b82317769fee3283231f8937e3dd266362f48ce0cc381012a7",
+  "authoredStart": 1.4,
+  "authoredLaunch": 1.7,
+  "tones": [
+    {
+      "onset": 0.4,
+      "frequency": 550
+    },
+    {
+      "onset": 0.9,
+      "frequency": 550
+    },
+    {
+      "onset": 1.4,
+      "frequency": 1100
+    }
+  ],
+  "referenceMethod": "Original geometric animation and synthesized audio. Authored clocks are workflow controls, not independent human labels or real-climber accuracy evidence.",
+  "decodedSourcePTS": {
+    "frames": 240,
+    "first": 0,
+    "last": 7.966667,
+    "checkedAgainstAuthoredGrid": true,
+    "maxToleranceSeconds": 0.00001
+  }
+}
