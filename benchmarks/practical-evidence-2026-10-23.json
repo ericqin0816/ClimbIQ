@@ -11,7 +11,7 @@
     "firstPredictiveRunStartedAt": "2026-10-23T14:52:36.188Z",
     "comparisonToleranceSeconds": 0.1,
     "toleranceMeaning": "Predeclared observational interval tolerance only. No accepted fresh automatic endpoints means no automatic timing-error result.",
-    "splitMeaning": "Held out only for each group first default primary. After prediction exposure all group reruns/tuning are development; guided diagnostics do not add independent attempts."
+    "splitMeaning": "Held out for the first frozen default batch of predeclared clip primaries, with the known Jan clips in one conservatively grouped source group. After prediction exposure all group reruns/tuning are development; guided diagnostics do not add independent attempts."
   },
   "frozenRunEnvironment": {
     "build": {
@@ -36,7 +36,9 @@
   },
   "counts": {
     "distinctOriginalAttempts": 4,
-    "wholeSourceClimberGroups": 3,
+    "wholeSourceGroups": 3,
+    "groupCountMeaning": "Three source groups do not certify three independent named athletes or athlete disjointness across the historical corpus. Known Jan sources are conservatively grouped together; named athlete/lane identity remains unverified.",
+    "namedAthleteDisjointnessAcrossHistoricalCorpusCertified": false,
     "primaryEndpointOpportunities": 8,
     "acceptedAutomaticEndpoints": 0,
     "automaticCoverageFraction": 0,

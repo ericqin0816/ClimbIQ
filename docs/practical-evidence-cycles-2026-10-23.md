@@ -7,7 +7,8 @@ partly undecodable tail, comparison safeguards, and replay reliability.
 Automatic detection has not earned a 9/10 rating. Four fresh public attempts
 produce no automatically accepted endpoints in the default workflow.
 
-Closing verification and cycle 10 grading are pending in this draft.
+All ten scored review/improvement cycles are complete. No model weights were
+trained, and no automatic-accuracy gain is claimed from these changes.
 
 ## How the scores work
 
@@ -39,7 +40,19 @@ Git. Public availability does not establish redistribution permission.
 | 7 | 7.3 | 5.6 | A pair trial requested Finish 15.2 seconds but saved the initial 16.167-second cursor. Its initial harness pass was invalidated. Fix actions during pending native seeks and retain the failure. |
 | 8 | 7.5 | 5.6 | Pending Jump now preserves typed input/focus and cannot silently discard a seek. Both phone heights pass; a native 2 fps control saves 0.5-second observation intervals. Initial real replay still pauses, so continuity remains limited. |
 | 9 | 7.7 | 5.9 | Four fresh default attempts yield Start review 4/4 and Finish not run 4/4: automatic coverage 0/8. P07 supports explicit manual recovery within frozen observation brackets. Add context/clock review before performance claims and investigate the real replay interruption. |
-| 10 | Pending | Pending | Verify the paused replay-correction owner, truthful endpoint completion, development regression, and full production workflows. |
+| 10 | 7.8 | 5.9 | Paused replay correction and truthful endpoint completion pass native regressions. The real pair completes 3/3 after 2/3 before; a 1.531-pixel phone action-container overlap is repaired without weakening its assertion. All 46 local production workflows pass. Next, gather supported fixed-phone and human field evidence. |
+
+Separate closing reviews retain their own criteria:
+
+| Reviewer / scope | Practicality /10 | Evidence /10 |
+| --- | ---: | ---: |
+| Fixed-rubric evaluator, canonical ledger above | 7.8 | 5.9 |
+| Independent skeptical product/evidence reviewer | 7.7 | 5.7 |
+| Independent experience/workflow reviewer | 8.0 | 6.0 |
+
+The engineering reviewer separately rates scoped code/reliability **9.0/10**.
+That grade does not substitute for product usefulness or detection evidence.
+No reviewer establishes human training benefit from a supplied-cursor script.
 
 The canonical cycle numbers follow the ledger, not every exploratory filename.
 For example, the retained `cycle04-tail-candidate.json` artifact belongs to
@@ -162,10 +175,21 @@ subsequent endpoint-status change is typechecked and built cleanly at
 `f531d8b7e4a0eac2b75ed41a97724ef224339ec9`. Its local Chromium desktop/phone
 suite passes 45/46: all comparison checks pass, while the short-phone review
 action container overlaps bottom navigation by 1.531 pixels. That layout
-failure is preserved and its assertion is retained for the repair.
-The same runtime passes all 46 hosted macOS WebKit desktop/phone workflows and
-the hosted verification job in [CI run 39978095132](https://github.com/ericqin0816/ClimbIQ/actions/runs/39978095132).
-Final geometry repair and complete delivery checks remain pending.
+failure is preserved and its assertion is retained for the repair. Reducing only
+the short-phone action wrapper's vertical padding from four to two pixels saves
+four pixels, while preserving 44-pixel touch targets, font sizes and the strict
+geometry assertion. Clean `8fe669bd87131523b27c524d9ed11ffc9b972d5a` then passes
+**46/46 local production workflows**: 23 desktop and 23 phone, no skips,
+unexpected failures or flaky cases. Both 320×568 and 320×740 review checks pass.
+
+The earlier complete runtime passes all 46 hosted Chromium desktop/phone
+workflows, all 46 macOS WebKit desktop/phone workflows, and the verification job
+in [CI run 39978095132](https://github.com/ericqin0816/ClimbIQ/actions/runs/39978095132).
+The subsequent geometry build also passes **46/46 Chromium** and **46/46 macOS
+WebKit** workflows plus the verification job in
+[CI run 39979862781](https://github.com/ericqin0816/ClimbIQ/actions/runs/39979862781).
+Production dependency audit reports zero entries. WebKit phone viewport coverage
+does not replace testing on an actual iPhone.
 The first branch CI run exposed two stale Finish-button locators and a WebKit
 phone endpoint failure; those failures are retained, not counted as passes.
 
