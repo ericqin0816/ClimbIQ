@@ -157,7 +157,7 @@ export async function detectFirstMovement({
   debug.firstThresholdCrossingTime = debug.detectedSpikes[0]?.time;
 
   const requiredFrames = REQUIRED_FRAMES[sensitivity];
-  const candidates = buildMotionCandidates({
+  const allCandidates = buildMotionCandidates({
     samples: debug.samples,
     startSignalRawTime,
     searchEnd,
@@ -170,6 +170,10 @@ export async function detectFirstMovement({
     committedLaunchMinDelay,
     frameInterval: debug.frameInterval ?? 1 / fps,
   });
+  // The six-row presentation limit must not discard a reliable launch before
+  // semantic selection. Weak early motion can otherwise occupy every row.
+  const selectedCandidate = selectMotionCandidate(allCandidates, earliestThreshold, committedThreshold, requiredFrames, movementDefinition, committedLaunchMinDelay);
+  const candidates = limitPresentedCandidates(allCandidates, selectedCandidate);
   debug.topMotionSpikes = candidates;
   debug.topMotionPeaks = getTopMotionPeaks(debug.samples, startSignalRawTime);
   debug.movementSegments = buildMotionSegments(debug.samples, earliestThreshold).map((segment) => ({
@@ -181,7 +185,6 @@ export async function detectFirstMovement({
     totalMotion: segment.totalMotion,
   }));
 
-  const selectedCandidate = selectMotionCandidate(candidates, earliestThreshold, committedThreshold, requiredFrames, movementDefinition, committedLaunchMinDelay);
   const zoneLabel = usingFallbackZone ? "fallback lower-center region" : "Start Body Zone";
   const fallbackWarning = usingFallbackZone
     ? " Used fallback lower-center motion because Start Body Zone was missing. This may include camera shake or background movement."
@@ -420,8 +423,15 @@ function buildMotionCandidates({
   }
 
   return dedupeCandidates(candidates)
-    .sort((a, b) => motionCandidateRank(a, threshold, requiredFrames) - motionCandidateRank(b, threshold, requiredFrames))
-    .slice(0, 6);
+    .sort((a, b) => motionCandidateRank(a, threshold, requiredFrames) - motionCandidateRank(b, threshold, requiredFrames));
+}
+
+function limitPresentedCandidates(candidates: DetectionCandidate[], selected?: DetectionCandidate): DetectionCandidate[] {
+  const visible = candidates.slice(0, 6);
+  if (selected && !visible.includes(selected)) {
+    visible[visible.length - 1] = selected;
+  }
+  return visible;
 }
 
 function findMotionOnsetIndex(

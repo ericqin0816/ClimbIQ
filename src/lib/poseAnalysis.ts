@@ -338,13 +338,6 @@ export function selectTrackedPose(
     }))
     .sort((left, right) => left.score - right.score);
 
-  // A Start Body Zone is an identity hint, not a reason to discard the only
-  // person in the first frame. This fallback prevents a slightly tight zone
-  // from turning an otherwise valid single-athlete clip into 0% tracking.
-  if (!previousCenter && scored.length === 1) {
-    return { selected: scored[0] };
-  }
-
   if (previousCenter) {
     const maxDistance = clampNumber(0.12 + elapsedSincePrevious * 0.45, 0.12, 0.4);
     const backtrackLimit = highestTrackedY === undefined
@@ -394,8 +387,17 @@ export function selectTrackedPose(
     .map((candidate) => ({ ...candidate, zoneDistance: pointDistance(candidate.center, zoneCenter) }))
     .sort((left, right) => left.zoneDistance - right.zoneDistance);
   const zoneDiagonal = Math.hypot(identityZone.x2 - identityZone.x1, identityZone.y2 - identityZone.y1);
-  if (byZoneDistance[0].zoneDistance <= Math.max(0.1, zoneDiagonal * 0.75)) {
-    return { selected: byZoneDistance[0], warning: "Initial pose was near, but not inside, the Start Body Zone." };
+  // A slightly tight body zone may place the intended torso just outside its
+  // edges. Keep the existing proximity allowance, but require a unique match.
+  // A sole distant bystander must not bypass a user's explicit selection, and
+  // two nearby people must not acquire identity merely by detector array order.
+  const nearZone = byZoneDistance.filter((candidate) =>
+    candidate.zoneDistance <= Math.max(0.1, zoneDiagonal * 0.75));
+  if (nearZone.length === 1) {
+    return { selected: nearZone[0], warning: "Initial pose was near, but not inside, the Start Body Zone." };
+  }
+  if (nearZone.length > 1) {
+    return { warning: "More than one person anchor was near the Start Body Zone, so identity was ambiguous." };
   }
   return { warning: "No detected person matched the Start Body Zone." };
 }

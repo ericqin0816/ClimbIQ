@@ -102,3 +102,35 @@ describe("first-movement cancellation", () => {
     expect(result.debug.failureReason).toContain("Video seek timed out");
   });
 });
+
+describe("movement candidate selection before presentation limits", () => {
+  it.each(["earliest", "committed"] as const)(
+    "retains a reliable later %s launch after more than six weak early candidates",
+    async movementDefinition => {
+      let frame = 0;
+      let brightness = 100;
+      mocks.capture.mockImplementation(() => {
+        // Separate the later launch from the weak early segment. Otherwise
+        // committed mode correctly rejects a segment already underway at Start.
+        brightness += (frame % 2 ? 1 : -1) * (frame < 9 ? 1 : frame < 12 ? 0 : 14);
+        frame += 1;
+        const data = new Uint8ClampedArray(64);
+        for (let index = 0; index < data.length; index += 4) {
+          data[index] = data[index + 1] = data[index + 2] = brightness;
+          data[index + 3] = 255;
+        }
+        return { imageData: { width: 4, height: 4, data }, pixelZone: { x: 0, y: 0, width: 4, height: 4 } };
+      });
+      const result = await detectFirstMovement({ ...options(), movementDefinition });
+      expect(result.detected).toBe(true);
+      expect(result.confidence).not.toBe("Low");
+      expect(result.confidence).not.toBe("None");
+      expect(result.rawTime).toBeGreaterThan(2.1);
+      expect(result.rawTime).toBeLessThan(2.9);
+      const candidates = result.candidates ?? [];
+      expect(candidates.length).toBeLessThanOrEqual(6);
+      expect(candidates.some(candidate => candidate.rawTime === result.rawTime)).toBe(true);
+      expect(result.debug.topMotionSpikes?.some(candidate => candidate.rawTime === result.rawTime)).toBe(true);
+    },
+  );
+});

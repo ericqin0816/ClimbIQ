@@ -137,6 +137,36 @@ describe("cropped pose inference", () => {
 });
 
 describe("climber identity selection", () => {
+  it.each([[0.95, 0.2], [0.05, 0.2], [0.5, 0.1]])(
+    "does not let a lone distant person at %j bypass an explicit Start Body Zone",
+    (x, y) => {
+      const result = selectTrackedPose([poseAt(x, y)], startBodyZone);
+      expect(result.selected).toBeUndefined();
+      expect(result.warning).toContain("Start Body Zone");
+    },
+  );
+
+  it("does not choose by array order when two people are near but outside the body zone", () => {
+    const left = poseAt(0.3, 0.82);
+    const right = poseAt(0.7, 0.82);
+    for (const candidates of [[left, right], [right, left]]) {
+      const result = selectTrackedPose(candidates, startBodyZone);
+      expect(result.selected).toBeUndefined();
+      expect(result.warning).toContain("ambiguous");
+    }
+  });
+
+  it("retains a sole near-zone identity when an unrelated person is distant", () => {
+    const near = poseAt(0.5, 0.64);
+    const result = selectTrackedPose([poseAt(0.95, 0.2), near], startBodyZone);
+    expect(result.selected?.landmarks).toBe(near);
+  });
+
+  it("keeps an unhinted singleton available for later geometry checks", () => {
+    const only = poseAt(0.75, 0.4);
+    expect(selectTrackedPose([only]).selected?.landmarks).toBe(only);
+  });
+
   it("accepts the only person on the initial frame even when the body zone is tight", () => {
     const onlyPose = poseAt(0.5, 0.55);
     const result = selectTrackedPose([onlyPose], startBodyZone);
