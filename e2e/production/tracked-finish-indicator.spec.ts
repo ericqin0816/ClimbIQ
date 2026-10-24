@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { test, expect } from "./fixtures";
 
-test("indicator tracking keeps its marking frame after the review cursor moves", async ({ page }, testInfo) => {
+test("indicator tracking retains its marking frame or explains a missing native interval", async ({ page }, testInfo) => {
   test.setTimeout(120_000);
   test.skip(process.platform === "win32" && testInfo.project.name.startsWith("webkit"), "macOS CI exercises native WebKit codecs.");
   const file = path.resolve("e2e/fixtures/tracked-finish-pan.mp4");
@@ -27,6 +27,13 @@ test("indicator tracking keeps its marking frame after the review cursor moves",
   await start.click();
   await page.getByRole("button", { name: "Review finish", exact: true }).click();
   await seek(reference.anchorCursor);
+  const nativeInterval = await page.locator("#video-review video").evaluate(element => {
+    const frame = new VideoFrame(element as HTMLVideoElement);
+    try { return { timestamp: frame.timestamp, duration: frame.duration }; }
+    finally { frame.close(); }
+  });
+  if (testInfo.project.name.startsWith("chromium")) expect(nativeInterval.duration).toBeGreaterThan(0);
+  await testInfo.attach("marking-frame-native-interval-capability", { body: JSON.stringify(nativeInterval), contentType: "application/json" });
   const panel = page.locator("[data-finish-review-tools]");
   await panel.getByRole("button", { name: "Mark finish indicator", exact: true }).click();
   await expect(panel).toContainText("Frame: 7.000s");
@@ -39,26 +46,35 @@ test("indicator tracking keeps its marking frame after the review cursor moves",
   await seek(9);
   await expect(panel).toContainText("Frame: 7.000s");
   await panel.getByRole("button", { name: "Use this indicator area", exact: true }).click();
-  await expect(panel).toContainText("Tracking starts from your marking frame at 7.000s");
   const track = panel.getByRole("button", { name: "Track marked indicator", exact: true });
-  await expect(track).toBeEnabled();
-  await track.click();
-  const result = panel.locator("[data-guided-indicator-result]");
-  await expect(result).toContainText("No timing was accepted by this scan", { timeout: 90_000 });
-  await expect(result.locator("[data-tracked-indicator-status]")).toContainText("Full review window tracked");
-  const inspect = result.getByRole("button", { name: /^Inspect unverified indicator candidate at/ });
-  await expect(inspect).toBeEnabled();
-  const candidate = Number((await inspect.textContent())!.match(/at ([\d.]+)s/)![1]);
-  expect(Math.abs(candidate - reference.authoredIndicatorTransition)).toBeLessThanOrEqual(1 / reference.fps + .001);
-  // Inspection moves only the video. Before that, the9s cursor is restored.
-  const video = page.locator("#video-review video");
-  await expect.poll(() => video.evaluate(element => (element as HTMLVideoElement).currentTime)).toBeCloseTo(9, 2);
-  await expect(panel).toContainText("This frame is outside the tracked observations");
-  await expect(panel.locator("figure.finish-closeup")).toHaveCount(0);
-  await inspect.click();
-  await expect.poll(() => video.evaluate(element => (element as HTMLVideoElement).currentTime)).toBeCloseTo(candidate, 2);
-  await expect(panel.locator('[data-tracked-closeup="true"]')).toContainText("7.000s");
-  await testInfo.attach("tracked-indicator-review", { body: await panel.screenshot(), contentType: "image/png" });
+  if (nativeInterval.duration === null) {
+    // WebKit CI exposes a cursor-valued timestamp and no native duration.
+    // Assert the actual supported fallback, never invent a30fps interval.
+    await expect(track).toBeDisabled();
+    await expect(panel).toContainText("Frame tracking is unavailable here");
+    await expect(panel.locator("[data-guided-indicator-result]")).toHaveCount(0);
+    await expect(panel.getByRole("button", { name: "Scan marked indicator", exact: true })).toBeEnabled();
+  } else {
+    await expect(panel).toContainText("Tracking starts from your marking frame at 7.000s");
+    await expect(track).toBeEnabled();
+    await track.click();
+    const result = panel.locator("[data-guided-indicator-result]");
+    await expect(result).toContainText("No timing was accepted by this scan", { timeout: 90_000 });
+    await expect(result.locator("[data-tracked-indicator-status]")).toContainText("Full review window tracked");
+    const inspect = result.getByRole("button", { name: /^Inspect unverified indicator candidate at/ });
+    await expect(inspect).toBeEnabled();
+    const candidate = Number((await inspect.textContent())!.match(/at ([\d.]+)s/)![1]);
+    expect(Math.abs(candidate - reference.authoredIndicatorTransition)).toBeLessThanOrEqual(1 / reference.fps + .001);
+    // Inspection moves only the video. Before that, the9s cursor is restored.
+    const video = page.locator("#video-review video");
+    await expect.poll(() => video.evaluate(element => (element as HTMLVideoElement).currentTime)).toBeCloseTo(9, 2);
+    await expect(panel).toContainText("This frame is outside the tracked observations");
+    await expect(panel.locator("figure.finish-closeup")).toHaveCount(0);
+    await inspect.click();
+    await expect.poll(() => video.evaluate(element => (element as HTMLVideoElement).currentTime)).toBeCloseTo(candidate, 2);
+    await expect(panel.locator('[data-tracked-closeup="true"]')).toContainText("7.000s");
+    await testInfo.attach("tracked-indicator-review", { body: await panel.screenshot(), contentType: "image/png" });
+  }
   await page.getByRole("button", { name: "Close review", exact: true }).click();
   const download = page.waitForEvent("download");
   await page.getByRole("button", { name: "Download data", exact: true }).click();

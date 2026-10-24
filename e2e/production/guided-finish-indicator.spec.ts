@@ -40,6 +40,13 @@ test("a marked finish indicator gives review navigation without accepting timing
   const inspect = result.getByRole("button", { name: /^Inspect unverified indicator candidate at/ });
   await expect(inspect).toBeEnabled();
   const candidate = Number((await inspect.textContent())!.match(/at ([\d.]+)s/)![1]);
+  const beforeInspection = page.waitForEvent("download");
+  await page.getByRole("button", { name: "Download data", exact: true }).click();
+  await testInfo.attach("marked-indicator-context-before-inspection", { body: JSON.stringify({
+    dataset: JSON.parse(await readFile((await (await beforeInspection).path())!, "utf8")),
+    resultText: await result.innerText(), candidate,
+    cursor: await page.locator("#video-review video").evaluate(video => (video as HTMLVideoElement).currentTime),
+  }, null, 2), contentType: "application/json" });
   expect(Math.abs(candidate - reference.authoredFinishIndicator)).toBeLessThanOrEqual(1 / reference.fps + .001);
   await inspect.click();
   await expect.poll(() => page.locator("#video-review video").evaluate(video => (video as HTMLVideoElement).currentTime)).toBeCloseTo(candidate, 2);
