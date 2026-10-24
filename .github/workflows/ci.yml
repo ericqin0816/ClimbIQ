@@ -35,6 +35,15 @@ jobs:
       - run: npx playwright install --with-deps ${{ matrix.browser }}
       - name: Build the shipped app
         run: npm run build
+      - name: Retain WebKit indicator component diagnostics
+        if: matrix.browser == 'webkit'
+        run: |
+          node node_modules/vite/bin/vite.js --host 127.0.0.1 --port 5173 --strictPort >/tmp/climbiq-component-vite.log 2>&1 &
+          CLIMBIQ_COMPONENT_PID=$!
+          trap 'kill "$CLIMBIQ_COMPONENT_PID" || true' EXIT
+          curl --fail --silent --retry 20 --retry-connrefused --retry-delay 1 http://127.0.0.1:5173/ >/dev/null
+          mkdir -p test-results
+          node e2e/finish-indicator-probe.mjs --browser=webkit --diagnostics=true --video=e2e/fixtures/guided-finish-indicator.mp4 --sha=eef34ad20db63217d8ff6a030b9c9974dcd8fa78739327563790875154851266 --start=2.4 --lane=0.75 --indicator=0.7,0.48,0.82,0.62 --minimum=3.35 --maximum=5.85 --output=test-results/webkit-marked-indicator-component.json
       - name: Import, review, save, compare and recover
         run: npx playwright test ${{ matrix.projects }}
       - name: Keep production workflow evidence
