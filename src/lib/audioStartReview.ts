@@ -1,3 +1,4 @@
+import { waitForAudioOperation } from "./abortableAudioOperation";
 import {
   analyzeAudioChannelWindow,
   estimateSpectralBand,
@@ -77,7 +78,7 @@ export async function findAudioStartReview(options: FindAudioStartReviewOptions)
     try { await context?.close(); } catch { /* Preserve the analysis/cancellation error. */ }
   });
   try {
-    const bytes = await waitForReviewOperation(() => ownership.source.file.arrayBuffer(), options.signal,
+    const bytes = await waitForAudioOperation(() => ownership.source.file.arrayBuffer(), options.signal,
       "Audio review cancelled while reading the recording.");
     ownership.check();
     try { context = new Constructor({ sampleRate: ANALYSIS_RATE }); }
@@ -87,7 +88,7 @@ export async function findAudioStartReview(options: FindAudioStartReviewOptions)
     }
     options.onProgress?.("Decoding audio for a separate review suggestion…");
     ownership.check();
-    const decoded = await waitForReviewOperation(() => context!.decodeAudioData(bytes), options.signal,
+    const decoded = await waitForAudioOperation(() => context!.decodeAudioData(bytes), options.signal,
       "Audio review cancelled while decoding.", () => { void closeOwnedContext(); });
     ownership.check();
     const channels = Array.from({ length: decoded.numberOfChannels }, (_, index) => decoded.getChannelData(index));
@@ -104,30 +105,6 @@ export async function findAudioStartReview(options: FindAudioStartReviewOptions)
     // Context cleanup can yield after the last analysis check. The result must
     // still belong to the same exact recording when the promise is published.
     ownership.check();
-  }
-}
-
-/** Stop waiting promptly; a native read may still settle later, but cannot
- * open a decoder or publish a result after its owner has cancelled. */
-async function waitForReviewOperation<T>(operation: () => Promise<T>, signal: AbortSignal | undefined,
-  message: string, onCancel?: () => void): Promise<T> {
-  if (!signal) return operation();
-  let onAbort!: () => void;
-  const aborted = new Promise<never>((_, reject) => {
-    onAbort = () => {
-      // A decoder may not settle after close. Reject independently, while the
-      // caller's finally awaits this same owned cleanup exactly once.
-      onCancel?.();
-      const error = new Error(message);
-      error.name = "AbortError"; reject(error);
-    };
-    signal.addEventListener("abort", onAbort, { once: true });
-  });
-  try {
-    if (signal.aborted) onAbort();
-    return await Promise.race([aborted, signal.aborted ? aborted : operation()]);
-  } finally {
-    signal.removeEventListener("abort", onAbort);
   }
 }
 

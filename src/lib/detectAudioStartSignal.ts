@@ -1,4 +1,5 @@
 import type { Confidence } from "../types";
+import { waitForAudioOperation } from "./abortableAudioOperation";
 
 const TARGET_SAMPLE_RATE = 8_000;
 const FRAME_SECONDS = 0.02;
@@ -119,8 +120,13 @@ export async function detectAudioStartSignal({
 
   onProgress?.("Decoding the local audio track…");
   let context: AudioContext | undefined;
+  let closing: Promise<void> | undefined;
+  const closeOwnedContext = () => closing ??= Promise.resolve().then(async () => {
+    try { await context?.close(); } catch { /* Preserve analysis and cancellation outcomes. */ }
+  });
   try {
-    const bytes = await file.arrayBuffer();
+    const bytes = await waitForAudioOperation(() => file.arrayBuffer(), signal,
+      "Audio start detection cancelled while reading the recording.");
     checkCancelled(signal);
     try {
       // decodeAudioData resamples PCM to the context rate. Request the rate we
@@ -133,7 +139,8 @@ export async function detectAudioStartSignal({
       // resampler below remains responsible for bringing this fallback to 8 kHz.
       context = new AudioContextConstructor();
     }
-    const decoded = await context.decodeAudioData(bytes);
+    const decoded = await waitForAudioOperation(() => context!.decodeAudioData(bytes), signal,
+      "Audio start detection cancelled while decoding.", () => { void closeOwnedContext(); });
     checkCancelled(signal);
     if (!decoded.numberOfChannels || !decoded.length) {
       return emptyAudioResult("The uploaded video has no usable audio samples.");
@@ -160,7 +167,7 @@ export async function detectAudioStartSignal({
         : "The audio track could not be analyzed.",
     );
   } finally {
-    if (context) void context.close().catch(() => undefined);
+    if (context) void closeOwnedContext();
   }
 }
 
