@@ -3763,7 +3763,7 @@ function App() {
               {autoAnalysisRunning && (
                 <button onClick={() => analysisRuns.automatic?.abort()}>Cancel</button>
               )}
-              {hasLoadedVideo && startSignalRaw === null && suggestedStartRawTime === null && (
+              {hasLoadedVideo && (
                 <button disabled={videoAnalysisRunning} onClickCapture={focusReviewOpener} onClick={openManualStartReview}>Review timing manually</button>
               )}
               {!autoAnalysisRunning && suggestedStartRawTime !== null && (
