@@ -56,10 +56,19 @@ export interface TopFinishSignalOutcome {
   calibration?: StartLightCalibration;
 }
 
+export interface MarkedFinishIndicatorReview extends TopFinishSignalOutcome {
+  authority: "navigation-only";
+  automaticAcceptanceAllowed: false;
+  createsLaneIdentity: false;
+  result: StartSignalDetectionResult & { detected: false; rawTime?: undefined; confidence: "Low" | "None" };
+}
+
 interface DetectTopFinishSignalOptions {
   video: HTMLVideoElement;
   startSignalRawTime: number;
   laneHintZone?: NormalizedZone;
+  /** Explicit user-selected electronic indicator search area, not a pad or lane identity. */
+  indicatorZone?: NormalizedZone;
   expectedFinishTime?: number;
   minimumClimbSeconds?: number;
   maximumClimbSeconds?: number;
@@ -86,19 +95,46 @@ const UNLOCALIZED_TARGET_REASON = "The upper color change did not retain localiz
 export async function detectTopFinishSignal(options: DetectTopFinishSignalOptions): Promise<TopFinishSignalOutcome> {
   let partialSourceObservation: PartialSourceObservation | undefined;
   const outcome = await detectTopFinishSignalPass(options, observation => { partialSourceObservation ??= observation; });
-  return { ...outcome, result: markPartialFinishObservation(outcome.result, partialSourceObservation) };
+  const observed = { ...outcome, result: markPartialFinishObservation(outcome.result, partialSourceObservation) };
+  return options.indicatorZone ? asMarkedFinishIndicatorReview(observed) : observed;
+}
+
+/** Explicit spatial/temporal guidance cannot establish an automatic event,
+ * including when an entered total happens to corroborate the proposed clock. */
+export function asMarkedFinishIndicatorReview(outcome: TopFinishSignalOutcome): MarkedFinishIndicatorReview {
+  const result = outcome.result;
+  const proposals = [...(result.candidates ?? [])];
+  if (result.rawTime !== undefined && Number.isFinite(result.rawTime) &&
+      !proposals.some(candidate => candidate.rawTime === result.rawTime)) {
+    proposals.unshift({ rawTime: result.rawTime, confidence: "Low", reason: result.reason, score: 0, kind: "Manual indicator proposal" });
+  }
+  const prefix = "Manually selected indicator; frame review required. ";
+  const reason = result.reason.startsWith(prefix) ? result.reason : `${prefix}${result.reason}`;
+  const candidates = proposals.map(candidate => ({ ...candidate, confidence: "Low" as const }));
+  const originalZone = outcome.zone ?? result.debug.normalizedZone;
+  const zone: NormalizedZone | undefined = originalZone && { ...originalZone, id: "finishIndicator", label: "Finish Indicator Review Area" };
+  return { ...outcome, zone, authority: "navigation-only", automaticAcceptanceAllowed: false, createsLaneIdentity: false,
+    result: { ...result, detected: false, rawTime: undefined, confidence: candidates.length ? "Low" : "None", reason, candidates,
+      debug: { ...result.debug, detectedRawTime: undefined, selectedCandidateTime: candidates[0]?.rawTime,
+        selectedCandidateReason: reason, topCandidates: candidates,
+        normalizedZone: zone,
+        detectionMethod: "Manually selected finish-indicator review" } } };
 }
 
 async function detectTopFinishSignalPass({
   video,
   startSignalRawTime,
   laneHintZone,
+  indicatorZone,
   expectedFinishTime,
   minimumClimbSeconds = 3,
   maximumClimbSeconds = 30,
   signal,
   onProgress,
 }: DetectTopFinishSignalOptions, onPartial: (observation: PartialSourceObservation) => void): Promise<TopFinishSignalOutcome> {
+  if (indicatorZone && !validIndicatorRegion(indicatorZone)) {
+    return { result: emptyResult("The selected finish-indicator region is invalid; draw a nonempty region inside the video.") };
+  }
   const { start: searchStart, end: searchEnd } = resolveFinishSearchWindow(
     startSignalRawTime,
     video.duration,
@@ -118,11 +154,16 @@ async function detectTopFinishSignalPass({
   // A fixed phone view remains comparable; a scene change is rejected by the
   // frame-wide structural guard inside analyzeTopContactFrames.
   const referenceTime = Math.min(searchStart, Math.max(0, startSignalRawTime + 0.35));
-  const referenceFrames = await captureFrames(video, [referenceTime], signal, () => undefined, onPartial);
+  const referenceFrames = indicatorZone ? [] : await captureFrames(video, [referenceTime], signal, () => undefined, onPartial);
   const physicalReference = referenceFrames[0] ?? frames[0];
   const laneHintX = laneHintZone ? (laneHintZone.x1 + laneHintZone.x2) / 2 : undefined;
-  const indicatorDiscovery = analyzeTopFinishFrames(frames, laneHintX, expectedFinishTime);
-  const contactDiscovery = analyzeTopContactFrames([physicalReference, ...frames], laneHintX);
+  const indicatorDiscovery = analyzeTopFinishFrames(frames, laneHintX, expectedFinishTime, indicatorZone);
+  // A deliberate sensor search cannot silently return an unrelated top-reach
+  // cursor when the marked patch fails. The supplied region is spatial input,
+  // not proof of pad contact, selected lane, or an uninterrupted camera view.
+  const contactDiscovery = indicatorZone
+    ? emptyDiscovery("Only the user-selected indicator was searched; athlete top contact was not established.")
+    : analyzeTopContactFrames([physicalReference, ...frames], laneHintX);
   const topPresence = contactDiscovery.candidates.find((candidate) => candidate.kind === "Unverified top presence");
   const indicatorLooksLikeReset = Boolean(
     topPresence && indicatorDiscovery.found && indicatorDiscovery.rawTime !== undefined &&
@@ -193,10 +234,10 @@ async function detectTopFinishSignalPass({
   const refineEnd = Math.min(searchEnd, discovery.rawTime + 1.25);
   const estimatedFrames = Math.ceil((refineEnd - refineStart) * REFINE_FPS);
   const refinedSamples: TopFinishColorSample[] = [];
-  const indicatorZone = discovery.zone;
+  const refinementZone = discovery.zone;
   const refinedScan = await scanSourceFrames({ video, start: refineStart, end: refineEnd, fallbackFps: REFINE_FPS, signal, allowUnobservedTail: true,
     onFrame: async frame => {
-      const sampled = await sampleZoneAverageColor(video, frame.cursorTime, indicatorZone, "cover");
+      const sampled = await sampleZoneAverageColor(video, frame.cursorTime, refinementZone, "cover");
       refinedSamples.push({ time: frame.rawTime, cursorTime: frame.cursorTime,
         timestampMethod: frame.decoded ? "video-frame" : "seek-cursor",
         sourceFrameDurationSeconds: frame.decoded?.durationSeconds, averageRgb: sampled.averageRgb });
@@ -205,7 +246,9 @@ async function detectTopFinishSignalPass({
   });
   if (refinedScan.partialSourceObservation) onPartial(refinedScan.partialSourceObservation);
 
-  const refined = analyzeTopFinishColorSamples(refinedSamples, discovery.calibration, expectedFinishTime);
+  const refined = indicatorZone
+    ? analyzeReviewedFinishColorSamples(refinedSamples, discovery.calibration, expectedFinishTime)
+    : analyzeTopFinishColorSamples(refinedSamples, discovery.calibration, expectedFinishTime);
   let result = refined.detected
     ? refined
     : unconfirmedUpperRefinement(discovery);
@@ -277,11 +320,15 @@ export function analyzeTopFinishFrames(
   frames: TopFinishFrame[],
   laneHintX?: number,
   expectedFinishTime?: number,
+  indicatorZone?: NormalizedZone,
 ): TopFinishDiscovery {
   if (frames.length < 8) return emptyDiscovery("Not enough upper-wall frames were available for finish-indicator discovery.");
   const { width, height } = frames[0];
   if (width < 8 || height < 8 || frames.some((frame) => frame.width !== width || frame.height !== height)) {
     return emptyDiscovery("Upper-wall scan frames had inconsistent dimensions.");
+  }
+  if (indicatorZone && !validIndicatorRegion(indicatorZone)) {
+    return emptyDiscovery("The selected finish-indicator region was invalid; automatic discovery was not substituted.");
   }
 
   const baselineCount = Math.min(8, Math.max(4, Math.floor(frames.length * 0.14)));
@@ -295,10 +342,11 @@ export function analyzeTopFinishFrames(
     globalColors[index],
   ));
   const [minXNorm, maxXNorm] = upperLaneBounds(laneHintX, 0.21);
-  const minX = Math.max(1, Math.floor(width * minXNorm));
-  const maxX = Math.min(width - 2, Math.ceil(width * maxXNorm));
-  const minY = Math.max(1, Math.floor(height * TOP_SCAN_MIN_Y));
-  const maxY = Math.min(height - 2, Math.ceil(height * TOP_SCAN_MAX_Y));
+  const minX = Math.max(1, Math.floor(width * (indicatorZone?.x1 ?? minXNorm)));
+  const maxX = Math.min(width - 2, Math.ceil(width * (indicatorZone?.x2 ?? maxXNorm)) - (indicatorZone ? 1 : 0));
+  const minY = Math.max(1, Math.floor(height * (indicatorZone?.y1 ?? TOP_SCAN_MIN_Y)));
+  const maxY = Math.min(height - 2, Math.ceil(height * (indicatorZone?.y2 ?? TOP_SCAN_MAX_Y)) - (indicatorZone ? 1 : 0));
+  if (minX > maxX || minY > maxY) return emptyDiscovery("The selected finish-indicator region contained no usable scan pixels.");
   const internal: Array<{
     x: number;
     y: number;
@@ -426,8 +474,8 @@ export function analyzeTopFinishFrames(
   // patch's calibration, suppressing a real light transition during refinement.
   const halfSize = selected.radius;
   const zone: NormalizedZone = {
-    id: "finishLight",
-    label: "Auto-detected upper finish indicator",
+    id: indicatorZone ? "finishIndicator" : "finishLight",
+    label: indicatorZone ? "Discovered within user-selected finish-indicator region" : "Auto-detected upper finish indicator",
     x1: clamp((selected.x - halfSize) / width, 0, 1),
     y1: clamp((selected.y - halfSize) / height, 0, 1),
     x2: clamp((selected.x + halfSize + 1) / width, 0, 1),
@@ -461,6 +509,11 @@ export function analyzeTopFinishFrames(
     calibration,
     candidates,
   };
+}
+
+function validIndicatorRegion(region: NormalizedZone): boolean {
+  return region.id === "finishIndicator" && [region.x1, region.y1, region.x2, region.y2].every(value => Number.isFinite(value) && value >= 0 && value <= 1) &&
+    region.x1 < region.x2 && region.y1 < region.y2;
 }
 
 /**
@@ -775,6 +828,118 @@ export function analyzeTopFinishColorSamples(
   if (!candidates.length) return emptyResult("The discovered upper indicator did not produce a frame-level persistent finish transition.");
   const selected = [...candidates].sort((left, right) => left.rawTime - right.rawTime)[0];
   return resultFromCandidates(selected, candidates, samples, calibration);
+}
+
+/** Color proposals for explicit manual review only. Callers must keep this
+ * separate from automatic Finish authority and preserve its review cap. */
+export function analyzeReviewedFinishColorSamples(
+  samples: TopFinishColorSample[],
+  calibration: StartLightCalibration,
+  expectedFinishTime?: number,
+): StartSignalDetectionResult {
+  if (samples.length < 8 || !calibration.beforeStartRGB || !calibration.afterStartRGB) {
+    return emptyResult("Not enough refined upper-indicator samples were available.");
+  }
+  const source = calibration.beforeStartRGB;
+  const target = calibration.afterStartRGB;
+  if (!hasDistinctIndicatorHue(source, target)) {
+    return emptyResult("The upper patch changed brightness or saturation without a distinct indicator hue; scoreboard digits and reflections cannot verify Finish.");
+  }
+  if (computeColorDistance(source, target) ** 2 < 25) {
+    return emptyResult("The upper-indicator states were too similar to refine finish timing.");
+  }
+  const sourceChroma = indicatorChromaticity(source);
+  const targetChroma = indicatorChromaticity(target);
+  if (!sourceChroma || !targetChroma) return emptyResult("The upper-indicator states did not contain observable color.");
+  const vector = { r: targetChroma.r - sourceChroma.r, g: targetChroma.g - sourceChroma.g, b: targetChroma.b - sourceChroma.b };
+  const magnitudeSquared = vector.r ** 2 + vector.g ** 2 + vector.b ** 2;
+  if (magnitudeSquared === 0) return emptyResult("The upper-indicator states had the same chromaticity.");
+
+  const baselineCount = Math.min(12, Math.max(4, Math.floor(samples.length * 0.22)));
+  // A shadow can move raw RGB toward a darker target while retaining the
+  // original indicator hue. Project color ratios instead, so equal-channel
+  // brightness scaling cannot start or backdate a color-state transition.
+  // A black sample contains no hue evidence and contributes no progress.
+  // Normalizing a near-black red residual can produce a saturated target hue.
+  // Keep absolute evidence as well: either an increasing calibrated channel
+  // must visibly advance, or the patch must retain substantial target light.
+  // These are evidence-policy checks, not a calibrated sensor-noise model.
+  const channels = ["r", "g", "b"] as const;
+  const rawTargetSupport = samples.map(({ averageRgb: color }) =>
+    channels.some(channel => target[channel] > source[channel] &&
+      (color[channel] - source[channel]) / (target[channel] - source[channel]) >= 0.08) ||
+    luminance(color) >= luminance(target) * 0.55);
+  const settledTargetSupport = samples.map((sample, index) => rawTargetSupport[index] &&
+    indicatorChromaticity(sample.averageRgb) !== undefined && chroma(sample.averageRgb) >= 8 &&
+    !hasDistinctIndicatorHue(sample.averageRgb, target));
+  const projection = samples.map((sample, index) => {
+    const color = indicatorChromaticity(sample.averageRgb);
+    // A third hue can project past the target on a single vector. Before the
+    // settled target hue is visible, all changing color-ratio channels must
+    // move in their calibrated direction; an unrelated obstruction cannot
+    // connect itself to a later genuine transition through projection alone.
+    const followsTransition = color && rawTargetSupport[index] && chroma(sample.averageRgb) >= 8 &&
+      (settledTargetSupport[index] || channels.every(channel =>
+        (color[channel] - sourceChroma[channel]) * vector[channel] >= 0));
+    return followsTransition ? ((color.r - sourceChroma.r) * vector.r +
+      (color.g - sourceChroma.g) * vector.g +
+      (color.b - sourceChroma.b) * vector.b) / magnitudeSquared : 0;
+  });
+  const baselineProjection = median(projection.slice(0, baselineCount));
+  const normalized = projection.map((value) => value - baselineProjection);
+  const candidates: DetectionCandidate[] = [];
+
+  for (let index = baselineCount; index < samples.length - 2; index += 1) {
+    if (normalized[index] < 0.16) continue;
+    const horizonEnd = findLastSampleIndexAtOrBefore(samples, samples[index].time + 0.95);
+    const verification = normalized.slice(index, horizonEnd + 1);
+    const targetFrames = verification.filter((value, offset) => value >= 0.42 && settledTargetSupport[index + offset]).length;
+    const peak = Math.max(...verification.filter((_, offset) => settledTargetSupport[index + offset]));
+    if (targetFrames < Math.max(3, Math.ceil(verification.length * 0.55)) || peak < 0.7) continue;
+
+    let onset = index;
+    let gaps = 0;
+    for (let cursor = index - 1; cursor >= baselineCount && samples[cursor].time >= samples[index].time - 0.34; cursor -= 1) {
+      if (normalized[cursor] >= 0.08) {
+        onset = cursor;
+        gaps = 0;
+      } else if (++gaps > 1) {
+        break;
+      }
+    }
+    // A faint connected ramp can remain between the stable-state and trigger
+    // thresholds for several frames. Its stable baseline precedes the first
+    // connected color evidence, not necessarily the later .16 crossing.
+    if (![onset - 2, onset - 1].every(cursor => normalized[cursor] < 0.12)) continue;
+    const rawTime = roundTime(samples[onset].time);
+    const expectedPenalty = expectedFinishTime === undefined ? 0 : Math.abs(rawTime - expectedFinishTime) * 2;
+    const confidence: Confidence = peak >= 0.9 && targetFrames >= Math.ceil(verification.length * 0.62) ? "High" : "Medium";
+    candidates.push({
+      rawTime,
+      confidence,
+      reason: onset < index
+        ? "The first faint upper-indicator pixels were connected to its verified settled state."
+        : "The upper indicator changed and remained in its verified finish state.",
+      score: roundTime(peak * 100 + targetFrames - expectedPenalty),
+      kind: "Upper finish indicator",
+      method: "Refined perspective-aware upper finish timing",
+      rgb: samples[onset].averageRgb,
+      distanceToBefore: roundTime(computeColorDistance(samples[onset].averageRgb, source)),
+      distanceToAfter: roundTime(computeColorDistance(samples[onset].averageRgb, target)),
+      persistenceFrames: targetFrames,
+    });
+  }
+
+  if (!candidates.length) return emptyResult("The discovered upper indicator did not produce a frame-level persistent finish transition.");
+  const selected = [...candidates].sort((left, right) => left.rawTime - right.rawTime)[0];
+  return resultFromCandidates(selected, candidates, samples, calibration);
+}
+
+function indicatorChromaticity(color: RGB): RGB | undefined {
+  const values = [color.r, color.g, color.b];
+  if (values.some(value => !Number.isFinite(value) || value < 0 || value > 255)) return undefined;
+  const total = color.r + color.g + color.b;
+  return total > 0 ? { r: color.r / total, g: color.g / total, b: color.b / total } : undefined;
 }
 
 /** Brightening an existing red clock digit is not a finish-state transition. */

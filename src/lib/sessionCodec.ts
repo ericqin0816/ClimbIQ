@@ -123,6 +123,7 @@ export function datasetToSavedSession(dataset: unknown): SavedAnalysisSession {
       hold10: zonesFromDataset.hold10Zone ?? undefined,
       finishLight: zonesFromDataset.finishLightZone ?? undefined,
       finishPad: zonesFromDataset.finishPadZone ?? undefined,
+      finishIndicator: zonesFromDataset.finishIndicatorZone ?? undefined,
     }),
     startLightCalibration: sanitizeStartLightCalibration({
       beforeStartRGB: calibration.beforeStartRGB,

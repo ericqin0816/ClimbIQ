@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
-import type { RGB, StartLightCalibration } from "../types";
+import type { NormalizedZone, RGB, StartLightCalibration } from "../types";
 import { normalizedZoneToPixelRect } from "./videoFrameSampler";
 import {
   analyzeTopFinishColorSamples,
+  analyzeReviewedFinishColorSamples,
+  asMarkedFinishIndicatorReview,
   analyzeTopFinishFrames,
   analyzeTopContactFrames,
   requireUpperFinishCorroboration,
@@ -184,6 +186,163 @@ describe("perspective-aware upper finish indicator", () => {
     expect(result.detected).toBe(true);
     expect(result.rawTime).toBeCloseTo(12 / 30, 3);
     expect(result.confidence).toBe("High");
+  });
+
+  it("does not backdate a green-to-red transition to a preceding same-hue darkening", () => {
+    const before = { r: 40, g: 180, b: 80 };
+    const after = { r: 190, g: 50, b: 45 };
+    const samples = [
+      ...repeat(before, 12),
+      ...repeat({ r: 22, g: 99, b: 44 }, 3),
+      ...repeat(mix(before, after, 0.12), 2),
+      mix(before, after, 0.55),
+      ...repeat(after, 20),
+    ].map((averageRgb, index) => ({ time: index / 30, averageRgb }));
+
+    const result = analyzeReviewedFinishColorSamples(samples, { beforeStartRGB: before, afterStartRGB: after });
+
+    expect(result.detected).toBe(true);
+    expect(result.rawTime).toBeCloseTo(15 / 30, 3);
+  });
+
+  it("rejects a persistent darkening that retains the pre-finish hue", () => {
+    const before = { r: 50, g: 210, b: 120 };
+    const after = { r: 150, g: 40, b: 40 };
+    const samples = [...repeat(before, 12), ...repeat({ r: 5, g: 21, b: 12 }, 24)]
+      .map((averageRgb, index) => ({ time: index / 30, averageRgb }));
+
+    const result = analyzeReviewedFinishColorSamples(samples, { beforeStartRGB: before, afterStartRGB: after });
+
+    expect(result.detected).toBe(false);
+    expect(result.rawTime).toBeUndefined();
+  });
+
+  it.each([0.3, 0.6, 1])("preserves a real transition when its settled indicator brightness is scaled by %s", factor => {
+    const samples = [...repeat(darkRed, 12), ...repeat({
+      r: brightGreen.r * factor, g: brightGreen.g * factor, b: brightGreen.b * factor,
+    }, 24)].map((averageRgb, index) => ({ time: index / 30, averageRgb }));
+
+    const result = analyzeReviewedFinishColorSamples(samples, { beforeStartRGB: darkRed, afterStartRGB: brightGreen });
+
+    expect(result.detected).toBe(true);
+    expect(result.rawTime).toBeCloseTo(12 / 30, 3);
+  });
+
+  it.each([1, 2, 8])("anchors a connected %s-frame quiet ramp to the stable state before its first faint frame", rampFrames => {
+    const before = { r: 40, g: 180, b: 80 };
+    const after = { r: 190, g: 60, b: 50 };
+    const samples = [...repeat(before, 12), ...repeat(mix(before, after, 0.14), rampFrames),
+      mix(before, after, 0.55), ...repeat(after, 24)]
+      .map((averageRgb, index) => ({ time: index / 30, averageRgb }));
+
+    const result = analyzeReviewedFinishColorSamples(samples, { beforeStartRGB: before, afterStartRGB: after });
+
+    expect(result.detected).toBe(true);
+    expect(result.rawTime).toBeCloseTo(12 / 30, 3);
+  });
+
+  it("does not bridge two observed source-state frames to preceding target-directed noise", () => {
+    const before = { r: 40, g: 180, b: 80 };
+    const after = { r: 190, g: 60, b: 50 };
+    const samples = [...repeat(before, 8), ...repeat(mix(before, after, 0.1), 2), ...repeat(before, 2), ...repeat(after, 24)]
+      .map((averageRgb, index) => ({ time: index / 30, averageRgb }));
+
+    const result = analyzeReviewedFinishColorSamples(samples, { beforeStartRGB: before, afterStartRGB: after });
+
+    expect(result.detected).toBe(true);
+    expect(result.rawTime).toBeCloseTo(12 / 30, 3);
+  });
+
+  it.each([
+    { r: 2, g: 0, b: 0 },
+    { r: 8, g: 0, b: 0 },
+    { r: 12, g: 0, b: 0 },
+    { r: 16, g: 0, b: 0 },
+    { r: 24, g: 0, b: 0 },
+    { r: 0, g: 0, b: 180 },
+    { r: 180, g: 0, b: 180 },
+  ])("does not turn a low-signal or third-hue patch into a settled target: %j", color => {
+    const before = { r: 40, g: 180, b: 80 };
+    const after = { r: 190, g: 50, b: 45 };
+    const samples = [...repeat(before, 12), ...repeat(color, 24)]
+      .map((averageRgb, index) => ({ time: index / 30, averageRgb }));
+
+    expect(analyzeReviewedFinishColorSamples(samples, { beforeStartRGB: before, afterStartRGB: after }).detected).toBe(false);
+  });
+
+  it("does not connect an unrelated third-hue obstruction to a later true transition", () => {
+    const before = { r: 40, g: 180, b: 80 };
+    const after = { r: 190, g: 50, b: 45 };
+    const samples = [...repeat(before, 12), ...repeat({ r: 180, g: 0, b: 180 }, 2), ...repeat(after, 24)]
+      .map((averageRgb, index) => ({ time: index / 30, averageRgb }));
+
+    const result = analyzeReviewedFinishColorSamples(samples, { beforeStartRGB: before, afterStartRGB: after });
+
+    expect(result.detected).toBe(true);
+    expect(result.rawTime).toBeCloseTo(14 / 30, 3);
+  });
+
+  it("searches an explicitly selected sensor region outside the default upper band", () => {
+    const frames = makeFrames([...repeat(darkRed, 8), ...repeat(brightGreen, 12)], { x: 14, y: 10 });
+    const region: NormalizedZone = { id: "finishIndicator", label: "User-selected indicator search", x1: 0.7, y1: 0.5, x2: 0.9, y2: 0.7 };
+
+    expect(analyzeTopFinishFrames(frames, 0.1).found).toBe(false);
+    const result = analyzeTopFinishFrames(frames, 0.1, undefined, region);
+
+    expect(result.found).toBe(true);
+    expect(result.targetLocalized).toBe(true);
+    expect(result.zone!.x1).toBeGreaterThanOrEqual(region.x1);
+    expect(result.zone!.y1).toBeGreaterThanOrEqual(region.y1);
+    expect(result.zone!.x2).toBeLessThanOrEqual(region.x2);
+    expect(result.zone!.y2).toBeLessThanOrEqual(region.y2);
+    expect(result.zone!.label).toContain("user-selected");
+    expect(result.zone!.id).toBe("finishIndicator");
+  });
+
+  it("does not replace an empty user-selected region with another lane's changing indicator", () => {
+    const frames = makeFrames([...repeat(darkRed, 8), ...repeat(brightGreen, 12)], { x: 12, y: 2 });
+    const region: NormalizedZone = { id: "finishIndicator", label: "User-selected indicator search", x1: 0.1, y1: 0.5, x2: 0.3, y2: 0.7 };
+
+    expect(analyzeTopFinishFrames(frames, undefined, undefined, region).found).toBe(false);
+  });
+
+  it.each([
+    { x1: 0.6, y1: 0.1, x2: 0.5, y2: 0.2 },
+    { x1: -0.1, y1: 0.1, x2: 0.8, y2: 0.2 },
+    { x1: 0.1, y1: 0.1, x2: 1.1, y2: 0.2 },
+    { x1: 0.1, y1: 0.1, x2: 0.8, y2: NaN },
+    { x1: 0.1, y1: 0.2, x2: 0.8, y2: 0.2 },
+  ])("rejects an invalid explicit region instead of falling back to automatic discovery: %j", bounds => {
+    const frames = makeFrames([...repeat(darkRed, 8), ...repeat(brightGreen, 12)], { x: 12, y: 2 });
+    const region: NormalizedZone = { id: "finishIndicator", label: "Invalid selected indicator", ...bounds };
+
+    expect(analyzeTopFinishFrames(frames, undefined, undefined, region).found).toBe(false);
+  });
+
+  it.each(["finishPad", "finishLight"] as const)("does not reinterpret a %s region as a manual indicator", id => {
+    const frames = makeFrames([...repeat(darkRed, 8), ...repeat(brightGreen, 12)], { x: 12, y: 2 });
+    expect(analyzeTopFinishFrames(frames, undefined, undefined,
+      { id, label: "Different region role", x1: .4, y1: .05, x2: .8, y2: .2 }).found).toBe(false);
+  });
+
+  it("caps an explicitly marked indicator even when its raw proposal was High and corroborated", () => {
+    const outcome = asMarkedFinishIndicatorReview({ result: finishResult(7),
+      zone: { id: "finishLight", label: "Raw discovery", x1: .7, y1: .1, x2: .8, y2: .2 } });
+    expect(outcome).toMatchObject({ authority: "navigation-only", automaticAcceptanceAllowed: false, createsLaneIdentity: false });
+    expect(outcome.result).toMatchObject({ detected: false, confidence: "Low" });
+    expect(outcome.result.rawTime).toBeUndefined();
+    expect(outcome.result.debug.detectedRawTime).toBeUndefined();
+    expect(outcome.result.candidates?.[0]).toMatchObject({ rawTime: 7, confidence: "Low" });
+    expect(outcome.zone?.id).toBe("finishIndicator");
+  });
+
+  it("keeps a debug-only discovered region in the manual role", () => {
+    const raw = finishResult(7);
+    const outcome = asMarkedFinishIndicatorReview({ result: { ...raw, debug: { ...raw.debug,
+      normalizedZone: { id: "finishLight", label: "Raw discovery", x1: .7, y1: .1, x2: .8, y2: .2 } } } });
+    expect(outcome.zone?.id).toBe("finishIndicator");
+    expect(outcome.result.debug.normalizedZone?.id).toBe("finishIndicator");
+    expect(outcome.result).toMatchObject({ detected: false, confidence: "Low" });
   });
 
   it("timestamps a physical top reach only when a descent follows", () => {
