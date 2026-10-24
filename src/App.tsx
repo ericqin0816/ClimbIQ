@@ -118,6 +118,7 @@ const NATIVE_APP = Capacitor.isNativePlatform();
 const AttemptComparisonPanel = lazy(() => import("./components/AttemptComparisonPanel"));
 const CoachingReviewPanel = lazy(() => import("./components/CoachingReviewPanel"));
 const FinishReviewPanel = lazy(() => import("./components/FinishReviewPanel"));
+const AudioStartReviewPanel = lazy(() => import("./components/AudioStartReviewPanel"));
 const Hold10SecondPassPanel = lazy(() => import("./components/Hold10SecondPassPanel"));
 const BiomechanicsPanel = lazy(async () => {
   const module = await import("./components/BiomechanicsPanel");
@@ -203,7 +204,7 @@ interface PendingVideoAttachment {
 }
 
 interface TimestampReviewTarget {
-  kind?: "finish";
+  kind?: "start" | "finish";
   label: string;
   instruction?: string;
   navigationOnly?: boolean;
@@ -1011,11 +1012,16 @@ function App() {
   }
 
   function openManualStartReview() {
+    openManualStartReviewAt(startSignalRaw ?? currentTime);
+  }
+
+  function openManualStartReviewAt(rawTime: number, fromAudio = false) {
     if (videoAnalysisRunning || !isCurrentVideoReady(videoRef.current)) return;
-    reviewTimestamp({ label: "Manual start signal", navigationOnly: true, suggestedRawTime: startSignalRaw ?? currentTime,
-      instruction: "Locate the visible or audible start signal, then accept its frame. Athlete movement alone does not establish the signal. Leave Start unset if the signal is missing.",
+    reviewTimestamp({ kind: "start", label: "Manual start signal", navigationOnly: true, suggestedRawTime: rawTime,
+      instruction: `${fromAudio ? "The recorded-cue suggestion is unverified and has not changed any timing. " : ""}Locate the visible or audible start signal, then accept its frame. Athlete movement alone does not establish the signal. Leave Start unset if the signal is missing.`,
       acceptLabel: "Accept start",
-      onAccept: (time, note, observationIntervalSeconds) => acceptManualTimestamp("startSignal", time, { frameReviewed: true, observationIntervalSeconds, note }),
+      onAccept: (time, note, observationIntervalSeconds) => acceptManualTimestamp("startSignal", time, { frameReviewed: true, observationIntervalSeconds,
+        note: `${fromAudio ? `Review began from an unverified recorded-cue suggestion at ${rawTime.toFixed(3)}s; it did not establish automatic timing. ` : ""}${note ?? ""}` }),
     });
   }
 
@@ -3996,7 +4002,13 @@ function App() {
             onReturn={() => reviewTimestamp(visibleTimestampReview)} onAccept={acceptReviewedTimestamp}
             onClose={closeTimestampReview}
             onJumpToTime={jumpTo}
-          >{reviewAcceptanceRejected && <p role="alert">{timestampStatus || "That frame was not accepted. Check the event order and choose a frame within this attempt."}</p>}{visibleTimestampReview.kind === "finish" && <Suspense fallback={<p>Preparing finish close-up…</p>}><FinishReviewPanel key={`${videoUrl}:${startSignalRaw}`}
+          >{reviewAcceptanceRejected && <p role="alert">{timestampStatus || "That frame was not accepted. Check the event order and choose a frame within this attempt."}</p>}
+          {visibleTimestampReview.kind === "start" && displayedStartSearchWindow && <Suspense fallback={<p>Preparing audio review…</p>}><AudioStartReviewPanel
+            file={videoFileRef.current} sourceKey={videoRef.current?.src ?? ""} sourceGeneration={analysisContextRef.current}
+            window={displayedStartSearchWindow} busy={videoAnalysisRunning}
+            isCurrentSource={(file, key, generation) => videoFileRef.current === file && videoRef.current?.src === key && analysisContextRef.current === generation}
+            onInspect={time => openManualStartReviewAt(time, true)} /></Suspense>}
+          {visibleTimestampReview.kind === "finish" && <Suspense fallback={<p>Preparing finish close-up…</p>}><FinishReviewPanel key={`${videoUrl}:${startSignalRaw}`}
             video={videoRef.current} currentTime={currentTime} frameReady={reviewFrameReady}
             busy={videoAnalysisRunning} scanning={finishReviewRunning} progress={finishReviewProgress}
             zone={zones.finishPad} contextZone={zones.finishLight}
