@@ -1,0 +1,9 @@
+CC0 1.0 Universal (CC0 1.0) Public Domain Dedication
+https://creativecommons.org/publicdomain/zero/1.0/
+
+The original generated graphics, synthesized audio and reference metadata in
+audio-start-review.mp4 and scripts/generate-guided-finish-indicator.mjs are
+dedicated to the public domain under CC0 1.0.
+
+This is an authored codec/workflow fixture, not real-climber detection evidence.
+Generate with --audio-profile=secondary and CLIMBIQ_FFMPEG=<ffmpeg>.

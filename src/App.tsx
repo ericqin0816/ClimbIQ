@@ -73,6 +73,7 @@ import { assessAutomaticStartBodyAudit } from "./lib/startBodyAudit";
 import { deriveAutomaticStartBodyZone, resolveAnalysisBodyZone } from "./lib/startRegion";
 import { applyTimestampAcceptance, clearMarkerTimestamp, sanitizeTimestampSequence } from "./lib/timestampIntegrity";
 import { finishPrecisionNote, timingConfidence } from "./lib/timingEvidence";
+import type { TrackedFinishIndicatorAnchor, TrackedFinishIndicatorReview } from "./lib/trackedFinishIndicator";
 import { captureFrame, captureVideoPixels, clamp, hasUsableVideoMetadata, roundTime, sampleFrameAt, sampleZoneOpponentColor, seekTo, seekToFrameObservation } from "./lib/videoFrameSampler";
 import { getVideoUiState } from "./lib/videoUiState";
 import {
@@ -110,6 +111,7 @@ const ZONES: Array<{ id: ZoneId; label: string; tone: string }> = [
   { id: "startLight", label: "Start Light Zone", tone: "#7dd3fc" },
   { id: "startBody", label: "Start Body Zone", tone: "#f0abfc" },
   { id: "hold10", label: "Hold 10 Zone", tone: "#facc15" },
+  { id: "finishIndicator", label: "Finish Indicator Review Area", tone: "#fb923c" },
 ];
 
 
@@ -118,6 +120,7 @@ const NATIVE_APP = Capacitor.isNativePlatform();
 const AttemptComparisonPanel = lazy(() => import("./components/AttemptComparisonPanel"));
 const CoachingReviewPanel = lazy(() => import("./components/CoachingReviewPanel"));
 const FinishReviewPanel = lazy(() => import("./components/FinishReviewPanel"));
+const AudioStartReviewPanel = lazy(() => import("./components/AudioStartReviewPanel"));
 const Hold10SecondPassPanel = lazy(() => import("./components/Hold10SecondPassPanel"));
 const BiomechanicsPanel = lazy(async () => {
   const module = await import("./components/BiomechanicsPanel");
@@ -203,7 +206,7 @@ interface PendingVideoAttachment {
 }
 
 interface TimestampReviewTarget {
-  kind?: "finish";
+  kind?: "start" | "finish";
   label: string;
   instruction?: string;
   navigationOnly?: boolean;
@@ -1011,11 +1014,16 @@ function App() {
   }
 
   function openManualStartReview() {
+    openManualStartReviewAt(startSignalRaw ?? currentTime);
+  }
+
+  function openManualStartReviewAt(rawTime: number, fromAudio = false) {
     if (videoAnalysisRunning || !isCurrentVideoReady(videoRef.current)) return;
-    reviewTimestamp({ label: "Manual start signal", navigationOnly: true, suggestedRawTime: startSignalRaw ?? currentTime,
-      instruction: "Locate the visible or audible start signal, then accept its frame. Athlete movement alone does not establish the signal. Leave Start unset if the signal is missing.",
+    reviewTimestamp({ kind: "start", label: "Manual start signal", navigationOnly: true, suggestedRawTime: rawTime,
+      instruction: `${fromAudio ? "The recorded-cue suggestion is unverified and has not changed any timing. " : ""}Locate the visible or audible start signal, then accept its frame. Athlete movement alone does not establish the signal. Leave Start unset if the signal is missing.`,
       acceptLabel: "Accept start",
-      onAccept: (time, note, observationIntervalSeconds) => acceptManualTimestamp("startSignal", time, { frameReviewed: true, observationIntervalSeconds, note }),
+      onAccept: (time, note, observationIntervalSeconds) => acceptManualTimestamp("startSignal", time, { frameReviewed: true, observationIntervalSeconds,
+        note: `${fromAudio ? `Review began from an unverified recorded-cue suggestion at ${rawTime.toFixed(3)}s; it did not establish automatic timing. ` : ""}${note ?? ""}` }),
     });
   }
 
@@ -1064,6 +1072,53 @@ function App() {
     } finally {
       finishReviewAbortRef.current = null;
       setFinishReviewRunning(false);
+    }
+  }
+
+  async function rescanMarkedFinishIndicator(zone: NormalizedZone, center: number): Promise<StartSignalDetectionResult> {
+    return runMarkedIndicatorReview(async (video, start, signal, isCurrent, onProgress) => {
+      const { scanGuidedFinishIndicator } = await import("./lib/guidedFinishIndicator");
+      if (!isCurrent()) throw new PoseAnalysisCancelledError();
+      return scanGuidedFinishIndicator({ video, zone, center, start, signal, onProgress });
+    });
+  }
+
+  async function trackMarkedFinishIndicator(anchor: TrackedFinishIndicatorAnchor): Promise<TrackedFinishIndicatorReview> {
+    return runMarkedIndicatorReview(async (video, start, signal, isCurrent, onProgress) => {
+      const { scanTrackedFinishIndicatorReview } = await import("./lib/trackedFinishIndicator");
+      if (!isCurrent()) throw new PoseAnalysisCancelledError();
+      return scanTrackedFinishIndicatorReview({ video, anchor, startSignal: start, signal, isCurrent, onProgress });
+    });
+  }
+
+  async function runMarkedIndicatorReview<T>(scan: (video: HTMLVideoElement, start: number, signal: AbortSignal,
+    isCurrent: () => boolean, onProgress: (message: string) => void) => Promise<T>): Promise<T> {
+    const video = videoRef.current;
+    if (!video || videoAnalysisRunning || finishReviewAbortRef.current || startSignalRaw === null) {
+      throw new Error("Review Start and wait for the current video task to finish.");
+    }
+    const controller = new AbortController(), source = video.src, context = analysisContextRef.current;
+    const current = () => !controller.signal.aborted && context === analysisContextRef.current &&
+      videoRef.current === video && video.src === source;
+    finishReviewAbortRef.current = controller;
+    setFinishReviewRunning(true);
+    setFinishReviewProgress("Inspecting the marked finish indicator…");
+    try {
+      if (!current()) throw new PoseAnalysisCancelledError();
+      const result = await runWithVideoRestore(video, () => scan(video, startSignalRaw, controller.signal, current,
+        message => { if (current()) setFinishReviewProgress(message); }),
+        "Indicator inspected. Video position restored; accepted timing was not changed.", "finish indicator review");
+      if (!current()) throw new PoseAnalysisCancelledError();
+      // This manually selected region is navigation evidence only. Do not
+      // publish into automatic Finish/lane state or accept any timestamp here.
+      return result;
+    } finally {
+      if (finishReviewAbortRef.current === controller) {
+        finishReviewAbortRef.current = null;
+        if (context === analysisContextRef.current && videoRef.current === video && video.src === source) {
+          setFinishReviewRunning(false);
+        }
+      }
     }
   }
 
@@ -3996,12 +4051,22 @@ function App() {
             onReturn={() => reviewTimestamp(visibleTimestampReview)} onAccept={acceptReviewedTimestamp}
             onClose={closeTimestampReview}
             onJumpToTime={jumpTo}
-          >{reviewAcceptanceRejected && <p role="alert">{timestampStatus || "That frame was not accepted. Check the event order and choose a frame within this attempt."}</p>}{visibleTimestampReview.kind === "finish" && <Suspense fallback={<p>Preparing finish close-up…</p>}><FinishReviewPanel key={`${videoUrl}:${startSignalRaw}`}
+          >{reviewAcceptanceRejected && <p role="alert">{timestampStatus || "That frame was not accepted. Check the event order and choose a frame within this attempt."}</p>}
+          {visibleTimestampReview.kind === "start" && displayedStartSearchWindow && <Suspense fallback={<p>Preparing audio review…</p>}><AudioStartReviewPanel
+            file={videoFileRef.current} sourceKey={videoRef.current?.src ?? ""} sourceGeneration={analysisContextRef.current}
+            window={displayedStartSearchWindow} busy={videoAnalysisRunning}
+            isCurrentSource={(file, key, generation) => videoFileRef.current === file && videoRef.current?.src === key && analysisContextRef.current === generation}
+            onInspect={time => openManualStartReviewAt(time, true)} /></Suspense>}
+          {visibleTimestampReview.kind === "finish" && <Suspense fallback={<p>Preparing finish close-up…</p>}><FinishReviewPanel key={`${videoUrl}:${startSignalRaw}`}
             video={videoRef.current} currentTime={currentTime} frameReady={reviewFrameReady}
             busy={videoAnalysisRunning} scanning={finishReviewRunning} progress={finishReviewProgress}
             zone={zones.finishPad} contextZone={zones.finishLight}
+            indicatorZone={zones.finishIndicator}
             automaticRecovery={activeFinishRecovery}
             onZone={zone => setZones(current => zone ? { ...current, finishPad: zone } : omitZone(current, "finishPad"))}
+            onIndicatorZone={zone => setZones(current => zone ? { ...current, finishIndicator: zone } : omitZone(current, "finishIndicator"))}
+            onIndicatorScan={rescanMarkedFinishIndicator}
+            onIndicatorTrack={trackMarkedFinishIndicator}
             onScan={rescanMarkedFinishPad} onCancel={() => finishReviewAbortRef.current?.abort()}
             onJump={jumpTo} /></Suspense>}</TimestampReviewPanel> : null}
           </div>
@@ -4073,7 +4138,7 @@ function App() {
             </button>
           </div>
           <p className="muted zone-helper">
-            Zones are normally unnecessary. If two climbers are visible, draw one rough Start Body Zone around your climber to guide analysis to that lane. Draw a Start Light Zone only if automatic sensor discovery fails. If the numbered route overlay places Hold 10 incorrectly, draw a small Hold 10 Zone over the real hold to correct contact timing.
+            Zones are normally unnecessary. If two climbers are visible, draw one rough Start Body Zone around your climber to guide analysis to that lane. Draw a Start Light Zone only if automatic sensor discovery fails. If the numbered route overlay places Hold 10 incorrectly, draw a small Hold 10 Zone over the real hold to correct contact timing. A Finish Indicator Review Area marks a timing light for a guided scan; it does not identify a pad or accept Finish.
           </p>
 
           {capturedFrame ? (

@@ -1,0 +1,53 @@
+{
+  "schemaVersion": 1,
+  "synthetic": true,
+  "workflowOnly": true,
+  "license": "CC0-1.0",
+  "variant": "pan",
+  "width": 320,
+  "height": 180,
+  "fps": 30,
+  "duration": 10,
+  "sha256": "caef463f4309d40efdfb0023dcf42a6ba4557fa5c677cdcb51cebf9c5fcf1dc3",
+  "authoredStart": 2.4,
+  "authoredIndicatorTransition": 7,
+  "authoredOtherLaneTransition": 6.25,
+  "anchorCursor": 7,
+  "expectedAnchorNativePts": 7,
+  "anchorIndicatorPixelRect": [
+    236,
+    92,
+    248,
+    102
+  ],
+  "anchorIndicatorRegion": {
+    "id": "finishIndicator",
+    "label": "Authored selected right indicator",
+    "x1": 0.7375,
+    "y1": 0.5111111111111111,
+    "x2": 0.775,
+    "y2": 0.5666666666666667
+  },
+  "camera": {
+    "atAnchor7": [
+      80,
+      50
+    ],
+    "motion": "originX=80+clamp((t-7)*24,-30,30); originY=50+clamp((t-7)*12,-20,20), integerrounded",
+    "maximumOrdinaryAdjacentShiftPixels": 1,
+    "referenceAnchorCursor": 7
+  },
+  "sourceHueShadow": {
+    "from": 6.8,
+    "to": 7,
+    "brightness": 0.55
+  },
+  "decodedSourcePts": {
+    "count": 300,
+    "first": 0,
+    "last": 9.966667,
+    "verified": true
+  },
+  "referenceMethod": "Original authored RGB pixels, camera translation and sine audio. No real climber, pad contact, calibrated sensor timing or independent human annotation.",
+  "planSha256": "73df4407070960ff16b409aab4d24bc7559912d0dc7e106dea325e261e6a1708"
+}

@@ -1,0 +1,56 @@
+{
+  "version": 1,
+  "synthetic": true,
+  "workflowOnly": true,
+  "license": "CC0-1.0",
+  "variant": "baseline",
+  "width": 320,
+  "height": 180,
+  "fps": 30,
+  "duration": 10,
+  "sha256": "eef34ad20db63217d8ff6a030b9c9974dcd8fa78739327563790875154851266",
+  "authoredStart": 2.4,
+  "authoredLaunch": 2.7,
+  "authoredFinishIndicator": 7,
+  "oppositeLaneIndicator": 5.5,
+  "selectedIndicatorRegion": {
+    "x1": 0.7,
+    "y1": 0.48,
+    "x2": 0.82,
+    "y2": 0.62
+  },
+  "selectedIndicatorPixelRect": [
+    236,
+    92,
+    248,
+    102
+  ],
+  "sourceHueShadow": {
+    "start": 6.8,
+    "end": 7,
+    "brightnessFactor": 0.55
+  },
+  "tones": [
+    {
+      "onset": 0.4,
+      "frequency": 550
+    },
+    {
+      "onset": 1.4,
+      "frequency": 550
+    },
+    {
+      "onset": 2.4,
+      "frequency": 1100
+    }
+  ],
+  "referenceMethod": "Original generated graphics, sampled color change and synthesized audio. No real people, pad contact, independent human labels, or physical timing calibration.",
+  "reproduction": "CLIMBIQ_FFMPEG=<ffmpeg> node scripts/generate-guided-finish-indicator.mjs",
+  "decodedSourcePTS": {
+    "frames": 300,
+    "first": 0,
+    "last": 9.966667,
+    "checkedAgainstAuthoredGrid": true,
+    "maxToleranceSeconds": 0.00001
+  }
+}

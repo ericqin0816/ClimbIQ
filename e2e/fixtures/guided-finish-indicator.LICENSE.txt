@@ -1,0 +1,9 @@
+CC0 1.0 Universal (CC0 1.0) Public Domain Dedication
+https://creativecommons.org/publicdomain/zero/1.0/
+
+The original generated graphics and synthesized audio in
+guided-finish-indicator.mp4, the reproducible generator, and its authored
+reference metadata are dedicated to the public domain under CC0 1.0.
+
+This is an authored codec/workflow fixture. It depicts no real people and
+provides no independent human annotation or real-climber accuracy evidence.
