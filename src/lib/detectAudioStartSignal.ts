@@ -36,7 +36,7 @@ export interface AudioToneSegment {
   qualifiedFrames?: number;
 }
 
-interface AudioFrameFeature {
+export interface AudioFrameFeature {
   time: number;
   rms: number;
   tonality: number;
@@ -44,6 +44,24 @@ interface AudioFrameFeature {
   spectralProminenceDb: number;
   spectralConcentration: number;
   spectralAmplitude: number;
+}
+
+export interface AudioToneComponents {
+  readonly frameSize: number;
+  readonly hopSize: number;
+  readonly threshold: number;
+  readonly features: readonly Readonly<AudioFrameFeature>[];
+  readonly segments: readonly Readonly<AudioToneSegment>[];
+  readonly stablePitchSegments: readonly Readonly<AudioToneSegment>[];
+}
+
+interface OwnedAudioToneComponents {
+  frameSize: number;
+  hopSize: number;
+  threshold: number;
+  features: AudioFrameFeature[];
+  segments: AudioToneSegment[];
+  stablePitchSegments: AudioToneSegment[];
 }
 
 export interface AudioStartResult {
@@ -208,15 +226,22 @@ export function reconcileStereoCountdown(mixed: AudioStartResult, results: Audio
   };
 }
 
-export function analyzeBeepSequence(
+/** Read-only view of the same numerical work used by automatic analysis.
+ * Each call owns its arrays; input samples and automatic ranking are untouched.
+ */
+export function extractAudioToneComponents(
   samples: Float32Array,
   sampleRate: number,
   timeOffset = 0,
-): AudioStartResult {
-  if (sampleRate < 2_000 || samples.length < sampleRate) {
-    return emptyAudioResult("Not enough audio was available for countdown detection.");
-  }
+): AudioToneComponents {
+  return extractOwnedAudioToneComponents(samples, sampleRate, timeOffset);
+}
 
+function extractOwnedAudioToneComponents(
+  samples: Float32Array,
+  sampleRate: number,
+  timeOffset: number,
+): OwnedAudioToneComponents {
   const frameSize = Math.max(32, Math.round(sampleRate * FRAME_SECONDS));
   const hopSize = Math.max(16, Math.round(sampleRate * HOP_SECONDS));
   const features: AudioFrameFeature[] = [];
@@ -235,7 +260,7 @@ export function analyzeBeepSequence(
     });
   }
   if (features.length < 20) {
-    return emptyAudioResult("Not enough audio frames were available.");
+    return { frameSize, hopSize, threshold: 0, features, segments: [], stablePitchSegments: [] };
   }
 
   const rmsValues = features.map((feature) => feature.rms);
@@ -250,19 +275,36 @@ export function analyzeBeepSequence(
     .filter((segment) =>
       segment.meanTonality >= 0.28 || (segment.meanSpectralProminenceDb ?? 0) >= 14,
     );
+  // A countdown beep can overlap speech, music, or another sustained tone. In
+  // that case the broad activity segment's median pitch no longer represents
+  // the beep (the 12.24 reference clip contains exactly this failure mode).
+  // Recover only dense, pitch-stable sub-runs and use them for the strict
+  // protocol matcher; generic countdown fallbacks still use the broad segments.
+  const stablePitchSegments = segments.length
+    ? extractPitchStableSubsegments(features, segments, HOP_SECONDS)
+    : [];
+  return { frameSize, hopSize, threshold, features, segments, stablePitchSegments };
+}
+
+export function analyzeBeepSequence(
+  samples: Float32Array,
+  sampleRate: number,
+  timeOffset = 0,
+): AudioStartResult {
+  if (sampleRate < 2_000 || samples.length < sampleRate) {
+    return emptyAudioResult("Not enough audio was available for countdown detection.");
+  }
+  const { frameSize, hopSize, threshold, features, segments, stablePitchSegments } =
+    extractOwnedAudioToneComponents(samples, sampleRate, timeOffset);
+  if (features.length < 20) {
+    return emptyAudioResult("Not enough audio frames were available.");
+  }
   if (!segments.length) {
     return {
       ...emptyAudioResult("No tonal beeps stood out from the background audio."),
       segments,
     };
   }
-
-  // A countdown beep can overlap speech, music, or another sustained tone. In
-  // that case the broad activity segment's median pitch no longer represents
-  // the beep (the 12.24 reference clip contains exactly this failure mode).
-  // Recover only dense, pitch-stable sub-runs and use them for the strict
-  // protocol matcher; generic countdown fallbacks still use the broad segments.
-  const stablePitchSegments = extractPitchStableSubsegments(features, segments, HOP_SECONDS);
   const targetedOctaveSegments = extractTargetedOctaveFinalSegments(
     samples,
     sampleRate,
