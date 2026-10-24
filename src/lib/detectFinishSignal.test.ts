@@ -11,6 +11,200 @@ const calibration: StartLightCalibration = {
 };
 
 describe("same-lane automatic finish detection", () => {
+  it.each([false, true])("keeps an early Finish instead of a later reset when the recording tail grows (reverse=%s)", reverse => {
+    const colorAt = (time: number) => ((time < 4 || time >= 8) !== reverse) ? blue : green;
+    for (const end of [10, 30]) {
+      const samples = Array.from({ length: (end - 3) * 5 + 1 }, (_, index) => ({
+        time: 3 + index / 5, averageRgb: colorAt(3 + index / 5),
+      }));
+      const history = { samples: sourceHistory(reverse ? green : blue), coarseSamples: samples };
+      const coarse = analyzeFinishColorSamples(samples, calibration, undefined, history);
+      expect(coarse.detected).toBe(true);
+      expect(coarse.rawTime).toBe(4);
+      expect(coarse.confidence).toBe(end === 30 ? "Medium" : "High");
+      if (end === 30) expect(coarse.candidates).toEqual(expect.arrayContaining([
+        expect.objectContaining({ rawTime: 8, confidence: "Medium", kind: "Unrefined alternative Finish time" }),
+      ]));
+      // Exercise the same local refinement bounds as detectFinishSignal. A
+      // mistaken reset must not become the center of the dense verification.
+      const firstFrame = Math.ceil(Math.max(3, coarse.rawTime! - 1.15) * 30);
+      const lastFrame = Math.floor(Math.min(end, coarse.rawTime! + 0.85) * 30);
+      const refined = analyzeFinishColorSamples(Array.from({ length: lastFrame - firstFrame + 1 }, (_, index) => ({
+        time: (firstFrame + index) / 30, averageRgb: colorAt((firstFrame + index) / 30),
+      })), calibration, undefined, history);
+      expect(resolveFinishRefinement(coarse, refined).rawTime).toBe(4);
+      expect(refined.confidence).toBe(coarse.confidence);
+      if (end === 30) expect(refined.candidates).toEqual(expect.arrayContaining([
+        expect.objectContaining({ rawTime: 8, confidence: "Medium" }),
+      ]));
+    }
+  });
+
+  it.each([false, true])("preserves the released early-Finish clock when history agrees with its polarity (reverse=%s)", reverse => {
+    for (const end of [8, 10]) {
+      const samples = Array.from({ length: (end - 3) * 5 + 1 }, (_, index) => {
+        const time = 3 + index / 5;
+        return { time, averageRgb: ((time < 4.2) !== reverse) ? blue : green };
+      });
+      const legacy = analyzeFinishColorSamples(samples, calibration);
+      expect(legacy.rawTime).toBe(4.2);
+      expect(analyzeFinishColorSamples(samples, calibration, undefined,
+        { samples: sourceHistory(reverse ? green : blue), coarseSamples: samples })).toEqual(legacy);
+    }
+  });
+
+  it.each([false, true])("keeps an unrecovered early transition's alternative clock review-only (reverse=%s)", reverse => {
+    const samples = Array.from({ length: 136 }, (_, index) => {
+      const time = 3 + index / 5;
+      return { time, averageRgb: ((time < 3.2 || time >= 8) !== reverse) ? blue : green };
+    });
+    const result = analyzeFinishColorSamples(samples, calibration, undefined,
+      { samples: sourceHistory(reverse ? green : blue), coarseSamples: samples });
+    expect(result.rawTime).toBe(8);
+    expect(result.confidence).toBe("Medium");
+  });
+
+  it.each([2, 3, 4])("does not let %s initial obstruction frames redefine the independent source state", count => {
+    for (const reverse of [false, true]) {
+      const samples = Array.from({ length: 136 }, (_, index) => {
+        const time = 3 + index / 5;
+        return { time, averageRgb: ((index >= count && time < 6) !== reverse) ? blue : green };
+      });
+      const result = analyzeFinishColorSamples(samples, calibration, undefined,
+        { samples: sourceHistory(reverse ? green : blue), coarseSamples: samples });
+      expect(result.rawTime).toBe(6);
+      expect(result).toEqual(analyzeFinishColorSamples(samples, calibration));
+    }
+  });
+
+  it("preserves released analysis when a pre-search obstruction makes history inconsistent", () => {
+    const samples = seriesAtFps([...repeat(blue, 15), ...repeat(green, 20)], 5)
+      .map(sample => ({ ...sample, time: sample.time + 3 }));
+    for (const obstructionEnd of [2.8, 3.6]) {
+      const history = sourceHistory(blue).map(sample => ({ ...sample,
+        averageRgb: sample.time >= 2.2 && sample.time <= obstructionEnd ? green : blue }));
+      expect(analyzeFinishColorSamples(samples, calibration, undefined, { samples: history, coarseSamples: samples }))
+        .toEqual(analyzeFinishColorSamples(samples, calibration));
+    }
+  });
+
+  it("prefers the earlier released clock over a wholly occluded history's later reset", () => {
+    const samples = Array.from({ length: 136 }, (_, index) => {
+      const time = 3 + index / 5;
+      return { time, averageRgb: time < 6 || time >= 8 ? blue : green };
+    });
+    expect(analyzeFinishColorSamples(samples, calibration).rawTime).toBe(6);
+    const result = analyzeFinishColorSamples(samples, calibration, undefined,
+      { samples: sourceHistory(green), coarseSamples: samples });
+    expect(result.rawTime).toBe(6);
+    expect(result.confidence).toBe("Medium");
+    expect(result.candidates.every(candidate => candidate.confidence !== "High")).toBe(true);
+    expect(result.candidates[1]).toMatchObject({ rawTime: 8, confidence: "Medium", kind: "Unrefined alternative Finish time" });
+  });
+
+  it("preserves the entire released result when history changes photometry but not polarity", () => {
+    const brightGreen = { r: 210, g: 255, b: 174 };
+    const samples = Array.from({ length: 136 }, (_, index) => {
+      const time = 3 + index / 5;
+      return { time, averageRgb: time >= 8 ? green : time >= 4 && time < 5 ? brightGreen : blue };
+    });
+    const legacy = analyzeFinishColorSamples(samples, calibration);
+    expect(legacy.rawTime).toBe(8);
+    expect(legacy.confidence).toBe("High");
+    const result = analyzeFinishColorSamples(samples, calibration, undefined,
+      { samples: sourceHistory({ r: 140, g: 124, b: 210 }), coarseSamples: samples });
+    expect(result).toEqual(legacy);
+  });
+
+  it("cannot restore High in dense refinement after the coarse pass lost authority", () => {
+    const samples = Array.from({ length: 136 }, (_, index) => {
+      const time = 3 + index / 5;
+      return { time, averageRgb: time < 4 || time >= 8 ? blue : green };
+    });
+    const dense = Array.from({ length: 61 }, (_, index) => ({ time: 3 + index / 30,
+      averageRgb: index < 30 ? blue : green }));
+    expect(analyzeFinishColorSamples(dense, calibration).confidence).toBe("High");
+    const result = analyzeFinishColorSamples(dense, calibration, undefined,
+      { samples: sourceHistory(blue), coarseSamples: samples });
+    expect(result.rawTime).toBe(4);
+    expect(result.confidence).toBe("Medium");
+  });
+
+  it("retains the original coarse alternative when dense local history agrees with an obstruction clearing", () => {
+    const samples = Array.from({ length: 136 }, (_, index) => {
+      const time = 3 + index / 5;
+      return { time, averageRgb: time < 3.6 || time >= 6 ? green : blue };
+    });
+    expect(analyzeFinishColorSamples(samples, calibration).rawTime).toBe(6);
+    const history = { samples: sourceHistory(green), coarseSamples: samples };
+    const coarse = analyzeFinishColorSamples(samples, calibration, undefined, history);
+    expect(coarse.rawTime).toBe(3.6);
+    expect(coarse.confidence).toBe("Medium");
+    const dense = Array.from({ length: 46 }, (_, index) => ({ time: 3 + index / 30,
+      averageRgb: index < 18 ? green : blue }));
+    expect(analyzeFinishColorSamples(dense, calibration).confidence).toBe("High");
+    const refined = analyzeFinishColorSamples(dense, calibration, undefined,
+      history);
+    expect(refined.rawTime).toBe(3.6);
+    expect(refined.confidence).toBe("Medium");
+    expect(refined.candidates[1]).toMatchObject({ rawTime: 6, confidence: "Medium",
+      kind: "Unrefined alternative Finish time", method: "Original coarse scan; approximately 0.20s sampling" });
+    expect(refined.candidates[1].reason).toContain("was not confirmed");
+  });
+
+  it("falls back exactly for missing, truncated, repeated, nonfinite, overlapping, neutral, and red-dominant history", () => {
+    const samples = Array.from({ length: 136 }, (_, index) => ({ time: 3 + index / 5,
+      averageRgb: index < 15 ? blue : green }));
+    const good = sourceHistory(blue);
+    const invalid: FinishColorSample[][] = [[], good.slice(0, 2),
+      good.map(sample => ({ ...sample, time: 1 })),
+      good.map((sample, index) => ({ ...sample, time: index === 1 ? NaN : sample.time })),
+      good.map(sample => ({ ...sample, time: sample.time + 2 })),
+      sourceHistory({ r: 80, g: 80, b: 80 }), sourceHistory({ r: 180, g: 80, b: 75 }),
+      good.map((sample, index) => ({ ...sample, averageRgb: index === 1 ? green : blue })),
+      sourceHistory({ r: NaN, g: 62, b: 105 })];
+    for (const history of invalid) {
+      expect(analyzeFinishColorSamples(samples, calibration, undefined, { samples: history, coarseSamples: samples }))
+        .toEqual(analyzeFinishColorSamples(samples, calibration));
+    }
+  });
+
+  it("lets a valid dense clock outrank both unrefined coarse interpretations", () => {
+    const samples = Array.from({ length: 136 }, (_, index) => ({ time: 3 + index / 5,
+      averageRgb: index < 5 || index >= 25 ? blue : green }));
+    const dense = Array.from({ length: 61 }, (_, index) => ({ time: 3 + index / 30,
+      averageRgb: index < 33 ? blue : green }));
+    const result = analyzeFinishColorSamples(dense, calibration, undefined,
+      { samples: sourceHistory(blue), coarseSamples: samples });
+    expect(result.rawTime).toBe(4.1);
+    expect(result.confidence).toBe("Medium");
+    expect(result.candidates).toEqual(expect.arrayContaining([
+      expect.objectContaining({ rawTime: 4, kind: "Unrefined alternative Finish time" }),
+      expect.objectContaining({ rawTime: 8, kind: "Unrefined alternative Finish time" }),
+    ]));
+  });
+
+  it("falls back to the earliest coarse review clock if neither dense interpretation confirms", () => {
+    const samples = Array.from({ length: 136 }, (_, index) => ({ time: 3 + index / 5,
+      averageRgb: index < 5 || index >= 25 ? blue : green }));
+    const dense = Array.from({ length: 61 }, (_, index) => ({ time: 3 + index / 30, averageRgb: blue }));
+    const result = analyzeFinishColorSamples(dense, calibration, undefined,
+      { samples: sourceHistory(blue), coarseSamples: samples });
+    expect(result.rawTime).toBe(4);
+    expect(result.confidence).toBe("Medium");
+    expect(result.candidates[0].kind).toBe("Unrefined alternative Finish time");
+  });
+
+  it("documents that mixed history leaves the released early-Finish/reset error unfixed", () => {
+    const samples = Array.from({ length: 136 }, (_, index) => ({ time: 3 + index / 5,
+      averageRgb: index < 5 || index >= 25 ? blue : green }));
+    const history = sourceHistory(blue).map((sample, index) => ({ ...sample, averageRgb: index < 5 ? blue : green }));
+    const legacy = analyzeFinishColorSamples(samples, calibration);
+    expect(legacy.rawTime).toBe(8);
+    expect(legacy.confidence).toBe("High");
+    expect(analyzeFinishColorSamples(samples, calibration, undefined, { samples: history, coarseSamples: samples })).toEqual(legacy);
+  });
+
   it("timestamps source frames instead of the later seek cursor and ignores duplicate decoded frames", () => {
     const samples: FinishColorSample[] = [];
     for (let index = 0; index < 30; index++) {
@@ -404,6 +598,10 @@ describe("same-lane automatic finish detection", () => {
 
 function series(colors: RGB[]): FinishColorSample[] {
   return seriesAtFps(colors, 10);
+}
+
+function sourceHistory(color: RGB): FinishColorSample[] {
+  return Array.from({ length: 10 }, (_, index) => ({ time: 1 + index / 5, averageRgb: color }));
 }
 
 function seriesAtFps(colors: RGB[], fps: number): FinishColorSample[] {

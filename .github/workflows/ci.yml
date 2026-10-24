@@ -33,6 +33,33 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npx playwright install --with-deps ${{ matrix.browser }}
+      - name: Verify native lane-light Finish in WebKit
+        if: matrix.browser == 'webkit'
+        env:
+          CLIMBIQ_E2E_BROWSER: webkit
+          CLIMBIQ_E2E_URL: http://127.0.0.1:5197/
+        run: |
+          if command -v ffmpeg >/dev/null; then
+            export CLIMBIQ_FFMPEG=$(command -v ffmpeg)
+          else
+            python3 -m venv "$RUNNER_TEMP/climbiq-finish-encoder"
+            "$RUNNER_TEMP/climbiq-finish-encoder/bin/python" -m pip install --disable-pip-version-check imageio-ffmpeg==0.6.0
+            export CLIMBIQ_FFMPEG=$("$RUNNER_TEMP/climbiq-finish-encoder/bin/python" -c 'import imageio_ffmpeg; print(imageio_ffmpeg.get_ffmpeg_exe())')
+          fi
+          ./node_modules/.bin/vite --host 127.0.0.1 --port 5197 --strictPort >"$RUNNER_TEMP/climbiq-webkit-finish-vite.log" 2>&1 &
+          CLIMBIQ_VITE_PID=$!
+          trap 'kill "$CLIMBIQ_VITE_PID" 2>/dev/null || true; wait "$CLIMBIQ_VITE_PID" 2>/dev/null || true' EXIT
+          CLIMBIQ_VITE_READY=false
+          for attempt in {1..30}; do
+            kill -0 "$CLIMBIQ_VITE_PID" || { cat "$RUNNER_TEMP/climbiq-webkit-finish-vite.log"; exit 1; }
+            if lsof -nP -a -p "$CLIMBIQ_VITE_PID" -iTCP:5197 -sTCP:LISTEN >/dev/null && curl --fail --silent http://127.0.0.1:5197/src/lib/detectFinishSignal.ts >/dev/null; then
+              CLIMBIQ_VITE_READY=true
+              break
+            fi
+            sleep 1
+          done
+          test "$CLIMBIQ_VITE_READY" = true
+          npm run test:finish-baseline
       - name: Build the shipped app
         run: npm run build
       - name: Import, review, save, compare and recover
@@ -101,6 +128,7 @@ jobs:
           npm run test:library-concurrency
           npm run test:video-attachment
           npm run test:biomechanics-ownership
+          npm run test:finish-baseline
           # Repetition catches decoder/readback races; a failure stops the step.
           for pass in 1 2 3; do
             npm run test:source-frames
@@ -114,5 +142,6 @@ jobs:
           path: |
             test-results/*.json
             test-results/*.png
+            test-results/finish-source-baseline/**/*.json
           if-no-files-found: ignore
           retention-days: 7

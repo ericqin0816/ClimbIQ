@@ -20,6 +20,7 @@
     "test:cancellation": "node e2e/analysis-cancellation.mjs",
     "test:audio-browser": "node e2e/audio-decoding.mjs",
     "test:finish-review": "node e2e/finish-review.mjs",
+    "test:finish-baseline": "node e2e/finish-source-baseline.mjs",
     "test:source-frames": "node e2e/source-frame-refinement.mjs",
     "test:upload": "node e2e/upload-flow.mjs",
     "test:coaching": "node e2e/coaching-review.mjs",

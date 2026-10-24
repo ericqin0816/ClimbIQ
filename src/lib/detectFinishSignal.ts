@@ -32,6 +32,13 @@ export interface FinishColorSample {
   sourceFrameDurationSeconds?: number;
 }
 
+export interface FinishSourceBaseline {
+  /** Observed before the earliest eligible Finish, never learned from its tail. */
+  samples: FinishColorSample[];
+  /** Original coarse scan, reused unchanged by dense refinement's conflict veto. */
+  coarseSamples: FinishColorSample[];
+}
+
 interface DetectFinishSignalOptions {
   video: HTMLVideoElement;
   zone?: NormalizedZone;
@@ -59,6 +66,8 @@ interface FinishAnalysis {
   samples: FinishColorSample[];
   candidates: DetectionCandidate[];
   baselineRgb?: RGB;
+  sourceBaselineConflict?: boolean;
+  unrefinedClock?: boolean;
 }
 
 const COARSE_FPS = 5;
@@ -100,12 +109,29 @@ export async function detectFinishSignal({
     return emptyResult("Finish search window is too short.", zone);
   }
 
+  const source = video.src;
+  const baselineStart = Math.max(startSignalRawTime + 0.25, searchStart - 2);
+  const baselineEnd = searchStart - 0.2;
+  let baselinePass: Awaited<ReturnType<typeof sampleFinishColors>> | undefined;
+  if ([baselineStart, baselineEnd].every(Number.isFinite) && baselineEnd - baselineStart >= 0.4 - 1e-9) {
+    baselinePass = await sampleFinishColors(video, zone, baselineStart, baselineEnd, COARSE_FPS, calibration, signal, () => {});
+    assertSourceUnchanged();
+    if (baselinePass.partialSourceObservation) {
+      const review = toResult({ detected: false, confidence: "None", reason: "Finish requires a complete pre-search lane-light baseline.",
+        threshold: 0, samples: [], candidates: [] }, zone, calibration, baselinePass.samples);
+      return markPartialFinishObservation(review, baselinePass.partialSourceObservation);
+    }
+  }
+
   const coarsePass = await sampleFinishColors(video, zone, searchStart, searchEnd, COARSE_FPS, calibration, signal, (done, total) => {
     onProgress?.("coarse", done, total);
   });
-  const coarse = analyzeFinishColorSamples(coarsePass.samples, calibration, expectedFinishTime);
+  assertSourceUnchanged();
+  const sourceBaseline = baselinePass ? { samples: baselinePass.samples, coarseSamples: coarsePass.samples } : undefined;
+  const coarse = analyzeFinishColorSamples(coarsePass.samples, calibration, expectedFinishTime, sourceBaseline);
   if (!coarse.detected || coarse.rawTime === undefined) {
-    return markPartialFinishObservation(toResult(coarse, zone, calibration), coarsePass.partialSourceObservation);
+    return markPartialFinishObservation(toResult(coarse, zone, calibration,
+      coarse.sourceBaselineConflict ? baselinePass?.samples : undefined), coarsePass.partialSourceObservation);
   }
 
   // The timing unit flashes green before it settles. The coarse 5 fps pass may
@@ -116,9 +142,22 @@ export async function detectFinishSignal({
   const refinedPass = await sampleFinishColors(video, zone, refineStart, refineEnd, REFINE_FPS, calibration, signal, (done, total) => {
     onProgress?.("refine", done, total);
   });
-  const refined = analyzeFinishColorSamples(refinedPass.samples, calibration, expectedFinishTime);
-  return markPartialFinishObservation(toResult(resolveFinishRefinement(coarse, refined), zone, calibration),
+  assertSourceUnchanged();
+  const refined = analyzeFinishColorSamples(refinedPass.samples, calibration, expectedFinishTime, sourceBaseline);
+  const resolved = resolveFinishRefinement(coarse, refined);
+  return markPartialFinishObservation(toResult(resolved, zone, calibration,
+    resolved.sourceBaselineConflict ? baselinePass?.samples : undefined,
+    resolved.sourceBaselineConflict ? coarsePass.samples : undefined),
     coarsePass.partialSourceObservation ?? refinedPass.partialSourceObservation);
+
+  function assertSourceUnchanged() {
+    throwIfCancelled(signal);
+    if (video.src !== source) {
+      const error = new Error("Finish detection cancelled because the recording changed.");
+      error.name = "AbortError";
+      throw error;
+    }
+  }
 }
 
 /** A salvaged native frame does not verify the unobserved container tail. */
@@ -150,10 +189,66 @@ export function resolveFinishRefinement(coarse: FinishAnalysis, refined: FinishA
   };
 }
 
+/** Independent history may correct a conflicting source polarity for review.
+ * It never changes photometric thresholds or authority when polarity agrees;
+ * unavailable or inconclusive history preserves the released analysis exactly. */
 export function analyzeFinishColorSamples(
   samples: FinishColorSample[],
   calibration: StartLightCalibration,
   expectedFinishTime?: number,
+  sourceBaseline?: FinishSourceBaseline,
+): FinishAnalysis {
+  const legacy = analyzeFinishColorSamplesCore(samples, calibration, expectedFinishTime);
+  if (!sourceBaseline || !hasCalibration(calibration) ||
+      !usableSourceBaseline(sourceBaseline.samples, calibration, sourceBaseline.coarseSamples[0]?.time ?? NaN)) return legacy;
+  const coarseSamples = sourceBaseline.coarseSamples;
+  const count = Math.min(12, Math.max(3, Math.floor(coarseSamples.length * 0.2)));
+  const before = opponent(calibration.beforeStartRGB), after = opponent(calibration.afterStartRGB);
+  const state = (value: number) => Math.abs(value - after) <= Math.abs(value - before);
+  const originalState = state(median(coarseSamples.slice(0, count).map(sample => opponent(sample.averageRgb))));
+  const historyState = state(median(sourceBaseline.samples.map(sample => opponent(sample.averageRgb))));
+  if (originalState === historyState) return legacy;
+
+  // The original coarse interpretation fixes this conflict for both passes.
+  // A locally agreeing dense baseline cannot restore automatic authority.
+  const history = analyzeFinishColorSamplesCore(samples, calibration, expectedFinishTime, sourceBaseline.samples);
+  const isDense = samples !== coarseSamples;
+  const originalCoarse = isDense ? analyzeFinishColorSamplesCore(coarseSamples, calibration, expectedFinishTime) : legacy;
+  const historyCoarse = isDense
+    ? analyzeFinishColorSamplesCore(coarseSamples, calibration, expectedFinishTime, sourceBaseline.samples) : history;
+  type Interpretation = { analysis: FinishAnalysis; coarse: boolean };
+  const usable = (entry: Interpretation) => entry.analysis.detected && entry.analysis.rawTime !== undefined;
+  const samePass = [{ analysis: history, coarse: !isDense }, { analysis: legacy, coarse: !isDense }].filter(usable);
+  const earlierPass = [{ analysis: originalCoarse, coarse: true }, { analysis: historyCoarse, coarse: true }].filter(usable);
+  const byTime = (left: Interpretation, right: Interpretation) => left.analysis.rawTime! - right.analysis.rawTime!;
+  // Dense verification takes priority over every unrefined coarse clock.
+  // Coarse suggestions are fallback navigation only if neither dense view works.
+  const primary = [...(samePass.length ? samePass : earlierPass)].sort(byTime)[0];
+  const reason = "Earlier lamp observations and the Finish scan disagree about the lamp state. Review these suggestions before accepting a Finish.";
+  if (!primary) return { ...legacy, reason, sourceBaselineConflict: true };
+  const entries = [primary, ...[...samePass, ...earlierPass].sort(byTime)];
+  const candidates: DetectionCandidate[] = [];
+  for (const entry of entries) {
+    const rawTime = entry.analysis.rawTime!;
+    if (candidates.some(candidate => candidate.rawTime === rawTime)) continue;
+    const candidate = entry.analysis.candidates.find(item => item.rawTime === rawTime);
+    if (!candidate) continue;
+    candidates.push({ ...candidate, confidence: "Medium",
+      kind: entry.coarse ? "Unrefined alternative Finish time" : "Finish review time",
+      method: entry.coarse ? "Original coarse scan; approximately 0.20s sampling" : "Dense scan with conflicting lamp-state interpretations",
+      reason: entry.coarse
+        ? "This time came from the original 5 fps scan and was not confirmed by a finer scan. Review both lamp-state interpretations."
+        : "This return-color change is a review suggestion because the earlier lamp state is ambiguous." });
+  }
+  return { ...primary.analysis, samples, confidence: "Medium", reason,
+    candidates: candidates.slice(0, 4), sourceBaselineConflict: true, unrefinedClock: primary.coarse };
+}
+
+function analyzeFinishColorSamplesCore(
+  samples: FinishColorSample[],
+  calibration: StartLightCalibration,
+  expectedFinishTime?: number,
+  sourceSamples?: FinishColorSample[],
 ): FinishAnalysis {
   if (samples.length < 6 || !hasCalibration(calibration)) {
     return {
@@ -181,8 +276,9 @@ export function analyzeFinishColorSamples(
   }
 
   const baselineCount = Math.min(12, Math.max(3, Math.floor(samples.length * 0.2)));
-  const baselineValues = samples.slice(0, baselineCount).map((sample) => opponent(sample.averageRgb));
-  const baselineRgb = averageRgb(samples.slice(0, baselineCount).map((sample) => sample.averageRgb));
+  const baselineSamples = sourceSamples ?? samples.slice(0, baselineCount);
+  const baselineValues = baselineSamples.map((sample) => opponent(sample.averageRgb));
+  const baselineRgb = averageRgb(baselineSamples.map((sample) => sample.averageRgb));
   const baselineOpponent = median(baselineValues);
   const baselineMad = median(baselineValues.map((value) => Math.abs(value - baselineOpponent)));
   // Some timing systems stay blue throughout the climb and return green at
@@ -198,9 +294,12 @@ export function analyzeFinishColorSamples(
   const threshold = Math.max(1.2, learnedSpan * 0.12, baselineMad * 4 + 0.8);
   const confirmationThreshold = Math.max(threshold * 1.35, learnedSpan * 0.22);
   const signalColors = samples.map((sample) => sample.directionalRgb ?? sample.averageRgb);
-  const signalBaselineOpponent = median(signalColors.slice(0, baselineCount).map(opponent));
+  const baselineSignalColors = sourceSamples
+    ? sourceSamples.map(sample => sample.directionalRgb ?? sample.averageRgb)
+    : signalColors.slice(0, baselineCount);
+  const signalBaselineOpponent = median(baselineSignalColors.map(opponent));
   const signalBaselineMad = median(
-    signalColors.slice(0, baselineCount).map((rgb) => Math.abs(opponent(rgb) - signalBaselineOpponent)),
+    baselineSignalColors.map((rgb) => Math.abs(opponent(rgb) - signalBaselineOpponent)),
   );
   const signalThreshold = Math.max(threshold, signalBaselineMad * 4 + 0.8);
   // Confirmation should stay conservative, but using that same threshold as
@@ -213,8 +312,8 @@ export function analyzeFinishColorSamples(
   const frameInterval = median(
     samples.slice(1).map((sample, index) => Math.max(1 / 120, sample.time - samples[index].time)),
   );
-  const baselineLuminance = median(signalColors.slice(0, baselineCount).map(luminance));
-  const baselineChroma = median(signalColors.slice(0, baselineCount).map(chroma));
+  const baselineLuminance = median(baselineSignalColors.map(luminance));
+  const baselineChroma = median(baselineSignalColors.map(chroma));
   const minimumPlausibleChroma = Math.max(
     2.5,
     Math.min(baselineChroma, chroma(calibration.beforeStartRGB), chroma(calibration.afterStartRGB)) * 0.15,
@@ -227,7 +326,7 @@ export function analyzeFinishColorSamples(
   const maximumLearnedRedShare = Math.max(
     redShare(calibration.beforeStartRGB),
     redShare(calibration.afterStartRGB),
-    median(signalColors.slice(0, baselineCount).map(redShare)),
+    median(baselineSignalColors.map(redShare)),
   );
   const plausibleLightLevel = signalColors.map((rgb) => {
     const lightLevel = luminance(rgb);
@@ -553,8 +652,12 @@ function toResult(
   analysis: FinishAnalysis,
   zone: NormalizedZone,
   calibration: StartLightCalibration,
+  sourceBaselineSamples: FinishColorSample[] = [],
+  originalCoarseSamples: FinishColorSample[] = [],
 ): StartSignalDetectionResult {
-  const debugSamples: StartSignalDebug["samples"] = analysis.samples.map((sample) => ({
+  const coarseObservations = originalCoarseSamples === analysis.samples ? [] : originalCoarseSamples;
+  const debugSamples: StartSignalDebug["samples"] = [...sourceBaselineSamples, ...coarseObservations, ...analysis.samples]
+    .sort((left, right) => left.time - right.time).map((sample) => ({
     time: sample.time,
     cursorTime: sample.cursorTime,
     timestampMethod: sample.timestampMethod,
@@ -570,7 +673,7 @@ function toResult(
   }));
   return {
     detected: analysis.detected,
-    observationIntervalSeconds: finishObservationInterval(analysis.samples, analysis.rawTime),
+    observationIntervalSeconds: analysis.unrefinedClock ? undefined : finishObservationInterval(analysis.samples, analysis.rawTime),
     rawTime: analysis.rawTime,
     confidence: analysis.confidence,
     reason: analysis.reason,
@@ -580,8 +683,10 @@ function toResult(
       zoneExists: true,
       normalizedZone: zone,
       calibration,
-      detectionMethod: "Same-lane finish light reversal",
-      framesSampled: analysis.samples.length,
+      detectionMethod: sourceBaselineSamples.length
+        ? "Same-lane finish light reversal; pre-search history, original coarse observations, and available refinement retained"
+        : "Same-lane finish light reversal",
+      framesSampled: debugSamples.length,
       baselineRgb: analysis.baselineRgb ?? calibration.afterStartRGB,
       maxColorDistance: Math.max(0, ...debugSamples.map((sample) => sample.colorDistance)),
       threshold: analysis.threshold,
@@ -625,6 +730,30 @@ function emptyResult(reason: string, zone?: NormalizedZone): StartSignalDetectio
 
 function hasCalibration(calibration: StartLightCalibration): calibration is RequiredCalibration & StartLightCalibration {
   return Boolean(calibration.beforeStartRGB && calibration.afterStartRGB && calibration.colorDelta !== undefined);
+}
+
+/** Earlier source history can challenge polarity, never establish emitter identity.
+ * Mixed states, neutral pixels and insufficient observations cannot replace the
+ * search interpretation; callers preserve the released behavior in those cases.
+ * Seek-cursor fallback remains supported when native timestamps are unavailable. */
+function usableSourceBaseline(samples: FinishColorSample[], calibration: RequiredCalibration, beforeTime: number): boolean {
+  if (samples.length < 3 || !Number.isFinite(beforeTime) ||
+      samples.at(-1)!.time - samples[0].time < 0.3 - 1e-9) return false;
+  const before = opponent(calibration.beforeStartRGB), after = opponent(calibration.afterStartRGB);
+  const span = Math.abs(before - after);
+  if (!Number.isFinite(span) || span < 1) return false;
+  const initial = opponent(samples[0].averageRgb);
+  const afterState = Math.abs(initial - after) <= Math.abs(initial - before);
+  const source = afterState ? after : before, opposite = afterState ? before : after;
+  const advantageFloor = Math.max(0.5, span * 0.03);
+  const minimumChroma = Math.max(2.5, Math.min(chroma(calibration.beforeStartRGB), chroma(calibration.afterStartRGB)) * 0.15);
+  const maximumRedShare = Math.max(redShare(calibration.beforeStartRGB), redShare(calibration.afterStartRGB)) + 0.12;
+  return samples.every((sample, index) => Number.isFinite(sample.time) && sample.time >= 0 && sample.time < beforeTime &&
+    (index === 0 || sample.time > samples[index - 1].time + 1e-6) &&
+    [sample.averageRgb, sample.directionalRgb ?? sample.averageRgb].every(rgb =>
+      [rgb.r, rgb.g, rgb.b].every(value => Number.isFinite(value) && value >= 0 && value <= 255) &&
+      chroma(rgb) >= minimumChroma && redShare(rgb) <= maximumRedShare &&
+      Math.abs(opponent(rgb) - opposite) - Math.abs(opponent(rgb) - source) >= advantageFloor));
 }
 
 function opponent(rgb: RGB): number {
