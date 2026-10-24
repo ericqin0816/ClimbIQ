@@ -86,7 +86,7 @@ export default function AudioStartReviewPanel(props: Props) {
     {message && <p role="status">{message}</p>}
     {visible && <div data-audio-review-result>
       {visible.proposal ? <>
-        <p>Unverified recorded-cue suggestion. No Start was accepted.</p>
+        <p>Unverified recorded-cue suggestion. This suggestion has not changed accepted timing.</p>
         <button type="button" disabled={props.busy || running} onClick={() => {
           if (visible.proposal && belongs(visible.source.file, visible.source.sourceKey, visible.source.sourceGeneration, windowKey)) {
             props.onInspect(visible.proposal.rawTime);

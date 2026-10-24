@@ -102,6 +102,7 @@ test("a manually accepted Start keeps explicit audio review available without re
   await manual.click();
   expect(protectedState(await exported(page, info, "manual-start-review-reopened"))).toEqual(protectedState(accepted));
   await findAndInspect(page, info, "reopened-manual-review", accepted);
+  await expect(page.locator("[data-audio-review-result]")).toContainText("This suggestion has not changed accepted timing.");
   await page.getByRole("button", { name: "Close review", exact: true }).click();
   expect(protectedState(await exported(page, info, "reopened-review-closed"))).toEqual(protectedState(accepted));
   await expect(manual).toBeVisible();
