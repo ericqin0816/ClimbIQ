@@ -61,8 +61,10 @@ test("explicit audio review remains discoverable after ordinary Start and Finish
   await page.getByLabel("Analysis scope", { exact: true }).selectOption("timing-only");
   const analyze = page.getByRole("button", { name: "Find start & finish", exact: true });
   await analyze.click();
-  await expect(analyze).toBeDisabled();
-  await expect(analyze).toBeEnabled({ timeout: 90_000 });
+  // The visible label changes to “Analyzing climb…” while this control is busy.
+  const analysisControl = page.locator(".analyze-button");
+  await expect(analysisControl).toBeDisabled();
+  await expect(analysisControl).toBeEnabled({ timeout: 90_000 });
   const analyzed = await exported(page, info, "after-ordinary-analysis");
   expect(analyzed.automationAudit.automaticAnalysis).toBeTruthy();
   expect(analyzed.automationAudit).not.toEqual(imported.automationAudit);
